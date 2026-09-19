@@ -150,7 +150,8 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 |---|---|
 | [`src/registry.ts`](src/registry.ts) | 节点执行器注册表 |
 | [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` 服务 API 和事件 |
-| [`src/engine-provider.ts`](src/engine-provider.ts) | 调度、恢复、人工输入、暂停、恢复执行和取消 |
+| [`src/engine-provider.ts`](src/engine-provider.ts) | 定义存储、运行控制、回答、运行记录写入和恢复 |
+| [`src/run-executor.ts`](src/run-executor.ts) | 按层级调度节点、暂停点、人工输入请求和节点结果 |
 | [`src/validation.ts`](src/validation.ts) | 按注册表校验定义，以及拓扑顺序 |
 | [`src/run-state.ts`](src/run-state.ts) | 运行的内存状态与运行记录转换 |
 | [`src/persistence.ts`](src/persistence.ts) | 定义与运行的 per-record storage domain |

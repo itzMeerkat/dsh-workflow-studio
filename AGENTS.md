@@ -9,7 +9,8 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/shared/` holds the modules the Host and the browser both load: types, JSON schemas, graph and port rules, and error messages. Keep them free of Host-only imports.
 - `src/persistence.ts` owns the `workflow_studio` and `workflow_studio_runs` per-record domains; `src/json.ts` owns JSON checks for persisted node values.
 - `src/validation.ts` owns definition validation against the registry; `src/run-state.ts` owns in-memory run state and its conversion to run records.
-- `src/engine-provider.ts` owns durable definitions, scheduling, recovery, human input, pause, resume, and cancellation.
+- `src/engine-provider.ts` owns durable definitions, run control, answers, run-record writes, and recovery.
+- `src/run-executor.ts` owns one run's scheduling loop: levels, pause points, input gating, confirmation, human input requests, and node results.
 - `src/node.ts` owns the `WorkflowNode` base class, `NodeFailure`, and the condition gate.
 - The plugin registers no nodes. Node implementations live in node plugins such as `dsh-workflow-demo-node`; `tests/fixture-nodes.ts` holds test-only nodes for engine tests.
 - `src/tools.ts` owns `create_workflow`, `run_workflow`, and `get_workflow_run`.

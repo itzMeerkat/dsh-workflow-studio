@@ -150,7 +150,8 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 |---|---|
 | [`src/registry.ts`](src/registry.ts) | Node executor registry |
 | [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` service API and events |
-| [`src/engine-provider.ts`](src/engine-provider.ts) | Scheduling, recovery, human input, pause, resume, and cancellation |
+| [`src/engine-provider.ts`](src/engine-provider.ts) | Definition storage, run control, answers, run-record writes, and recovery |
+| [`src/run-executor.ts`](src/run-executor.ts) | Level-by-level node scheduling, pause points, human input requests, and node results |
 | [`src/validation.ts`](src/validation.ts) | Definition validation against the registry and topological order |
 | [`src/run-state.ts`](src/run-state.ts) | In-memory run state and run-record conversion |
 | [`src/persistence.ts`](src/persistence.ts) | Per-record storage domains for definitions and runs |

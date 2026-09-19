@@ -6,7 +6,7 @@
 import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions/types'
 import { CONFIRM_REQUEST_ID } from './human-input.ts'
 import type {
-  DagNodeDefinition, DagWorkflowDefinition, NodeId, NodeRunRecord, RunId, WorkflowId,
+  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, NodeId, NodeRunRecord, RunId, WorkflowId,
   WorkflowNodeExecutor, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from './shared/types.ts'
 
@@ -130,4 +130,47 @@ export function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
 export function awaitingConfirmation(record: NodeRunRecord): boolean {
   const pending = (record.interactions ?? []).filter(item => item.answer === undefined)
   return record.status === 'awaiting-input' && pending.length === 1 && pending[0]?.id === CONFIRM_REQUEST_ID
+}
+
+/**
+ * 运行中的节点状态。
+ * @param state - 运行状态。
+ * @param nodeId - 定义中的节点 ID。
+ * @throws 运行不包含该节点时。
+ */
+export function nodeState(state: RunState, nodeId: NodeId): NodeExecState {
+  const execState = state.nodeStates.get(nodeId)
+  if (execState === undefined) throw new Error(`运行状态缺少节点 ${nodeId}`)
+  return execState
+}
+
+/**
+ * 事件负载中的运行信息。
+ * @param state - 运行状态。
+ */
+export function runInfo(state: RunState): DagRunInfo {
+  return { runId: state.runId, workflowId: state.workflowId, name: state.definition.name, status: state.status }
+}
+
+/**
+ * 唤醒所有等待运行恢复的调度循环。
+ * @param state - 运行状态。
+ */
+export function releasePauseWaiters(state: RunState): void {
+  for (const resolve of state.pauseResolvers) resolve()
+  state.pauseResolvers.clear()
+}
+
+/**
+ * 将所有 pending 节点标记为 cancelled。
+ * @param state - 运行状态。
+ * @param reason - 写入节点记录的原因；undefined 时不写。
+ */
+export function cancelRemaining(state: RunState, reason: unknown): void {
+  for (const { record } of state.nodeStates.values()) {
+    if (record.status !== 'pending') continue
+    record.status = 'cancelled'
+    if (reason !== undefined) record.error = String(reason)
+    record.completedAt = Date.now()
+  }
 }
