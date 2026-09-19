@@ -17,16 +17,8 @@ import {
   createExecutionPlan,
   reduceExecutionDependencies,
 } from './model.ts'
+import type { Translate } from './locale.ts'
 import css from './WorkflowStudioPanel.module.css'
-
-type ExecutionOrderKey =
-  | 'execution.title'
-  | 'execution.stage'
-  | 'execution.stages'
-  | 'execution.nodes'
-  | 'execution.cycle'
-
-type Translate = (key: ExecutionOrderKey) => string
 
 type ExecutionNodeData = {
   definition: DagNodeDefinition

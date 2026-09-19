@@ -163,9 +163,17 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/shared/types.ts`](src/shared/types.ts) | Host 与浏览器共享的类型 |
 | [`src/shared/workflow-schema.ts`](src/shared/workflow-schema.ts) | 定义、运行记录、运行摘要和编辑器快照的 JSON schema |
 | [`src/shared/graph.ts`](src/shared/graph.ts) | 拓扑层级、端口兼容性和输入端口解析 |
-| [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序/运行视图、保存、运行和运行状态刷新 |
+| [`src/client/index.tsx`](src/client/index.tsx) | `main` 面板和侧边栏注册，以及 Remote 挂载 |
+| [`src/client/locale.ts`](src/client/locale.ts) | `workflowStudio` 本地化命名空间的中英文文案 |
+| [`src/client/remote.ts`](src/client/remote.ts) | Remote 方法描述和 `callRemote` 错误处理函数 |
+| [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | 工作流选择、保存、运行和画布/执行顺序/运行视图 |
+| [`src/client/Menus.tsx`](src/client/Menus.tsx) | 工作流选择器和节点库菜单 |
+| [`src/client/use-runs.ts`](src/client/use-runs.ts) | 运行列表轮询、运行选择、运行控制和回答 |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | 只读执行依赖图和运行状态 |
-| [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布、自定义节点、连线、底部详情面板和运行状态 |
+| [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布状态、节点编辑和连线 |
+| [`src/client/graph-model.ts`](src/client/graph-model.ts) | 定义与画布节点和边之间的转换，以及连线规则 |
+| [`src/client/NodeCard.tsx`](src/client/NodeCard.tsx) | 画布节点卡片：端口、内联控件和运行输出 |
+| [`src/client/NodeInspector.tsx`](src/client/NodeInspector.tsx) | 所选节点的详情面板和运行结果 |
 | [`src/client/model.ts`](src/client/model.ts) | 快照解析、节点摆放和执行计划 |
 | [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | 运行标签页：运行列表、控制按钮、问题表单和节点状态 |
 | [`src/client/runs-model.ts`](src/client/runs-model.ts) | 运行记录解析、分组、待回答请求和答案构建 |

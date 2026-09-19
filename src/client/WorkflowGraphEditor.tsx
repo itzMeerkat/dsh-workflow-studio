@@ -4,78 +4,35 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  Handle,
   MarkerType,
-  Position,
   ReactFlow,
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   reconnectEdge,
 } from '@xyflow/react'
-import type {
-  Connection,
-  Edge,
-  EdgeChange,
-  FinalConnectionState,
-  Node,
-  NodeChange,
-  NodeProps,
-} from '@xyflow/react'
-import {
-  Button,
-  IconCloseOutline16,
-  IconTrashOutline16,
-} from '@deepseek-ai/dsh-client-ui-primitives'
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import type { Connection, Edge, EdgeChange, NodeChange } from '@xyflow/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
-import { portsAreCompatible, resolveInputPorts } from '../shared/graph.ts'
+import type { DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
 import {
-  EdgeId,
-  NodeId,
-  type DagEdgeDefinition,
-  type DagNodeDefinition,
-  type DagWorkflowDefinition,
-  type NodeControlDefinition,
-  type NodeRunRecord,
-  type NodeTypeSummary,
-  type PortDefinition,
-} from '../shared/types.ts'
+  connectionError,
+  flowEdges,
+  flowNodes,
+  toDefinition,
+  withRunRecord,
+  type WorkflowFlowNode,
+} from './graph-model.ts'
+import type { Translate } from './locale.ts'
+import { NodeCardContext, WorkflowNodeCard } from './NodeCard.tsx'
+import { NodeInspector } from './NodeInspector.tsx'
 import css from './WorkflowStudioPanel.module.css'
 
-type GraphEditorKey =
-  | 'action.apply'
-  | 'action.delete'
-  | 'inspector.title'
-  | 'inspector.close'
-  | 'inspector.label'
-  | 'inspector.config'
-  | 'result.title'
-  | 'result.empty'
-  | 'notice.connectPorts'
-  | 'notice.configObject'
-  | 'notice.incompatiblePorts'
-  | 'notice.inputConnected'
-
-type Translate = (key: GraphEditorKey) => string
-
-type WorkflowNodeData = {
-  definition: DagNodeDefinition
-  catalog?: NodeTypeSummary
-  runRecord?: NodeRunRecord
-} & Record<string, unknown>
-
-type WorkflowFlowNode = Node<WorkflowNodeData, 'workflow'>
+const nodeTypes = { workflow: WorkflowNodeCard }
 
 interface WorkflowGraphEditorProps {
   readonly definition: DagWorkflowDefinition
+  /** Changing it discards the canvas graph and reloads `definition`. */
   readonly revision: number
   readonly nodeTypes: readonly NodeTypeSummary[]
   readonly runRecords: ReadonlyMap<string, NodeRunRecord>
@@ -85,27 +42,18 @@ interface WorkflowGraphEditorProps {
   readonly onError: (message: string | undefined) => void
 }
 
-interface NodeCardContextValue {
-  readonly updateConfig: (nodeId: string, name: string, value: unknown) => void
-}
-
-const NodeCardContext = createContext<NodeCardContextValue | undefined>(undefined)
-
 /** Render and edit one workflow definition as a connected node graph. */
 export function WorkflowGraphEditor({
   definition,
   revision,
-  nodeTypes,
+  nodeTypes: catalogTypes,
   runRecords,
   runResult,
   t,
   onChange,
   onError,
 }: WorkflowGraphEditorProps) {
-  const catalog = useMemo(
-    () => new Map(nodeTypes.map(node => [node.type, node])),
-    [nodeTypes],
-  )
+  const catalog = useMemo(() => new Map(catalogTypes.map(node => [node.type, node])), [catalogTypes])
   const [nodes, setNodes] = useState<WorkflowFlowNode[]>(() => flowNodes(definition, catalog, runRecords))
   const [edges, setEdges] = useState<Edge[]>(() => flowEdges(definition))
   const [selectedNodeId, setSelectedNodeId] = useState<string>()
@@ -119,116 +67,56 @@ export function WorkflowGraphEditor({
   }, [revision, catalog])
 
   useEffect(() => {
-    setNodes(current => current.map(node => ({
-      ...node,
-      data: withRunRecord(node.data, runRecords.get(node.id)),
-    })))
+    setNodes(current => current.map(node => ({ ...node, data: withRunRecord(node.data, runRecords.get(node.id)) })))
   }, [runRecords])
 
   const selectedNode = nodes.find(node => node.id === selectedNodeId)
 
-  const applyNodes = (changes: NodeChange<WorkflowFlowNode>[]): void => {
+  const commitNodes = (update: (current: WorkflowFlowNode[]) => WorkflowFlowNode[]): void => {
     setNodes((current) => {
-      const next = applyNodeChanges(changes, current)
-      emitDefinition(definition, next, edges, onChange)
+      const next = update(current)
+      onChange(toDefinition(definition, next, edges))
       return next
     })
   }
 
-  const applyEdges = (changes: EdgeChange[]): void => {
+  const commitEdges = (update: (current: Edge[]) => Edge[]): void => {
     setEdges((current) => {
-      const next = applyEdgeChanges(changes, current)
-      emitDefinition(definition, nodes, next, onChange)
+      const next = update(current)
+      onChange(toDefinition(definition, nodes, next))
       return next
     })
   }
 
-  const connect = (connection: Connection): void => {
-    if (connection.sourceHandle === null || connection.targetHandle === null) {
-      onError(t('notice.connectPorts'))
-      return
-    }
-    const error = connectionError(connection, nodes, edges)
-    if (error !== undefined) {
-      onError(t(error))
-      return
-    }
-    setEdges((current) => {
-      const next = addEdge({
-        ...connection,
-        id: crypto.randomUUID(),
-        markerEnd: { type: MarkerType.ArrowClosed },
-      }, current)
-      emitDefinition(definition, nodes, next, onChange)
-      return next
-    })
-    onError(undefined)
+  const updateNode = (nodeId: string, update: (node: DagNodeDefinition) => DagNodeDefinition): void => {
+    commitNodes(current => current.map(node => node.id === nodeId
+      ? { ...node, data: { ...node.data, definition: update(node.data.definition) } }
+      : node))
   }
 
-  const reconnect = (oldEdge: Edge, connection: Connection): void => {
-    const error = connectionError(connection, nodes, edges, oldEdge.id)
-    if (error !== undefined) {
-      onError(t(error))
-      return
-    }
-    setEdges((current) => {
-      const next = reconnectEdge(oldEdge, connection, current, { shouldReplaceId: false })
-      emitDefinition(definition, nodes, next, onChange)
-      return next
-    })
-    onError(undefined)
-  }
-
-  const finishReconnect = (
-    edge: Edge,
-    connectionState: FinalConnectionState,
-  ): void => {
-    reconnectingEdgeId.current = undefined
-    if (connectionState.toHandle !== null) return
-    setEdges((current) => {
-      const next = current.filter(item => item.id !== edge.id)
-      emitDefinition(definition, nodes, next, onChange)
-      return next
+  const updateConfig = (nodeId: string, name: string, value: unknown): void => {
+    updateNode(nodeId, (node) => {
+      const config = { ...node.config, [name]: value }
+      if (nodeId === selectedNodeId) setConfigSource(JSON.stringify(config, null, 2))
+      return { ...node, config }
     })
   }
 
-  const updateNodeConfig = (nodeId: string, name: string, value: unknown): void => {
-    setNodes((current) => {
-      const next = current.map((node) => {
-        if (node.id !== nodeId) return node
-        const config = { ...node.data.definition.config, [name]: value }
-        if (selectedNodeId === nodeId) setConfigSource(JSON.stringify(config, null, 2))
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            definition: { ...node.data.definition, config },
-          },
-        }
-      })
-      emitDefinition(definition, next, edges, onChange)
-      return next
-    })
-  }
-
-  const updateSelected = (patch: Partial<DagNodeDefinition>): void => {
-    if (selectedNodeId === undefined) return
-    setNodes((current) => {
-      const next = current.map(node => node.id === selectedNodeId
-        ? { ...node, data: { ...node.data, definition: { ...node.data.definition, ...patch } } }
-        : node)
-      emitDefinition(definition, next, edges, onChange)
-      return next
-    })
+  /** Show why a connection is rejected, or clear the notice when it is allowed. */
+  const acceptConnection = (connection: Connection, ignoredEdgeId?: string): boolean => {
+    const error = connectionError(connection, nodes, edges, ignoredEdgeId)
+    onError(error === undefined ? undefined : t(error))
+    return error === undefined
   }
 
   const applyConfig = (): void => {
+    if (selectedNodeId === undefined) return
     try {
       const value = JSON.parse(configSource) as unknown
       if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         throw new TypeError(t('notice.configObject'))
       }
-      updateSelected({ config: value as Record<string, unknown> })
+      updateNode(selectedNodeId, node => ({ ...node, config: value as Record<string, unknown> }))
       onError(undefined)
     } catch (error: unknown) {
       onError(messageOf(error))
@@ -242,28 +130,44 @@ export function WorkflowGraphEditor({
     setNodes(nextNodes)
     setEdges(nextEdges)
     setSelectedNodeId(undefined)
-    emitDefinition(definition, nextNodes, nextEdges, onChange)
+    onChange(toDefinition(definition, nextNodes, nextEdges))
   }
 
   return (
     <div className={css.graphLayout}>
       <div className={css.canvas}>
-        <NodeCardContext.Provider value={{ updateConfig: updateNodeConfig }}>
+        <NodeCardContext.Provider value={{ updateConfig }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}
-            nodeTypes={{ workflow: WorkflowNodeCard }}
-            onNodesChange={applyNodes}
-            onEdgesChange={applyEdges}
-            onConnect={connect}
+            nodeTypes={nodeTypes}
+            onNodesChange={(changes: NodeChange<WorkflowFlowNode>[]) => {
+              commitNodes(current => applyNodeChanges(changes, current))
+            }}
+            onEdgesChange={(changes: EdgeChange[]) => {
+              commitEdges(current => applyEdgeChanges(changes, current))
+            }}
+            onConnect={(connection) => {
+              if (!acceptConnection(connection)) return
+              commitEdges(current => addEdge({
+                ...connection,
+                id: crypto.randomUUID(),
+                markerEnd: { type: MarkerType.ArrowClosed },
+              }, current))
+            }}
             isValidConnection={connection =>
               connectionError(connection, nodes, edges, reconnectingEdgeId.current) === undefined}
             onReconnectStart={(_event, edge) => {
               reconnectingEdgeId.current = edge.id
             }}
-            onReconnect={reconnect}
+            onReconnect={(oldEdge, connection) => {
+              if (!acceptConnection(connection, oldEdge.id)) return
+              commitEdges(current => reconnectEdge(oldEdge, connection, current, { shouldReplaceId: false }))
+            }}
             onReconnectEnd={(_event, edge, _handleType, connectionState) => {
-              finishReconnect(edge, connectionState)
+              reconnectingEdgeId.current = undefined
+              // Dropping a reconnected edge away from any port deletes it.
+              if (connectionState.toHandle === null) commitEdges(current => current.filter(item => item.id !== edge.id))
             }}
             onNodeClick={(_event, node) => {
               setSelectedNodeId(node.id)
@@ -291,344 +195,18 @@ export function WorkflowGraphEditor({
       </div>
 
       {selectedNode !== undefined && (
-        <section className={css.detailsPanel}>
-          <div className={css.detailsHeader}>
-            <h2>{t('inspector.title')}</h2>
-            <button
-              type="button"
-              className={css.detailsClose}
-              aria-label={t('inspector.close')}
-              title={t('inspector.close')}
-              onClick={() => { setSelectedNodeId(undefined) }}
-            >
-              <IconCloseOutline16 size={14} />
-            </button>
-          </div>
-          <div className={css.detailsContent}>
-            <section>
-              <div className={css.inspectorForm}>
-                <label>
-                  <span>{t('inspector.label')}</span>
-                  <input
-                    value={selectedNode.data.definition.label ?? ''}
-                    placeholder={selectedNode.data.catalog?.label ?? selectedNode.data.definition.type}
-                    onChange={event => { updateSelected({ label: event.currentTarget.value }) }}
-                  />
-                </label>
-                <label>
-                  <span>{t('inspector.config')}</span>
-                  <textarea
-                    aria-label={t('inspector.config')}
-                    spellCheck={false}
-                    value={configSource}
-                    onChange={event => { setConfigSource(event.currentTarget.value) }}
-                  />
-                </label>
-                <div className={css.inspectorActions}>
-                  <Button size="sm" variant="outline" onClick={applyConfig}>
-                    {t('action.apply')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    icon={<IconTrashOutline16 size={14} />}
-                    onClick={deleteSelected}
-                  >
-                    {t('action.delete')}
-                  </Button>
-                </div>
-              </div>
-            </section>
-            <section className={css.resultPanel}>
-              <h2>{t('result.title')}</h2>
-              {runResult === undefined
-                ? <p>{t('result.empty')}</p>
-                : <pre>{runResult}</pre>}
-            </section>
-          </div>
-        </section>
-      )}
-    </div>
-  )
-}
-
-function WorkflowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
-  const inputs = resolvedInputPorts(data)
-  const outputs = resolvedOutputPorts(data)
-  const controls = data.catalog?.controls ?? []
-  const runOutputs = data.runRecord?.outputs
-  const { updateConfig } = useNodeCardContext()
-  return (
-    <div className={`${css.canvasNode} ${selected ? css.canvasNodeSelected : ''}`}>
-      <div className={css.nodeHeader}>
-        <strong>{data.definition.label ?? data.catalog?.label ?? data.definition.type}</strong>
-        {data.runRecord !== undefined && (
-          <span className={css.nodeStatus} data-status={data.runRecord.status}>
-            {data.runRecord.status}
-          </span>
-        )}
-      </div>
-      <code>{data.definition.type}</code>
-      <div className={css.ports}>
-        <div>{inputs.map(port => (
-          <PortRow key={port.name} port={port} side="input" />
-        ))}</div>
-        <div>{outputs.map(port => (
-          <PortRow key={port.name} port={port} side="output" />
-        ))}</div>
-      </div>
-      {controls.length > 0 && (
-        <div className={css.nodeControls}>
-          {controls.map(control => (
-            <NodeControl
-              key={control.name}
-              control={control}
-              value={data.definition.config[control.name] ?? control.defaultValue}
-              onChange={(value) => { updateConfig(data.definition.id, control.name, value) }}
-            />
-          ))}
-        </div>
-      )}
-      {runOutputs !== undefined && (
-        <div className={css.nodeOutputs}>
-          {outputs
-            .filter(port => port.display !== undefined
-              && Object.hasOwn(runOutputs, port.name))
-            .map(port => (
-              <div key={port.name} className={css.nodeOutput}>
-                <span>{port.name}</span>
-                <output>{formatOutput(runOutputs[port.name], port.display ?? 'value')}</output>
-              </div>
-            ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function PortRow({
-  port,
-  side,
-}: {
-  readonly port: PortDefinition
-  readonly side: 'input' | 'output'
-}) {
-  const isInput = side === 'input'
-  return (
-    <div
-      className={[
-        css.port,
-        isInput ? css.portInput : css.portOutput,
-        port.role === 'condition' ? css.conditionPort : '',
-      ].join(' ')}
-      title={port.description}
-    >
-      <Handle
-        type={isInput ? 'target' : 'source'}
-        position={isInput ? Position.Left : Position.Right}
-        id={port.name}
-      />
-      <span>
-        {port.name}
-        {isInput && port.required !== false && <b className={css.requiredPort}>*</b>}
-      </span>
-      <small>{port.type}</small>
-    </div>
-  )
-}
-
-function NodeControl({
-  control,
-  value,
-  onChange,
-}: {
-  readonly control: NodeControlDefinition
-  readonly value: unknown
-  readonly onChange: (value: unknown) => void
-}) {
-  if (control.kind === 'boolean') {
-    return (
-      <label className={`${css.nodeControl} nodrag`}>
-        <input
-          type="checkbox"
-          checked={value === true}
-          onChange={event => { onChange(event.currentTarget.checked) }}
+        <NodeInspector
+          node={selectedNode}
+          configSource={configSource}
+          runResult={runResult}
+          t={t}
+          onLabel={(label) => { updateNode(selectedNode.id, node => ({ ...node, label })) }}
+          onConfigSource={setConfigSource}
+          onApplyConfig={applyConfig}
+          onDelete={deleteSelected}
+          onClose={() => { setSelectedNodeId(undefined) }}
         />
-        <span>{control.label}</span>
-      </label>
-    )
-  }
-  if (control.kind === 'select') {
-    return (
-      <label className={`${css.nodeControl} nodrag`}>
-        <span>{control.label}</span>
-        <select
-          className="nowheel"
-          value={typeof value === 'string' ? value : control.defaultValue}
-          onChange={event => { onChange(event.currentTarget.value) }}
-        >
-          {control.options.map(option => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-      </label>
-    )
-  }
-  return (
-    <label className={`${css.nodeControl} nodrag`}>
-      <span>{control.label}</span>
-      <input
-        className="nowheel"
-        type={control.kind}
-        value={controlValue(value, control)}
-        {...(control.kind === 'number' && control.min !== undefined ? { min: control.min } : {})}
-        {...(control.kind === 'number' && control.max !== undefined ? { max: control.max } : {})}
-        {...(control.kind === 'number' && control.step !== undefined ? { step: control.step } : {})}
-        {...(control.kind === 'text' && control.placeholder !== undefined
-          ? { placeholder: control.placeholder }
-          : {})}
-        onChange={(event) => {
-          if (control.kind === 'number') {
-            const next = event.currentTarget.valueAsNumber
-            if (Number.isFinite(next)) onChange(next)
-          } else {
-            onChange(event.currentTarget.value)
-          }
-        }}
-      />
-    </label>
+      )}
+    </div>
   )
-}
-
-function flowNodes(
-  definition: DagWorkflowDefinition,
-  catalog: ReadonlyMap<string, NodeTypeSummary>,
-  runRecords: ReadonlyMap<string, NodeRunRecord>,
-): WorkflowFlowNode[] {
-  return definition.nodes.map((node, index) => {
-    const nodeType = catalog.get(node.type)
-    const runRecord = runRecords.get(node.id)
-    return {
-      id: node.id,
-      type: 'workflow',
-      position: node.position ?? {
-        x: 80 + (index % 4) * 240,
-        y: 80 + Math.floor(index / 4) * 180,
-      },
-      data: {
-        definition: node,
-        ...(nodeType === undefined ? {} : { catalog: nodeType }),
-        ...(runRecord === undefined ? {} : { runRecord }),
-      },
-    }
-  })
-}
-
-function flowEdges(definition: DagWorkflowDefinition): Edge[] {
-  return definition.edges.map(edge => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    sourceHandle: edge.sourcePort ?? 'output',
-    targetHandle: edge.targetPort ?? 'input',
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }))
-}
-
-function emitDefinition(
-  previous: DagWorkflowDefinition,
-  nodes: readonly WorkflowFlowNode[],
-  edges: readonly Edge[],
-  emit: (definition: DagWorkflowDefinition) => void,
-): void {
-  emit({
-    ...previous,
-    nodes: nodes.map(node => ({
-      ...node.data.definition,
-      position: { x: node.position.x, y: node.position.y },
-    })),
-    edges: edges.map(edge => edgeDefinition(edge)),
-  })
-}
-
-function edgeDefinition(edge: Edge): DagEdgeDefinition {
-  return {
-    id: EdgeId(edge.id),
-    source: NodeId(edge.source),
-    target: NodeId(edge.target),
-    ...(edge.sourceHandle === undefined || edge.sourceHandle === null
-      ? {}
-      : { sourcePort: edge.sourceHandle }),
-    ...(edge.targetHandle === undefined || edge.targetHandle === null
-      ? {}
-      : { targetPort: edge.targetHandle }),
-  }
-}
-
-function resolvedInputPorts(data: WorkflowNodeData): readonly PortDefinition[] {
-  return resolveInputPorts(data.definition.inputs, data.catalog?.inputs ?? [])
-}
-
-function resolvedOutputPorts(data: WorkflowNodeData): readonly PortDefinition[] {
-  return data.definition.outputs ?? data.catalog?.outputs ?? []
-}
-
-function inputPorts(node: WorkflowFlowNode | undefined): readonly PortDefinition[] {
-  return node === undefined ? [] : resolvedInputPorts(node.data)
-}
-
-function outputPorts(node: WorkflowFlowNode | undefined): readonly PortDefinition[] {
-  return node === undefined ? [] : resolvedOutputPorts(node.data)
-}
-
-function connectionError(
-  connection: Connection | Edge,
-  nodes: readonly WorkflowFlowNode[],
-  edges: readonly Edge[],
-  ignoredEdgeId?: string,
-): Extract<
-  GraphEditorKey,
-  'notice.connectPorts' | 'notice.incompatiblePorts' | 'notice.inputConnected'
-> | undefined {
-  if (connection.sourceHandle === undefined || connection.sourceHandle === null
-    || connection.targetHandle === undefined || connection.targetHandle === null) {
-    return 'notice.connectPorts'
-  }
-  const sourceNode = nodes.find(node => node.id === connection.source)
-  const targetNode = nodes.find(node => node.id === connection.target)
-  const sourcePort = outputPorts(sourceNode).find(port => port.name === connection.sourceHandle)
-  const targetPort = inputPorts(targetNode).find(port => port.name === connection.targetHandle)
-  if (sourcePort === undefined || targetPort === undefined) return 'notice.connectPorts'
-  if (!portsAreCompatible(sourcePort, targetPort)) return 'notice.incompatiblePorts'
-  if (edges.some(edge =>
-    edge.id !== ignoredEdgeId
-    && edge.target === connection.target
-    && edge.targetHandle === connection.targetHandle)) {
-    return 'notice.inputConnected'
-  }
-  return undefined
-}
-
-function controlValue(value: unknown, control: Extract<NodeControlDefinition, { kind: 'number' | 'text' }>): string | number {
-  if (control.kind === 'number') return typeof value === 'number' ? value : control.defaultValue
-  return typeof value === 'string' ? value : control.defaultValue
-}
-
-function formatOutput(value: unknown, display: 'value' | 'json'): string {
-  if (display === 'json') return JSON.stringify(value, null, 2) ?? 'undefined'
-  return typeof value === 'string' ? value : String(value)
-}
-
-function useNodeCardContext(): NodeCardContextValue {
-  const context = useContext(NodeCardContext)
-  if (context === undefined) throw new Error('Workflow node card rendered outside its editor')
-  return context
-}
-
-function withRunRecord(
-  data: WorkflowNodeData,
-  runRecord: NodeRunRecord | undefined,
-): WorkflowNodeData {
-  const { runRecord: _previous, ...rest } = data
-  return runRecord === undefined ? rest : { ...rest, runRecord }
 }

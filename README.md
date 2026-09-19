@@ -163,9 +163,17 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/shared/types.ts`](src/shared/types.ts) | Types shared by the Host and the browser |
 | [`src/shared/workflow-schema.ts`](src/shared/workflow-schema.ts) | JSON schemas for definitions, run records, run summaries, and the editor snapshot |
 | [`src/shared/graph.ts`](src/shared/graph.ts) | Topological levels, port compatibility, and input-port resolution |
-| [`src/client/index.tsx`](src/client/index.tsx) | Localized workflow picker, canvas/execution/runs views, save, run, and run-status refresh |
+| [`src/client/index.tsx`](src/client/index.tsx) | `main` panel and sidebar registration, and Remote mounting |
+| [`src/client/locale.ts`](src/client/locale.ts) | zh and en copy for the `workflowStudio` locale namespace |
+| [`src/client/remote.ts`](src/client/remote.ts) | Remote method descriptors and the `callRemote` error helper |
+| [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | Workflow selection, save, run, and the canvas/execution/runs views |
+| [`src/client/Menus.tsx`](src/client/Menus.tsx) | Workflow picker and node library menus |
+| [`src/client/use-runs.ts`](src/client/use-runs.ts) | Run list polling, run selection, run controls, and answers |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | Read-only execution dependency graph and run status |
-| [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow canvas, custom nodes, connections, bottom details panel, and run state |
+| [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow canvas state, node edits, and connections |
+| [`src/client/graph-model.ts`](src/client/graph-model.ts) | Conversion between definitions and canvas nodes and edges, and connection rules |
+| [`src/client/NodeCard.tsx`](src/client/NodeCard.tsx) | Canvas node card: ports, inline controls, and run outputs |
+| [`src/client/NodeInspector.tsx`](src/client/NodeInspector.tsx) | Details panel for the selected node and the run result |
 | [`src/client/model.ts`](src/client/model.ts) | Snapshot parsing, node placement, and the execution plan |
 | [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | Runs tab: run list, controls, question forms, and node states |
 | [`src/client/runs-model.ts`](src/client/runs-model.ts) | Run record parsing, grouping, pending requests, and answer building |

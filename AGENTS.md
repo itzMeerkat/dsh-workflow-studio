@@ -14,8 +14,9 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/node.ts` owns the `WorkflowNode` base class, `NodeFailure`, and the condition gate.
 - The plugin registers no nodes. Node implementations live in node plugins such as `dsh-workflow-demo-node`; `tests/fixture-nodes.ts` holds test-only nodes for engine tests.
 - `src/tools.ts` owns `create_workflow`, `run_workflow`, and `get_workflow_run`.
-- `src/client/index.tsx` owns the `main` panel, workflow picker, and `sidebar.panellist` entry.
-- `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering.
+- `src/client/index.tsx` registers the `main` panel and `sidebar.panellist` entry; `src/client/locale.ts` owns all panel copy.
+- `src/client/WorkflowStudioPanel.tsx` owns workflow selection, save, and run; `src/client/use-runs.ts` owns run polling and run controls; `src/client/Menus.tsx` owns the picker menus.
+- `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering; `src/client/graph-model.ts` owns canvas conversion and connection rules; `NodeCard.tsx` and `NodeInspector.tsx` render one node and the selected node's settings.
 - `src/client/ExecutionOrderView.tsx` owns the read-only execution dependency graph.
 - `src/client/RunsView.tsx` owns the Runs tab; `src/client/runs-model.ts` owns run parsing, grouping, and answer building.
 - `.agents/skills/` owns reusable workflow-operation and custom-node development procedures.

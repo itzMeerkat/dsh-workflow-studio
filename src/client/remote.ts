@@ -4,6 +4,7 @@
 
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
+import { messageOf } from '../shared/errors.ts'
 
 /** Client view of the `workflowStudio` Remote; every result is a string, JSON where noted on the Host method. */
 export interface WorkflowStudioRemoteNamespace {
@@ -20,6 +21,28 @@ export interface WorkflowStudioRemoteNamespace {
 }
 
 type Method = keyof WorkflowStudioRemoteNamespace
+
+/**
+ * Await one Remote call and parse its string value.
+ * @param call - The Remote call.
+ * @param parse - Converts the value; a throw counts as a failed call.
+ * @param onError - Receives the message of a thrown error, error result, or parse failure.
+ * @returns The parsed value, or undefined after a failure.
+ */
+export async function callRemote<T>(
+  call: () => Promise<RemoteResult<string>>,
+  parse: (value: string) => T,
+  onError: (message: string) => void,
+): Promise<T | undefined> {
+  try {
+    const response = await call()
+    if (response.ok) return parse(response.value)
+    onError(response.error.message)
+  } catch (error: unknown) {
+    onError(messageOf(error))
+  }
+  return undefined
+}
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespaceMap {

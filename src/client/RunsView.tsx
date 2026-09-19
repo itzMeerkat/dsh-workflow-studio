@@ -18,9 +18,7 @@ import {
   type PendingRequest,
 } from './runs-model.ts'
 import css from './WorkflowStudioPanel.module.css'
-import type { WorkflowStudioKey } from './index.tsx'
-
-type Translate = (key: WorkflowStudioKey) => string
+import type { Translate, WorkflowStudioKey } from './locale.ts'
 
 /** Which runs the rail lists. */
 export type RunsFilter = 'workflow' | 'all'
