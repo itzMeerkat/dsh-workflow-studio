@@ -4,12 +4,12 @@
 
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { DagEngineConfig, DagEngineProvider } from '../src/engine-provider.ts'
-import { TestHosts, runEnded } from './host.ts'
-import { EdgeId, NodeId, type RunId, type WorkflowId } from '../src/types.ts'
+import { TestHosts, inputRequested, runEnded } from './host.ts'
+import { EdgeId, NodeId, type RunId, type WorkflowId, type WorkflowRunRecord } from '../src/types.ts'
 import type {
   NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor,
 } from '../src/types.ts'
@@ -285,5 +285,118 @@ describe('运行持久化与恢复', () => {
       edges: [],
     })).result
     await assert.rejects(context.notepad.save(undefined as never), /notepad 不是 JSON 值/)
+  })
+
+  /** 让运行记录表在 `fail` 返回 true 时拒绝写入。 */
+  function failWrites(engine: DagEngineProvider, fail: (record: WorkflowRunRecord) => boolean): void {
+    const table = (engine as unknown as { runStore: { put(id: RunId, record: WorkflowRunRecord): Promise<void> } }).runStore
+    const put = table.put.bind(table)
+    table.put = async (id, record) => {
+      if (fail(record)) throw new Error('disk full')
+      await put(id, record)
+    }
+  }
+
+  it('无法恢复的运行记录写为 failed 并保留原因', async () => {
+    const root = await newRoot()
+    const runId = await interruptedRun(root)
+    const file = join(root, 'workflow_studio_runs', 'runs', `${runId}.json`)
+    const stored = JSON.parse(await readFile(file, 'utf8')) as { record: { nodes: Array<{ nodeId: string }> } }
+    stored.record.nodes[1]!.nodeId = 'ghost'
+    await writeFile(file, JSON.stringify(stored))
+
+    const second = await host(root, freshCalls(), { block: false })
+    const run = second.engine.getRunRecord(runId)
+    assert.equal(run?.status, 'failed')
+    assert.match(run?.error ?? '', /无法恢复: .*ghost/)
+    assert.equal(second.engine.listRuns()[0]?.status, 'failed')
+  })
+
+  it('最终状态写入失败时运行仍按最终状态查询，且不再接受控制', async () => {
+    const root = await newRoot()
+    const { engine } = await host(root, freshCalls(), { block: false })
+    const workflowId = await saveChain(engine)
+    failWrites(engine, record => record.status === 'completed')
+    const result = await engine.start(workflowId).result
+    assert.equal(result.status, 'completed')
+    assert.equal(engine.getRun(result.runId)?.status, 'completed')
+    engine.cancelRun(result.runId)
+    assert.equal(engine.getRun(result.runId)?.status, 'completed')
+    const stored = JSON.parse(await readFile(join(root, 'workflow_studio_runs', 'runs', `${result.runId}.json`), 'utf8')) as {
+      record: { status: string }
+    }
+    assert.equal(stored.record.status, 'running')
+  })
+
+  it('Host 停止后 notepad 写入被拒绝', async () => {
+    const root = await newRoot()
+    const { ctx, engine } = await host(root, freshCalls(), { block: false })
+    const started = Promise.withResolvers<void>()
+    const saveAfterStop = Promise.withResolvers<unknown>()
+    engine.ctx.workflowNodeRegistry.register({
+      type: 'late-save',
+      label: 'Late save',
+      description: 'Saves its notepad after the run is aborted',
+      async execute(context) {
+        started.resolve()
+        await new Promise<void>((resolve) => { context.signal.addEventListener('abort', () => { resolve() }) })
+        saveAfterStop.resolve(await context.notepad.save(1).then(() => 'saved', (error: unknown) => error))
+        return { status: 'completed', outputs: {} }
+      },
+    }, 'run-persistence-tests')
+    engine.start(await engine.save({ name: 'late', nodes: [{ id: NodeId('n'), type: 'late-save', config: {} }], edges: [] }))
+    await started.promise
+    await ctx.fiber.dispose()
+    assert.match(String(await saveAfterStop.promise), /工作流引擎正在关闭/)
+  })
+
+  it('取消时节点抛出的错误记为 cancelled', async () => {
+    const root = await newRoot()
+    const { engine } = await host(root, freshCalls(), { block: false })
+    const started = Promise.withResolvers<void>()
+    engine.ctx.workflowNodeRegistry.register({
+      type: 'throw-on-abort',
+      label: 'Throw on abort',
+      description: 'Rejects with the abort reason',
+      async execute(context) {
+        started.resolve()
+        await new Promise<void>((_resolve, reject) => {
+          context.signal.addEventListener('abort', () => { reject(new Error('aborted')) })
+        })
+        return { status: 'completed', outputs: {} }
+      },
+    }, 'run-persistence-tests')
+    const run = engine.start(await engine.save({ name: 'abort', nodes: [{ id: NodeId('n'), type: 'throw-on-abort', config: {} }], edges: [] }))
+    await started.promise
+    engine.cancelRun(run.runId, 'stop')
+    const result = await run.result
+    assert.equal(result.status, 'cancelled')
+    assert.deepEqual([result.nodeRecords[0]?.status, result.nodeRecords[0]?.error], ['cancelled', 'stop'])
+  })
+
+  it('答案写入失败时请求保持未回答，可再次回答', async () => {
+    const root = await newRoot()
+    const { ctx, engine } = await host(root, freshCalls(), { block: false })
+    engine.ctx.workflowNodeRegistry.register({
+      type: 'ask',
+      label: 'Ask',
+      description: 'Asks one question and outputs the answer',
+      outputs: [{ name: 'output', type: 'any' }],
+      async execute(context) {
+        const answer = await context.askHuman('q', [{ id: 'a', question: 'Go?', options: [{ label: 'yes' }] }])
+        return { status: 'completed', outputs: { output: answer.answers[0]?.selected[0] } }
+      },
+    }, 'run-persistence-tests')
+    const asked = inputRequested(ctx)
+    const run = engine.start(await engine.save({ name: 'ask', nodes: [{ id: NodeId('n'), type: 'ask', config: {} }], edges: [] }))
+    await asked
+    let failNext = true
+    failWrites(engine, () => failNext)
+    const answer = { answers: [{ id: 'a', selected: ['yes'] }] }
+    await assert.rejects(engine.answerInput(run.runId, NodeId('n'), 'q', answer), /disk full/)
+    assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
+    failNext = false
+    await engine.answerInput(run.runId, NodeId('n'), 'q', answer)
+    assert.deepEqual((await run.result).nodeRecords[0]?.outputs, { output: 'yes' })
   })
 })

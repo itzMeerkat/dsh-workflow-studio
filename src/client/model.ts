@@ -1,6 +1,7 @@
 /** Browser-side workflow DTOs used by the visual editor. */
 
-import { workflowDefinitionSchema } from '../workflow-schema.ts'
+import { z } from 'zod'
+import { nodeControlSchema, workflowDefinitionSchema, workflowPortSchema } from '../workflow-schema.ts'
 
 export interface EditorPort {
   readonly name: string
@@ -121,6 +122,34 @@ export interface ExecutionPlan {
   readonly stages: readonly ExecutionStage[]
   readonly dependencies: readonly ExecutionDependency[]
   readonly cyclicNodeIds: readonly string[]
+}
+
+const snapshotSchema = z.object({
+  workflows: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    definition: z.string(),
+  })),
+  nodeTypes: z.array(z.object({
+    type: z.string(),
+    label: z.string(),
+    description: z.string(),
+    sourcePlugin: z.string(),
+    inputs: z.array(workflowPortSchema),
+    outputs: z.array(workflowPortSchema),
+    controls: z.array(nodeControlSchema),
+    variadicInputs: z.object({ min: z.number(), outputType: z.literal('same').optional() }).optional(),
+  })),
+}) as unknown as z.ZodType<WorkflowStudioSnapshot>
+
+/**
+ * Parse the `snapshot` Remote result.
+ * @param source - JSON snapshot.
+ * @returns The workflows and node catalog.
+ */
+export function parseSnapshot(source: string): WorkflowStudioSnapshot {
+  return snapshotSchema.parse(JSON.parse(source) as unknown)
 }
 
 /** Filter node types by user-visible metadata and source plugin. */

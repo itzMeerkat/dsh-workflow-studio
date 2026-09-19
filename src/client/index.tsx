@@ -41,6 +41,7 @@ import {
   filterWorkflows,
   nextWorkflowName,
   parseEditorDefinition,
+  parseSnapshot,
 } from './model.ts'
 import workflowStudioRemote, { type WorkflowStudioRemoteNamespace } from './remote.ts'
 import {
@@ -114,7 +115,14 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
       setPhase('ready')
       return
     }
-    const next = JSON.parse(response.value) as WorkflowStudioSnapshot
+    let next: WorkflowStudioSnapshot
+    try {
+      next = parseSnapshot(response.value)
+    } catch (error: unknown) {
+      setNotice(messageOf(error))
+      setPhase('ready')
+      return
+    }
     setSnapshot(next)
     const selected = next.workflows.find(row => row.id === preferredId)
       ?? next.workflows.find(row => row.id === selectedId)
@@ -138,11 +146,19 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
   const refreshRuns = async (): Promise<void> => {
     try {
       const list = await remote.listRuns()
-      if (list.ok) setRuns(parseRunSummaries(list.value))
+      if (!list.ok) {
+        setNotice(list.error.message)
+        return
+      }
+      setRuns(parseRunSummaries(list.value))
       const runId = selectedRunRef.current
       if (runId === undefined) return
       const detail = await remote.getRun(runId)
-      if (detail.ok && selectedRunRef.current === runId) setRunRecord(parseRunRecord(detail.value))
+      if (!detail.ok) {
+        setNotice(detail.error.message)
+        return
+      }
+      if (selectedRunRef.current === runId) setRunRecord(parseRunRecord(detail.value))
     } catch (error: unknown) {
       setNotice(messageOf(error))
     }

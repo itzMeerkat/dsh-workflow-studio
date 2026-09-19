@@ -217,6 +217,9 @@ export class DagEngineProvider extends DagEngine {
     this.workflows = domain.table('workflows')
     this.runStore = openedRuns.table('runs')
     this.recovered = this.recover()
+    this.recovered.catch((error: unknown) => {
+      this.ctx.logger.error(`dag: 运行恢复失败: ${messageOf(error)}`)
+    })
   }
 
   /** 保存前验证所有可由当前注册表确定的不变量。 */
@@ -451,12 +454,12 @@ export class DagEngineProvider extends DagEngine {
   }
 
   /**
-   * 未结束运行的内存状态。已结束运行返回 undefined；未知运行抛出。
+   * 未结束运行的内存状态。已结束运行（包括最终状态写入失败后留在内存中的运行）返回 undefined；未知运行抛出。
    * @param runId - 运行 ID。
    */
   private liveState(runId: RunId): RunState | undefined {
     const state = this.runs.get(runId)
-    if (state !== undefined) return state
+    if (state !== undefined) return TERMINAL_STATUSES.has(state.status) ? undefined : state
     if (this.runStore.get(runId) !== undefined) return undefined
     throw new Error(`运行 ${runId} 不存在`)
   }
@@ -526,17 +529,17 @@ export class DagEngineProvider extends DagEngine {
   }
 
   /**
-   * 将运行的当前状态排队写入运行记录。引擎关闭后不再写入。
-   * @returns 该次写入持久化后兑现；写入失败时拒绝。
+   * 将运行的当前状态排队写入运行记录。引擎关闭后拒绝新的写入，使运行记录保持停止前的状态。
+   * @returns 该次写入持久化后兑现；写入失败或引擎正在关闭时拒绝。
    */
   private checkpoint(state: RunState): Promise<void> {
-    if (this.closing) return Promise.resolve()
+    if (this.closing) return Promise.reject(new Error('工作流引擎正在关闭'))
     state.updatedAt = Date.now()
     const record = this.toRecord(state)
-    const write = state.writeTail.then(async () => {
-      if (!this.closing) await this.runStore.put(state.runId, record)
+    const write = state.writeTail.then(() => this.runStore.put(state.runId, record))
+    state.writeTail = write.catch((_error: unknown) => {
+      // 失败已通过 `write` 交给调用方；队列只负责顺序。
     })
-    state.writeTail = write.catch(() => {})
     return write
   }
 
@@ -556,7 +559,10 @@ export class DagEngineProvider extends DagEngine {
       try {
         state = this.createState(record)
       } catch (error: unknown) {
-        this.ctx.logger.warn(`dag: 无法恢复运行 ${runId}: ${messageOf(error)}`)
+        const now = Date.now()
+        await this.runStore.put(runId, {
+          ...record, status: 'failed', error: `无法恢复: ${messageOf(error)}`, updatedAt: now, completedAt: now,
+        })
         continue
       }
       const interrupted: NodeId[] = []
@@ -668,7 +674,13 @@ export class DagEngineProvider extends DagEngine {
     const parsed = parseAnswer(request.questions, answer)
     request.answer = parsed
     request.answeredAt = Date.now()
-    await this.checkpoint(state)
+    try {
+      await this.checkpoint(state)
+    } catch (error: unknown) {
+      delete request.answer
+      delete request.answeredAt
+      throw error
+    }
     this.emitEvent('dag/input-answered', this.runInfo(state), nodeId, requestId)
     state.inputWaiters.get(inputKey(nodeId, requestId))?.(structuredClone(parsed))
   }
@@ -722,12 +734,20 @@ export class DagEngineProvider extends DagEngine {
       .catch((error: unknown) => this.workflowResult(state, 'failed', messageOf(error)))
       .then(result => this.finishRun(state, result))
       .catch((error: unknown) => {
-        this.ctx.logger.warn(`dag: 运行 ${state.runId} 结束处理失败: ${messageOf(error)}`)
+        this.ctx.logger.error(`dag: 运行 ${state.runId} 结束处理失败: ${messageOf(error)}`)
       })
   }
 
+  /**
+   * 写入运行的最终状态并兑现结果。引擎关闭时运行记录保持停止前的状态，下次启动时恢复；
+   * 最终状态写入失败时运行留在内存中，使查询仍返回其最终状态。
+   */
   private async finishRun(state: RunState, result: WorkflowResult): Promise<void> {
     state.active = false
+    if (this.closing) {
+      state.resultResolve(structuredClone(result))
+      return
+    }
     state.status = result.status
     state.completedAt = result.completedAt ?? Date.now()
     if (result.error !== undefined) state.error = result.error
@@ -738,13 +758,13 @@ export class DagEngineProvider extends DagEngine {
     try {
       await this.checkpoint(state)
     } catch (error: unknown) {
-      this.ctx.logger.warn(`dag: 运行 ${state.runId} 最终状态写入失败: ${messageOf(error)}`)
+      this.ctx.logger.error(`dag: 运行 ${state.runId} 最终状态写入失败: ${messageOf(error)}`)
+      state.resultResolve(structuredClone(result))
+      return
     }
+    this.runs.delete(state.runId)
     try {
-      if (!this.closing) {
-        this.runs.delete(state.runId)
-        await this.enqueueMutation(() => this.pruneRuns())
-      }
+      await this.enqueueMutation(() => this.pruneRuns())
     } finally {
       state.resultResolve(structuredClone(result))
     }
@@ -919,7 +939,8 @@ export class DagEngineProvider extends DagEngine {
         this.settleNode(state, node, executor, execState, nodeInfo, result)
       }
     } catch (error: unknown) {
-      this.failNode(state, execState, nodeInfo, messageOf(error))
+      if (signal.aborted) this.completeNode(state, execState, nodeInfo, 'cancelled')
+      else this.failNode(state, execState, nodeInfo, messageOf(error))
     }
   }
 

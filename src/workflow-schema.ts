@@ -10,6 +10,7 @@ import type {
   DagEdgeDefinition,
   DagNodeDefinition,
   DagWorkflowDefinition,
+  NodeControlDefinition,
   PortDefinition,
 } from './types.ts'
 import { EdgeId, NodeId } from './types.ts'
@@ -35,6 +36,28 @@ export const workflowPortSchema = z.object({
   ...(raw.role === undefined ? {} : { role: raw.role }),
   ...(raw.display === undefined ? {} : { display: raw.display }),
 }))
+
+const controlIdentity = { name: nonEmptyString, label: nonEmptyString }
+
+/** 节点卡片配置控件的 JSON 表示。 */
+export const nodeControlSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ...controlIdentity,
+    kind: z.literal('number'),
+    defaultValue: z.number(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    step: z.number().optional(),
+  }),
+  z.object({ ...controlIdentity, kind: z.literal('text'), defaultValue: z.string(), placeholder: z.string().optional() }),
+  z.object({ ...controlIdentity, kind: z.literal('boolean'), defaultValue: z.boolean() }),
+  z.object({
+    ...controlIdentity,
+    kind: z.literal('select'),
+    defaultValue: z.string(),
+    options: z.array(z.object({ label: z.string(), value: z.string() })),
+  }),
+]) as unknown as z.ZodType<NodeControlDefinition>
 
 /** 一个工作流节点的 JSON 表示。 */
 export const workflowNodeSchema = z.object({
