@@ -88,7 +88,7 @@ describe('WorkflowStudioController', () => {
     )
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
-      ['greater', 'merge', 'sum', 'value'],
+      ['ask', 'greater', 'merge', 'sum', 'value'],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
     assert.equal(sum?.sourcePlugin, 'test-fixtures')
@@ -107,6 +107,39 @@ describe('WorkflowStudioController', () => {
     const result = await runEnded(contexts.at(-1)!, runId)
     assert.equal(result.status, 'completed')
     assert.deepEqual(result.nodes.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
+  })
+
+  it('等待中的请求经 signal Remote 校验后送达结果', async () => {
+    const controller = await setup()
+    const workflowId = await controller.save(JSON.stringify({
+      name: 'ask',
+      nodes: [{ id: 'ask', type: 'ask', config: {} }],
+      edges: [],
+    }))
+    const runId = RunId(controller.start(workflowId))
+    const record = () => JSON.parse(controller.getRun(runId)) as {
+      nodes: Array<{ status: string; requests?: Array<{ id: string; request: { kind: string }; result?: unknown }> }>
+    }
+    for (let tick = 0; tick < 200 && record().nodes[0]?.requests === undefined; tick++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    const pending = record().nodes[0]!
+    assert.equal(pending.status, 'running')
+    assert.deepEqual(pending.requests?.map(item => [item.id, item.request.kind]), [['pick', 'questions']])
+
+    await assert.rejects(
+      controller.signal(runId, 'ask', 'pick', JSON.stringify({ answers: [] })),
+      /缺少问题 "decision"/,
+    )
+    const answer = { answers: [{ id: 'decision', selected: ['yes'] }] }
+    const after = JSON.parse(await controller.signal(runId, 'ask', 'pick', JSON.stringify(answer))) as {
+      nodes: Array<{ requests?: Array<{ result?: unknown }> }>
+    }
+    assert.deepEqual(after.nodes[0]?.requests?.[0]?.result, answer)
+
+    const result = await runEnded(contexts.at(-1)!, runId)
+    assert.equal(result.status, 'completed')
+    assert.deepEqual(result.nodes[0]?.outputs, { answer: 'yes' })
   })
 
   it('按 ID 更新定义时保留工作流身份并允许重命名', async () => {

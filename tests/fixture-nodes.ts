@@ -4,6 +4,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
+import { askUser, validateQuestionsSignal } from '../src/shared/questions.ts'
 import type { NodeControlDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/shared/types.ts'
 
 /** `value`：输出 `config.value`。 */
@@ -85,9 +86,28 @@ export class MergeNode extends WorkflowNode<{ output: unknown }> {
   }
 }
 
+/** `ask`：向人提问并输出所选标签。 */
+export class AskNode extends WorkflowNode<{ answer: string }> {
+  readonly type = 'ask'
+  readonly label = 'Ask'
+  readonly description = 'Asks one question and outputs the selected label'
+  override readonly validateSignal = validateQuestionsSignal
+  protected readonly ports: WorkflowNodePorts = {
+    inputs: [],
+    outputs: [{ name: 'answer', type: 'string' }],
+  }
+
+  protected async run(context: NodeExecutionContext): Promise<{ answer: string }> {
+    const answer = await askUser(context, 'pick', [
+      { id: 'decision', question: 'Go?', options: [{ label: 'yes' }, { label: 'no' }] },
+    ])
+    return { answer: answer.answers[0]?.selected[0] ?? '' }
+  }
+}
+
 /** 所有测试用节点的新实例。 */
 export function createFixtureNodes(): WorkflowNodeExecutor[] {
-  return [new ValueNode(), new SumNode(), new GreaterNode(), new MergeNode()]
+  return [new ValueNode(), new SumNode(), new GreaterNode(), new MergeNode(), new AskNode()]
 }
 
 /**
