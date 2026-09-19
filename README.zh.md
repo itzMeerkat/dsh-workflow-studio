@@ -105,7 +105,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 向人提问只是其中一种请求格式，不是引擎的概念。`askUser(context, requestId, questions)` 以 `questions` 类型发起请求，问题与答案采用 `@deepseek-ai/dsh-user-questions` 中 Harness `ask_user_question` 工具的格式：每个问题可以提供选项、允许多选并接受自定义文本。`validateQuestionsSignal` 是与之配套的 `validateSignal`，运行标签页把这类请求渲染为表单。需要自有请求格式和界面的节点插件，在 `workflowStudio.request` 插槽中为自己的 `kind` 注册组件；没有组件的 `kind` 显示为原始请求内容。
 
-要在某一步执行前要求人工批准，把等待批准的节点（例如 `dsh-workflow-demo-node` 的 `human-approval`）放在它前面。引擎自身没有确认步骤：仍带 `requiresHumanInput` 的定义在保存时被拒绝。
+要在某一步执行前要求人工批准，把等待批准的节点（例如 `dsh-workflow-demo-node` 的 `human-approval`）放在它前面。引擎自身没有确认步骤。
 
 ```json
 {

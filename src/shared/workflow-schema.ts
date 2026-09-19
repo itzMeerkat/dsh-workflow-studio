@@ -64,8 +64,6 @@ export const workflowNodeSchema = z.object({
   type: nonEmptyString,
   label: nonEmptyString.optional(),
   config: z.record(z.string(), z.json()).default({}),
-  // 引擎执行前的人工确认已被 human-approval 等节点取代；仍带该字段的定义在保存时失败，而不是静默失去确认。
-  requiresHumanInput: z.never({ error: 'requiresHumanInput 已移除：改用 human-approval 节点' }).optional(),
   recovery: z.enum(['rerun', 'hold']).optional(),
   position: z.object({
     x: z.number().finite(),

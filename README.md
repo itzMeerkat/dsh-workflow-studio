@@ -105,7 +105,7 @@ A node type checks the result format with the optional `validateSignal(request, 
 
 Questions for a person are one request format, not an engine concern. `askUser(context, requestId, questions)` raises a request of kind `questions` using the format of the Harness `ask_user_question` tool from `@deepseek-ai/dsh-user-questions`, where each question may offer options, allow several selections, and accept custom text. `validateQuestionsSignal` is the matching `validateSignal`, and the Runs tab renders such requests as a form. A node plugin that wants its own request format and its own UI registers a component for its `kind` in the `workflowStudio.request` slot; a kind nobody renders is shown as its raw payload.
 
-To require approval before a step runs, put a node that waits for it, such as `human-approval` from `dsh-workflow-demo-node`, in front of that step. The engine has no approval of its own: a definition that still carries `requiresHumanInput` is rejected when saved.
+To require approval before a step runs, put a node that waits for it, such as `human-approval` from `dsh-workflow-demo-node`, in front of that step. The engine has no approval step of its own.
 
 ```json
 {
