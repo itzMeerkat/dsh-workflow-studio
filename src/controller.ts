@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
-import { WorkflowId } from './types.ts'
+import { RunId, WorkflowId } from './types.ts'
 import { parseWorkflowDefinition } from './tools.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -122,6 +122,76 @@ export class WorkflowStudioController extends TypertRemoteService {
   async run(workflowId: string): Promise<string> {
     try {
       return JSON.stringify(await this.engine.start(WorkflowId(workflowId)).result)
+    } catch (error: unknown) {
+      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+    }
+  }
+
+  /**
+   * Start one saved workflow without waiting for it to settle.
+   * @param workflowId - ID returned by {@link save}.
+   * @returns The new run ID.
+   */
+  @Remote
+  start(workflowId: string): string {
+    try {
+      return this.engine.start(WorkflowId(workflowId)).runId
+    } catch (error: unknown) {
+      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+    }
+  }
+
+  /**
+   * List retained runs, newest first.
+   * @returns The run summaries encoded as JSON.
+   */
+  @Remote
+  listRuns(): string {
+    return JSON.stringify(this.engine.listRuns())
+  }
+
+  /**
+   * Read one retained run with its node records.
+   * @param runId - Run ID returned by {@link start}.
+   * @returns The run result encoded as JSON.
+   */
+  @Remote
+  getRun(runId: string): string {
+    const result = this.engine.getRun(RunId(runId))
+    if (result === undefined) throw new RemoteError('gateway/bad-request', `运行 ${runId} 不存在`, {})
+    return JSON.stringify(result)
+  }
+
+  /**
+   * Request a pause after the current level of a running run.
+   * @param runId - Run ID.
+   */
+  @Remote
+  pause(runId: string): void {
+    this.control(() => { this.engine.pauseRun(RunId(runId)) })
+  }
+
+  /**
+   * Resume a paused or interrupted run.
+   * @param runId - Run ID.
+   */
+  @Remote
+  resume(runId: string): void {
+    this.control(() => { this.engine.resumeRun(RunId(runId)) })
+  }
+
+  /**
+   * Cancel an unfinished run.
+   * @param runId - Run ID.
+   */
+  @Remote
+  cancel(runId: string): void {
+    this.control(() => { this.engine.cancelRun(RunId(runId), '用户取消') })
+  }
+
+  private control(action: () => void): void {
+    try {
+      action()
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

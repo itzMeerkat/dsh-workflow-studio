@@ -213,7 +213,7 @@ describe('DagEngineProvider', () => {
     await ready.promise
 
     assert.deepEqual(ctx.workflowNodeRegistry.listTypes(), [])
-    assert.deepEqual([...tools.keys()].sort(), ['create_workflow', 'run_workflow'])
+    assert.deepEqual([...tools.keys()].sort(), ['create_workflow', 'get_workflow_run', 'run_workflow'])
     assert.ok(ctx.workflowStudioController instanceof WorkflowStudioController)
 
     const demo = ctx.plugin(demoPlugin)

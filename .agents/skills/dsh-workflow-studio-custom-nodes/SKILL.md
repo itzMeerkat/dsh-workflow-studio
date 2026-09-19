@@ -103,6 +103,16 @@ Set `variadicInputs.min` when each node instance may declare its own input list.
 
 The executor receives only supplied input keys. Distinguish an absent key from a key whose value is `undefined` with `Object.hasOwn(context.inputs, name)` when that distinction changes behavior.
 
+## Repeated calls and the notepad
+
+The engine guarantees at-least-once invocation: after a Host restart, a node that was running is called again from the start of `run()`. Completed nodes are never called again. Design every node so a second call is safe, or make it detect the earlier call:
+
+- `context.invocationKey` is `<runId>/<nodeId>` and is the same on every call of that node in one run. Use it to name or deduplicate external work.
+- `context.notepad.value` returns the JSON value last saved with `await context.notepad.save(value)` in this run, or `undefined`. Save progress before long or costly steps, and read it first on every call.
+- Declare `recovery = 'hold'` when a person must decide whether a second call is safe. The run then waits as `interrupted` until someone resumes it. A workflow node's own `recovery` overrides this.
+
+Outputs and notepad values are stored as JSON. An output port set to `undefined` counts as not produced; other non-JSON values, such as `Date`, `Map`, class instances, or non-finite numbers, fail the node.
+
 ## Asynchronous work and cancellation
 
 Observe `context.signal` throughout asynchronous work and stop promptly after abort. Remove timers, listeners, subprocesses, or other owned resources before settling. Do not convert an aborted operation into a completed output.
@@ -132,6 +142,8 @@ Before finishing, confirm:
 - Every used input and produced output is declared.
 - Expected invalid data throws `NodeFailure` (or returns `failed` from a plain executor) with a useful error.
 - Async work observes cancellation and releases resources.
+- A second call of `run()` for the same `invocationKey` is safe, or `recovery` is `hold`.
+- Outputs and notepad values are JSON values.
 - Registration is effect-owned and names its source plugin.
 - The browser catalog exposes the intended ports and controls.
 - `pnpm test` and `pnpm build` pass from `dsh-workflow-studio`.

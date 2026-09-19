@@ -8,6 +8,7 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/engine.ts` defines `ctx.dagEngine` and DAG lifecycle events.
 - `src/workflow-schema.ts` owns the shared workflow-definition JSON schema.
 - `src/persistence.ts` owns the `workflow_studio` per-record domain.
+- `src/run-persistence.ts` owns the `workflow_studio_runs` per-record domain; `src/json.ts` owns JSON checks for persisted node values.
 - `src/engine-provider.ts` owns durable definitions, validation, scheduling, pause, resume, and cancellation.
 - `src/node.ts` owns the `WorkflowNode` base class, `NodeFailure`, and the condition gate.
 - `src/demo/` owns the demo nodes and the `dsh-workflow-studio/demo` plugin that registers them; the core plugin registers no nodes.
@@ -40,6 +41,10 @@ Do not describe Session persistence, retries, Skills, or approval-service integr
 - Missing required data from a skipped dependency propagates `skipped`; other partial required inputs fail.
 - Executors return the discriminated `NodeExecutionResult` union and observe `context.signal` during asynchronous work.
 - HITL pause waiters must be released by both `resume()` and `cancel()`.
+- Write a node's running state before calling it and its final state before the next level starts; a node is finished only once its final state is durable.
+- Engine shutdown writes no final run state, so restart recovery sees the last checkpoint. Recovery starts only after the plugin loader finishes.
+- Never call a completed or skipped node again during recovery. A recovered run restarts only when `autoRestart` is on, every interrupted node's effective `recovery` is `rerun`, and every node type resolves; otherwise it becomes `interrupted`.
+- Persist only JSON values: drop `undefined` output ports and fail nodes whose outputs contain other non-JSON values.
 
 ## Tool and client rules
 

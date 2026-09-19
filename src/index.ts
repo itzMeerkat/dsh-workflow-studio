@@ -7,22 +7,28 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { WorkflowNodeRegistry } from './registry.ts'
-import { DagEngineProvider } from './engine-provider.ts'
+import { DagEngineProvider, type DagEngineConfig } from './engine-provider.ts'
 import { registerWorkflowTools } from './tools.ts'
 import { WorkflowStudioController } from './controller.ts'
 
 /** 插件运行所需的 Harness 服务。 */
 export const inject = ['tools', 'storageDomain']
 
+/** 插件配置：传给 {@link DagEngineProvider} 的引擎配置。 */
+export interface Config extends DagEngineConfig {}
+
+export const Config = DagEngineProvider.Config
+
 /**
  * 插件 apply。
  * @param ctx - Cordis context。
+ * @param config - 引擎配置。
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config): void {
   ctx.plugin(WorkflowNodeRegistry)
 
   ctx.inject(['workflowNodeRegistry'], (scope) => {
-    scope.plugin(DagEngineProvider)
+    scope.plugin(DagEngineProvider, config)
   })
 
   ctx.inject(['dagEngine', 'workflowNodeRegistry'], (scope) => {
@@ -33,6 +39,8 @@ export function apply(ctx: Context): void {
 
 export { WorkflowNodeRegistry } from './registry.ts'
 export { DagEngineProvider, topologicalSort } from './engine-provider.ts'
+export type { DagEngineConfig } from './engine-provider.ts'
+export { workflowRunsDomainSpec } from './run-persistence.ts'
 export { CONDITION_PORT, NodeFailure, WorkflowNode } from './node.ts'
 export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
@@ -45,7 +53,8 @@ export type {
   DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
   NodeExecutionCompleted, NodeExecutionFailed, NodeExecutionSkipped, NodeControlDefinition,
-  WorkflowResult, WorkflowSummary, WorkflowRunStatus,
+  WorkflowResult, WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
+  NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject,
   NodeRunRecord, NodeRunStatus, PortDefinition,
 } from './types.ts'
 export {

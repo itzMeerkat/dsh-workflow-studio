@@ -8,7 +8,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   DagWorkflowDefinition, WorkflowId, RunId,
-  WorkflowResult, WorkflowSummary,
+  WorkflowResult, WorkflowSummary, WorkflowRunSummary,
   DagRunInfo, NodeRunInfo, WorkflowRunStatus,
 } from './types.ts'
 
@@ -50,6 +50,13 @@ declare module '@deepseek-ai/cordis' {
      * @param info - 已恢复的运行信息。
      */
     'dag/resumed'(info: DagRunInfo): void
+    /**
+     * 运行因 Host 停止而中断，需要人工恢复，或恢复时缺少节点类型。
+     * @mode emit
+     * @param info - 已中断的运行信息。
+     * @param reason - 需要人工处理的原因。
+     */
+    'dag/interrupted'(info: DagRunInfo, reason: string): void
     /**
      * 运行结束（无论何种原因）。
      * @mode emit
@@ -109,8 +116,37 @@ export abstract class DagEngine extends Service {
   /** 启动一个已保存的工作流，返回运行 handle。 */
   abstract start(workflowId: WorkflowId): DagRun
 
-  /** 获取运行状态。 */
+  /**
+   * 获取运行状态，包括已结束并仍保留在运行记录中的运行。
+   * @param runId - 运行 ID。
+   * @returns 运行结果快照，或 undefined。
+   */
   abstract getRun(runId: RunId): WorkflowResult | undefined
+
+  /**
+   * 列出所有保留的运行，按启动时间从新到旧排列。
+   * @returns 运行摘要。
+   */
+  abstract listRuns(): WorkflowRunSummary[]
+
+  /**
+   * 请求在当前层级结束后暂停运行。非 running 状态的运行不受影响。
+   * @param runId - 运行 ID。
+   */
+  abstract pauseRun(runId: RunId): void
+
+  /**
+   * 恢复 paused 或 interrupted 的运行。interrupted 运行会重新调用未完成的节点。
+   * @param runId - 运行 ID。
+   */
+  abstract resumeRun(runId: RunId): void
+
+  /**
+   * 取消未结束的运行。
+   * @param runId - 运行 ID。
+   * @param reason - 写入运行记录的取消原因。
+   */
+  abstract cancelRun(runId: RunId, reason?: string): void
 
   /** 安全派发 Cordis 事件。 */
   protected emitEvent(name: string, ...args: unknown[]): void {

@@ -25,7 +25,24 @@ export function NodeId(id: string): NodeId { return id as NodeId }
 export type EdgeId = Branded<'EdgeId'>
 export function EdgeId(id: string): EdgeId { return id as EdgeId }
 
+// ---- JSON 值 ----
+
+/** 可无损写入 JSON 持久化记录的值。 */
+export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject
+
+/** 键为字符串的 JSON 对象。 */
+export interface JsonObject {
+  [key: string]: JsonValue
+}
+
 // ---- 工作流定义 ----
+
+/**
+ * 运行因 Host 停止而中断后，节点如何恢复。
+ * - `rerun`：自动重新调用节点（至少一次语义）。
+ * - `hold`：运行进入 interrupted，等待人工恢复后再重新调用。
+ */
+export type NodeRecoveryPolicy = 'rerun' | 'hold'
 
 /** 端口类型约束（仅文档用途，运行时不检查）。 */
 export type PortType = 'number' | 'string' | 'boolean' | 'any'
@@ -87,6 +104,8 @@ export interface DagNodeDefinition {
   config: Record<string, unknown>
   /** 是否需人工确认后执行。 */
   requiresHumanInput?: boolean
+  /** 覆盖执行器声明的中断恢复策略。 */
+  recovery?: NodeRecoveryPolicy
   /** 可视化编辑器中的节点坐标。 */
   position?: { x: number; y: number }
   /** 节点声明的输出端口；省略时使用执行器声明。 */
@@ -137,10 +156,24 @@ export interface NodeExecutionContext {
   connected: ReadonlySet<string>
   /** `${runId}/${nodeId}`，在同一运行中该节点的每次调用间保持不变，供节点自行去重或恢复。 */
   invocationKey: string
+  /** 随运行记录持久化的节点私有值，在同一运行中该节点的重新调用间保留。 */
+  notepad: NodeNotepad
   /** 取消信号。 */
   signal: AbortSignal
   /** 输出一条日志。 */
   log: (message: string) => void
+}
+
+/** 节点在同一运行的多次调用间保留的持久值。 */
+export interface NodeNotepad {
+  /** 最近一次保存的值；从未保存时为 undefined。每次读取返回独立副本。 */
+  readonly value: JsonValue | undefined
+  /**
+   * 持久化新值，替换先前的值。
+   * @param value - JSON 值；非 JSON 值（如 undefined、函数、非有限数值）会被拒绝。
+   * @returns 值写入运行记录后兑现。
+   */
+  save(value: JsonValue): Promise<void>
 }
 
 /** 节点执行成功结果。 */
@@ -177,17 +210,49 @@ export interface NodeRunRecord {
   inputs?: Record<string, unknown>
   outputs?: Record<string, unknown>
   error?: string
+  /** 节点在本次运行中被调用的次数，包括中断后的重新调用。 */
+  attempts: number
+  /** 节点通过 {@link NodeNotepad.save} 保存的最近值。 */
+  notepad?: JsonValue
   startedAt: number
   completedAt?: number
   runId: RunId
 }
 
 /** 工作流运行状态。 */
-export type WorkflowRunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+export type WorkflowRunStatus = 'running' | 'paused' | 'interrupted' | 'completed' | 'failed' | 'cancelled'
+
+/** 持久化的完整运行记录。 */
+export interface WorkflowRunRecord {
+  runId: RunId
+  workflowId: WorkflowId
+  /** 运行启动时的定义快照；之后对工作流的修改不影响该运行。 */
+  definition: DagWorkflowDefinition
+  status: WorkflowRunStatus
+  error?: string
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
+  nodes: NodeRunRecord[]
+}
+
+/** 运行列表中的一行。 */
+export interface WorkflowRunSummary {
+  runId: RunId
+  workflowId: WorkflowId
+  name: string
+  status: WorkflowRunStatus
+  error?: string
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
+}
 
 /** 工作流运行结果。 */
 export interface WorkflowResult {
   runId: RunId
+  workflowId: WorkflowId
+  name: string
   status: WorkflowRunStatus
   error?: string
   nodeRecords: NodeRunRecord[]
@@ -230,6 +295,8 @@ export interface WorkflowNodeExecutor {
   }
   /** 是否需要人工介入执行该节点。 */
   readonly requiresHumanInput?: boolean
+  /** 中断后的恢复策略；省略时为 `rerun`。工作流节点的 `recovery` 覆盖此值。 */
+  readonly recovery?: NodeRecoveryPolicy
   /**
    * 在引擎的输入检查和人工确认之前调用。返回结果时节点直接以该结果结束，不调用 {@link execute}；
    * 返回 undefined 时继续执行。

@@ -1,19 +1,21 @@
 /**
  * DAG 引擎默认实现。
  *
- * 包含拓扑排序（Kahn）、层级执行、暂停恢复和 HITL 集成。
+ * 包含拓扑排序（Kahn）、层级执行、暂停恢复、HITL、运行记录持久化和启动时恢复。
+ * 节点只有在其结束状态写入运行记录后才算完成；Host 停止时未完成的节点在恢复后重新调用（至少一次）。
  * @module dsh-workflow-studio
  */
 
 import { randomUUID } from 'node:crypto'
-import { Service } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import DagEngine from './engine.ts'
 import type { DagRun } from './engine.ts'
 import type {
   DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
   NodeId,
-  WorkflowResult, WorkflowSummary,
+  WorkflowResult, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
   NodeExecutionContext, NodeExecutionResult,
   NodeRunRecord, NodeRunStatus, PortDefinition,
   WorkflowRunStatus, NodeRunInfo, DagRunInfo,
@@ -22,7 +24,9 @@ import type {
 import { WorkflowId, RunId } from './types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import { workflowStudioDomainSpec } from './persistence.ts'
+import { workflowRunsDomainSpec } from './run-persistence.ts'
 import { workflowDefinitionSchema } from './workflow-schema.ts'
+import { toJsonOutputs, toJsonValue } from './json.ts'
 
 // ---- 内部状态 ----
 
@@ -35,17 +39,29 @@ interface RunState {
   runId: RunId
   workflowId: WorkflowId
   definition: DagWorkflowDefinition
+  /** 执行中的节点执行器；运行未执行时为空。 */
   executors: Map<NodeId, WorkflowNodeExecutor>
   status: WorkflowRunStatus
   nodeStates: Map<NodeId, NodeExecState>
   startedAt: number
+  updatedAt: number
   completedAt?: number
   error?: string
+  /** 调度循环正在执行本运行；恢复后等待人工处理的运行为 false。 */
+  active: boolean
   abortController: AbortController
   pauseRequested: boolean
   pauseResolvers: Set<() => void>
   resultPromise: Promise<WorkflowResult>
   resultResolve: (result: WorkflowResult) => void
+  /** 本运行的检查点写入按顺序排队。 */
+  writeTail: Promise<void>
+}
+
+const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 // ---- 拓扑排序 ----
@@ -134,27 +150,69 @@ export function topologicalSort(definition: DagWorkflowDefinition): TopoLevel[] 
  * - 支持暂停/恢复
  * - HITL 通过暂停等待实现
  */
+/** 引擎部署配置。 */
+export interface DagEngineConfig {
+  /** Host 重启后是否自动重新执行被中断的运行；为 false 时这些运行进入 interrupted。 */
+  autoRestart: boolean
+  /** 保留的已结束运行数量；超出时删除最早结束的运行记录。 */
+  retainRuns: number
+}
+
+// ---- 引擎实现 ----
+
+/**
+ * 默认 DAG 引擎实现。
+ * - 工作流定义和运行记录通过 storage-domain 持久化
+ * - 拓扑排序使用 Kahn 算法，同级节点并行执行
+ * - 支持暂停/恢复/取消，HITL 通过暂停等待实现
+ * - Host 启动时恢复未结束的运行
+ */
 export class DagEngineProvider extends DagEngine {
   static inject = ['workflowNodeRegistry', 'storageDomain']
 
+  static Config: z<DagEngineConfig> = z.object({
+    autoRestart: z.boolean().default(true)
+      .description('Host 重启后自动重新执行被中断的运行；节点或工作流节点可声明 recovery: hold 以要求人工恢复。'),
+    retainRuns: z.natural().min(1).default(100).description('保留的已结束运行数量。'),
+  })
+
+  /** 启动时对已保存运行的恢复处理完成后兑现。 */
+  recovered!: Promise<void>
+
   private workflows!: KvTable<WorkflowId, DagWorkflowDefinition>
+  private runStore!: KvTable<RunId, WorkflowRunRecord>
   private readonly runs = new Map<RunId, RunState>()
   private readonly registry: WorkflowNodeRegistry
   private mutationTail: Promise<void> = Promise.resolve()
+  private closing = false
 
-  constructor(ctx: import('@deepseek-ai/cordis').Context) {
+  constructor(ctx: Context, private readonly config: DagEngineConfig) {
     super(ctx)
     this.registry = ctx.workflowNodeRegistry
   }
 
-  /** 打开工作流 Domain，并在服务卸载时等待所有写入完成后关闭。 */
+  /** 打开定义与运行 Domain，启动恢复，并在服务卸载时停止运行、等待写入完成后关闭。 */
   protected async [Service.init](): Promise<void> {
     const domain = await this.ctx.storageDomain.open(workflowStudioDomainSpec)
+    const openedRuns = await this.ctx.storageDomain.open(workflowRunsDomainSpec).catch(async (error: unknown) => {
+      await domain.close()
+      throw error
+    })
     this.ctx.effect(() => async () => {
+      // 停止时不写入运行的结束状态，使运行记录保持中断前的状态以便下次启动恢复。
+      this.closing = true
+      for (const state of this.runs.values()) {
+        if (state.active) state.abortController.abort('Host 停止')
+        this.releasePauseWaiters(state)
+      }
+      await Promise.all([...this.runs.values()].map(state => state.writeTail))
       await this.mutationTail
+      await openedRuns.close()
       await domain.close()
     }, 'dagEngine.domainClose')
     this.workflows = domain.table('workflows')
+    this.runStore = openedRuns.table('runs')
+    this.recovered = this.recover()
   }
 
   /** 保存前验证所有可由当前注册表确定的不变量。 */
@@ -305,111 +363,317 @@ export class DagEngineProvider extends DagEngine {
   }
 
   start(workflowId: WorkflowId): DagRun {
+    if (this.closing) throw new Error('工作流引擎正在关闭')
     const definition = this.get(workflowId)
     if (definition === undefined) throw new Error(`工作流 ${workflowId} 未找到`)
-    const executors = new Map<NodeId, WorkflowNodeExecutor>()
-    for (const node of definition.nodes) {
-      const executor = this.registry.get(node.type)
-      if (executor === undefined) throw new Error(`节点类型 ${node.type} 已卸载，无法启动工作流`)
-      executors.set(node.id, executor)
-    }
-
+    const executors = this.resolveExecutors(definition)
     const runId = RunId(randomUUID())
-    const abortController = new AbortController()
-    const runInfo: DagRunInfo = {
-      runId,
-      workflowId,
-      name: definition.name,
-      status: 'running',
-    }
-
-    const { promise: resultPromise, resolve: resultResolve } = Promise.withResolvers<WorkflowResult>()
-
-    const runState: RunState = {
+    const now = Date.now()
+    const state = this.createState({
       runId,
       workflowId,
       definition,
-      executors,
       status: 'running',
-      nodeStates: new Map(),
-      startedAt: Date.now(),
-      abortController,
-      pauseRequested: false,
-      pauseResolvers: new Set(),
-      resultPromise,
-      resultResolve,
-    }
-
-    this.runs.set(runId, runState)
-    this.emitEvent('dag/start', runInfo)
-
-    // 异步执行
-    this.executeWorkflow(runState, definition).then(
-      (result) => { this.finishRun(runState, result) },
-      (error: unknown) => {
-        this.finishRun(runState, {
-          runId,
-          status: 'failed',
-          error: String(error),
-          nodeRecords: [],
-          startedAt: runState.startedAt,
-          completedAt: Date.now(),
-        })
-      },
-    )
-
-    const dagMeta: { name: string; description?: string } = { name: definition.name }
-    if (definition.description !== undefined) dagMeta.description = definition.description
-    return {
-      runId,
-      meta: dagMeta,
-      result: runState.resultPromise,
-      pause: () => { this.pauseRun(runState) },
-      resume: () => { this.resumeRun(runState) },
-      cancel: (reason?: string) => { this.cancelRun(runState, reason) },
-      dispose: async () => {
-        this.cancelRun(runState, 'dispose')
-        await runState.resultPromise
-      },
-    }
+      startedAt: now,
+      updatedAt: now,
+      nodes: definition.nodes.map(node => ({ nodeId: node.id, runId, status: 'pending', attempts: 0, startedAt: 0 })),
+    })
+    state.executors = executors
+    this.runs.set(runId, state)
+    this.emitEvent('dag/start', this.runInfo(state))
+    this.launch(state)
+    return this.handle(state)
   }
 
   getRun(runId: RunId): WorkflowResult | undefined {
     const state = this.runs.get(runId)
-    if (state === undefined) return undefined
-    const result: WorkflowResult = {
-      runId,
-      status: state.status,
-      nodeRecords: structuredClone([...state.nodeStates.values()].map(s => s.record)),
-      startedAt: state.startedAt,
+    if (state !== undefined) return this.snapshot(state)
+    const record = this.runStore.get(runId)
+    return record === undefined ? undefined : resultOfRecord(record)
+  }
+
+  listRuns(): WorkflowRunSummary[] {
+    const summaries = new Map<RunId, WorkflowRunSummary>()
+    for (const [runId, record] of this.runStore.entries()) summaries.set(runId, summaryOfRecord(record))
+    for (const state of this.runs.values()) summaries.set(state.runId, summaryOfRecord(this.toRecord(state)))
+    return [...summaries.values()].sort((a, b) => b.startedAt - a.startedAt)
+  }
+
+  pauseRun(runId: RunId): void {
+    const state = this.liveState(runId)
+    if (state === undefined || !state.active || state.status !== 'running') return
+    state.pauseRequested = true
+  }
+
+  resumeRun(runId: RunId): void {
+    if (this.closing) throw new Error('工作流引擎正在关闭')
+    const state = this.liveState(runId)
+    if (state === undefined) return
+    if (state.active) {
+      state.pauseRequested = false
+      if (state.status !== 'paused') return
+      state.status = 'running'
+      this.emitEvent('dag/resumed', this.runInfo(state))
+      this.checkpointInBackground(state)
+      this.releasePauseWaiters(state)
+      return
     }
-    if (state.completedAt !== undefined) result.completedAt = state.completedAt
-    if (state.error !== undefined) result.error = state.error
-    return result
+    // 未执行的 paused/interrupted 运行：按当前注册表重新解析执行器后继续调度。
+    state.executors = this.resolveExecutors(state.definition)
+    state.status = 'running'
+    delete state.error
+    this.emitEvent('dag/resumed', this.runInfo(state))
+    this.launch(state)
+  }
+
+  cancelRun(runId: RunId, reason?: string): void {
+    const state = this.liveState(runId)
+    if (state === undefined) return
+    const message = reason ?? 'cancelled'
+    if (state.active) {
+      state.abortController.abort(message)
+      this.releasePauseWaiters(state)
+      return
+    }
+    this.cancelRemaining(state, message)
+    void this.finishRun(state, this.workflowResult(state, 'cancelled', message))
+  }
+
+  /**
+   * 未结束运行的内存状态。已结束运行返回 undefined；未知运行抛出。
+   * @param runId - 运行 ID。
+   */
+  private liveState(runId: RunId): RunState | undefined {
+    const state = this.runs.get(runId)
+    if (state !== undefined) return state
+    if (this.runStore.get(runId) !== undefined) return undefined
+    throw new Error(`运行 ${runId} 不存在`)
+  }
+
+  private handle(state: RunState): DagRun {
+    const meta: { name: string; description?: string } = { name: state.definition.name }
+    if (state.definition.description !== undefined) meta.description = state.definition.description
+    return {
+      runId: state.runId,
+      meta,
+      result: state.resultPromise,
+      pause: () => { this.pauseRun(state.runId) },
+      resume: () => { this.resumeRun(state.runId) },
+      cancel: (reason?: string) => { this.cancelRun(state.runId, reason) },
+      dispose: async () => {
+        this.cancelRun(state.runId, 'dispose')
+        await state.resultPromise
+      },
+    }
+  }
+
+  // ---- 持久化与恢复 ----
+
+  private createState(record: WorkflowRunRecord): RunState {
+    const { promise: resultPromise, resolve: resultResolve } = Promise.withResolvers<WorkflowResult>()
+    const nodes = new Map(record.definition.nodes.map(node => [node.id, node]))
+    const nodeStates = new Map<NodeId, NodeExecState>()
+    for (const nodeRecord of record.nodes) {
+      const node = nodes.get(nodeRecord.nodeId)
+      if (node === undefined) throw new Error(`运行 ${record.runId} 的记录包含定义中不存在的节点 ${nodeRecord.nodeId}`)
+      nodeStates.set(node.id, { node, record: structuredClone(nodeRecord) })
+    }
+    return {
+      runId: record.runId,
+      workflowId: record.workflowId,
+      definition: record.definition,
+      executors: new Map(),
+      status: record.status,
+      nodeStates,
+      startedAt: record.startedAt,
+      updatedAt: record.updatedAt,
+      ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+      ...(record.error === undefined ? {} : { error: record.error }),
+      active: false,
+      abortController: new AbortController(),
+      pauseRequested: false,
+      pauseResolvers: new Set(),
+      resultPromise,
+      resultResolve,
+      writeTail: Promise.resolve(),
+    }
+  }
+
+  private toRecord(state: RunState): WorkflowRunRecord {
+    return {
+      runId: state.runId,
+      workflowId: state.workflowId,
+      definition: structuredClone(state.definition),
+      status: state.status,
+      startedAt: state.startedAt,
+      updatedAt: state.updatedAt,
+      nodes: structuredClone([...state.nodeStates.values()].map(item => item.record)),
+      ...(state.completedAt === undefined ? {} : { completedAt: state.completedAt }),
+      ...(state.error === undefined ? {} : { error: state.error }),
+    }
+  }
+
+  /**
+   * 将运行的当前状态排队写入运行记录。引擎关闭后不再写入。
+   * @returns 该次写入持久化后兑现；写入失败时拒绝。
+   */
+  private checkpoint(state: RunState): Promise<void> {
+    if (this.closing) return Promise.resolve()
+    state.updatedAt = Date.now()
+    const record = this.toRecord(state)
+    const write = state.writeTail.then(async () => {
+      if (!this.closing) await this.runStore.put(state.runId, record)
+    })
+    state.writeTail = write.catch(() => {})
+    return write
+  }
+
+  private checkpointInBackground(state: RunState): void {
+    this.checkpoint(state).catch((error: unknown) => {
+      this.ctx.logger.warn(`dag: 运行 ${state.runId} 检查点写入失败: ${messageOf(error)}`)
+    })
+  }
+
+  /** 等待节点注册完成后，恢复上次停止时未结束的运行。 */
+  private async recover(): Promise<void> {
+    await this.ctx.get('loader')?.await()
+    if (this.closing) return
+    for (const [runId, record] of [...this.runStore.entries()]) {
+      if (TERMINAL_STATUSES.has(record.status) || this.runs.has(runId)) continue
+      let state: RunState
+      try {
+        state = this.createState(record)
+      } catch (error: unknown) {
+        this.ctx.logger.warn(`dag: 无法恢复运行 ${runId}: ${messageOf(error)}`)
+        continue
+      }
+      const interrupted: NodeId[] = []
+      for (const { record: nodeRecord } of state.nodeStates.values()) {
+        if (nodeRecord.status !== 'running' && nodeRecord.status !== 'paused') continue
+        interrupted.push(nodeRecord.nodeId)
+        nodeRecord.status = 'pending'
+        delete nodeRecord.outputs
+        delete nodeRecord.error
+        delete nodeRecord.completedAt
+      }
+      this.runs.set(runId, state)
+      if (record.status === 'running') this.restartInterrupted(state, interrupted)
+    }
+  }
+
+  /** 按部署配置和节点恢复策略决定自动重新执行或等待人工恢复。 */
+  private restartInterrupted(state: RunState, interrupted: readonly NodeId[]): void {
+    if (!this.config.autoRestart) {
+      this.interrupt(state, 'Host 重启后未自动恢复（autoRestart 已关闭）')
+      return
+    }
+    let executors: Map<NodeId, WorkflowNodeExecutor>
+    try {
+      executors = this.resolveExecutors(state.definition)
+    } catch (error: unknown) {
+      this.interrupt(state, `无法恢复: ${messageOf(error)}`)
+      return
+    }
+    const held = interrupted.filter((nodeId) => {
+      const node = this.nodeState(state, nodeId).node
+      return (node.recovery ?? executors.get(nodeId)?.recovery ?? 'rerun') === 'hold'
+    })
+    if (held.length > 0) {
+      this.interrupt(state, `节点 ${held.join(', ')} 需要人工恢复后重新执行`)
+      return
+    }
+    state.executors = executors
+    state.status = 'running'
+    this.emitEvent('dag/resumed', this.runInfo(state))
+    this.launch(state)
+  }
+
+  private interrupt(state: RunState, reason: string): void {
+    state.status = 'interrupted'
+    state.error = reason
+    this.checkpointInBackground(state)
+    this.emitEvent('dag/interrupted', this.runInfo(state), reason)
+  }
+
+  /** 删除超出保留数量的最早结束的运行记录。 */
+  private async pruneRuns(): Promise<void> {
+    const finished = [...this.runStore.entries()]
+      .filter(([runId, record]) => TERMINAL_STATUSES.has(record.status) && !this.runs.has(runId))
+      .sort(([, a], [, b]) => (b.completedAt ?? b.updatedAt) - (a.completedAt ?? a.updatedAt) || b.startedAt - a.startedAt)
+    for (const [runId] of finished.slice(this.config.retainRuns)) {
+      if (this.closing) return
+      await this.runStore.delete(runId)
+    }
+  }
+
+  /** 按当前注册表验证定义并解析每个节点的执行器。 */
+  private resolveExecutors(definition: DagWorkflowDefinition): Map<NodeId, WorkflowNodeExecutor> {
+    this.validateDefinition(definition)
+    const executors = new Map<NodeId, WorkflowNodeExecutor>()
+    for (const node of definition.nodes) {
+      const executor = this.registry.get(node.type)
+      if (executor === undefined) throw new Error(`节点类型 ${node.type} 未注册`)
+      executors.set(node.id, executor)
+    }
+    return executors
   }
 
   // ---- 暂停/恢复 ----
 
-  private pauseRun(state: RunState): void {
-    if (state.status !== 'running') return
-    state.pauseRequested = true
+  private releasePauseWaiters(state: RunState): void {
+    for (const resolve of state.pauseResolvers) resolve()
+    state.pauseResolvers.clear()
   }
 
-  private resumeRun(state: RunState): void {
+  private waitForResume(state: RunState): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>()
+    state.pauseResolvers.add(resolve)
+    return promise.finally(() => {
+      state.pauseResolvers.delete(resolve)
+    })
+  }
+
+  private async checkPause(state: RunState): Promise<void> {
+    if (!state.pauseRequested || state.status !== 'running') return
+    const resumed = this.waitForResume(state)
+    state.status = 'paused'
+    this.emitEvent('dag/paused', this.runInfo(state))
+    await this.checkpoint(state)
+    await resumed
+  }
+
+  private async handleHumanInTheLoop(state: RunState, execState: NodeExecState, node: DagNodeDefinition): Promise<void> {
+    this.ctx.logger.info(`[workflow] 节点 ${node.label ?? node.type} 需要人工确认，暂停等待`)
+    const resumed = this.waitForResume(state)
+    state.status = 'paused'
+    execState.record.status = 'paused'
+    this.emitEvent('dag/paused', this.runInfo(state))
+    await this.checkpoint(state)
+    try {
+      await resumed
+    } finally {
+      if (!state.abortController.signal.aborted) execState.record.status = 'running'
+    }
+  }
+
+  // ---- 执行引擎 ----
+
+  /** 开始调度运行中未结束的节点，并在结束后写入最终状态。 */
+  private launch(state: RunState): void {
+    state.active = true
     state.pauseRequested = false
-    if (state.status !== 'paused') return
-    state.status = 'running'
-    this.emitEvent('dag/resumed', this.runInfo(state))
-    this.releasePauseWaiters(state)
+    state.abortController = new AbortController()
+    this.checkpoint(state)
+      .then(() => this.executeWorkflow(state))
+      .catch((error: unknown) => this.workflowResult(state, 'failed', messageOf(error)))
+      .then(result => this.finishRun(state, result))
+      .catch((error: unknown) => {
+        this.ctx.logger.warn(`dag: 运行 ${state.runId} 结束处理失败: ${messageOf(error)}`)
+      })
   }
 
-  private cancelRun(state: RunState, reason?: string): void {
-    if (state.status === 'completed' || state.status === 'cancelled' || state.status === 'failed') return
-    state.abortController.abort(reason ?? 'cancelled')
-    this.releasePauseWaiters(state)
-  }
-
-  private finishRun(state: RunState, result: WorkflowResult): void {
+  private async finishRun(state: RunState, result: WorkflowResult): Promise<void> {
+    state.active = false
     state.status = result.status
     state.completedAt = result.completedAt ?? Date.now()
     if (result.error !== undefined) state.error = result.error
@@ -417,33 +681,29 @@ export class DagEngineProvider extends DagEngine {
       status: result.status,
       ...(result.error === undefined ? {} : { error: result.error }),
     })
-    state.resultResolve(structuredClone(result))
+    try {
+      await this.checkpoint(state)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(`dag: 运行 ${state.runId} 最终状态写入失败: ${messageOf(error)}`)
+    }
+    try {
+      if (!this.closing) {
+        this.runs.delete(state.runId)
+        await this.enqueueMutation(() => this.pruneRuns())
+      }
+    } finally {
+      state.resultResolve(structuredClone(result))
+    }
   }
 
-  // ---- 执行引擎 ----
-
-  private async executeWorkflow(
-    state: RunState,
-    definition: DagWorkflowDefinition,
-  ): Promise<WorkflowResult> {
-    const levels = topologicalSort(definition)
+  private async executeWorkflow(state: RunState): Promise<WorkflowResult> {
+    const levels = topologicalSort(state.definition)
     const signal = state.abortController.signal
-
-    // 初始化节点状态
-    for (const node of definition.nodes) {
-      state.nodeStates.set(node.id, {
-        node,
-        record: {
-          nodeId: node.id,
-          status: 'pending',
-          startedAt: 0,
-          runId: state.runId,
-        },
-      })
-    }
 
     try {
       for (const level of levels) {
+        const pending = level.nodes.filter(node => this.nodeState(state, node.id).record.status === 'pending')
+        if (pending.length === 0) continue
         if (signal.aborted) {
           this.cancelRemaining(state, signal.reason)
           break
@@ -457,11 +717,8 @@ export class DagEngineProvider extends DagEngine {
         }
 
         // 同级并行
-        const tasks = level.nodes.map(node =>
-          this.executeNode(state, node, signal, definition),
-        )
-        await Promise.all(tasks)
-        const failed = level.nodes
+        await Promise.all(pending.map(node => this.executeNode(state, node, signal)))
+        const failed = pending
           .map(node => this.nodeState(state, node.id).record)
           .filter(record => record.status === 'failed')
         if (failed.length > 0) {
@@ -471,36 +728,52 @@ export class DagEngineProvider extends DagEngine {
         }
       }
 
-      // 处理暂停后恢复时的取消
-      if (signal.aborted) {
-        this.cancelRemaining(state, signal.reason)
-      }
-
-      const finalStatus: WorkflowRunStatus = signal.aborted ? 'cancelled' : 'completed'
+      if (signal.aborted) this.cancelRemaining(state, signal.reason)
       return this.workflowResult(
         state,
-        finalStatus,
+        signal.aborted ? 'cancelled' : 'completed',
         signal.aborted && signal.reason !== undefined ? String(signal.reason) : undefined,
       )
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = messageOf(error)
       this.cancelRemaining(state, message)
       return this.workflowResult(state, 'failed', message)
     }
   }
 
-  private async executeNode(
-    state: RunState,
-    node: DagNodeDefinition,
-    signal: AbortSignal,
-    definition: DagWorkflowDefinition,
-  ): Promise<void> {
+  /** 执行一个节点；开始和结束状态都在写入运行记录后才返回。 */
+  private async executeNode(state: RunState, node: DagNodeDefinition, signal: AbortSignal): Promise<void> {
     if (signal.aborted) return
     const execState = this.nodeState(state, node.id)
     const executor = this.executor(state, node.id)
+    const inputs = this.collectInputs(node, state)
+    const record = execState.record
+    record.attempts += 1
+    record.status = 'running'
+    record.startedAt = Date.now()
+    record.inputs = structuredClone(inputs)
+    const nodeInfo: NodeRunInfo = {
+      nodeId: node.id,
+      nodeType: node.type,
+      label: node.label ?? node.type,
+      status: 'running',
+    }
+    this.emitEvent('dag/node-start', this.runInfo(state), nodeInfo)
+    await this.checkpoint(state)
+    await this.runNode(state, node, executor, execState, nodeInfo, inputs, signal)
+    await this.checkpoint(state)
+  }
 
-    // 收集上游输入
-    const inputs = this.collectInputs(node, definition, state)
+  private async runNode(
+    state: RunState,
+    node: DagNodeDefinition,
+    executor: WorkflowNodeExecutor,
+    execState: NodeExecState,
+    nodeInfo: NodeRunInfo,
+    inputs: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const definition = state.definition
     const inputPorts = this.resolveInputPorts(node, executor)
     const businessInputPorts = inputPorts.filter(port => port.role === undefined)
     const suppliedInputs = businessInputPorts.filter(port => Object.hasOwn(inputs, port.name))
@@ -508,18 +781,7 @@ export class DagEngineProvider extends DagEngine {
     const connected = new Set(definition.edges
       .filter(edge => edge.target === node.id)
       .map(edge => edge.targetPort ?? 'input'))
-    const startedAt = Date.now()
-    execState.record.startedAt = startedAt
-    execState.record.inputs = structuredClone(inputs)
-
-    const nodeInfo: NodeRunInfo = {
-      nodeId: node.id,
-      nodeType: node.type,
-      label: node.label ?? node.type,
-      status: 'running',
-    }
-    execState.record.status = 'running'
-    this.emitEvent('dag/node-start', this.runInfo(state), nodeInfo)
+    const record = execState.record
 
     const context: NodeExecutionContext = {
       runId: state.runId,
@@ -527,6 +789,15 @@ export class DagEngineProvider extends DagEngine {
       inputs,
       connected,
       invocationKey: `${state.runId}/${node.id}`,
+      notepad: {
+        get value() {
+          return record.notepad === undefined ? undefined : structuredClone(record.notepad)
+        },
+        save: async (value) => {
+          record.notepad = toJsonValue(value, 'notepad')
+          await this.checkpoint(state)
+        },
+      },
       signal,
       log: (msg: string) => {
         this.ctx.logger.info(`[${state.definition.name}/${node.label ?? node.type}] ${msg}`)
@@ -537,7 +808,7 @@ export class DagEngineProvider extends DagEngine {
     try {
       preflight = executor.preflight?.(context)
     } catch (error: unknown) {
-      this.failNode(state, execState, nodeInfo, error instanceof Error ? error.message : String(error))
+      this.failNode(state, execState, nodeInfo, messageOf(error))
       return
     }
     if (preflight !== undefined) {
@@ -550,8 +821,8 @@ export class DagEngineProvider extends DagEngine {
       return
     }
     const missing = requiredInputPorts
-        .filter(port => !Object.hasOwn(inputs, port.name))
-        .map(port => port.name)
+      .filter(port => !Object.hasOwn(inputs, port.name))
+      .map(port => port.name)
     if (missing.length > 0) {
       const skippedDependency = definition.edges.some(edge =>
         edge.target === node.id
@@ -582,12 +853,11 @@ export class DagEngineProvider extends DagEngine {
         this.settleNode(state, node, executor, execState, nodeInfo, result)
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.failNode(state, execState, nodeInfo, message)
+      this.failNode(state, execState, nodeInfo, messageOf(error))
     }
   }
 
-  /** 按节点返回的结果结束节点；completed 结果的输出须为已声明端口。 */
+  /** 按节点返回的结果结束节点；completed 结果的输出须为已声明端口的 JSON 值。 */
   private settleNode(
     state: RunState,
     node: DagNodeDefinition,
@@ -597,13 +867,29 @@ export class DagEngineProvider extends DagEngine {
     result: NodeExecutionResult,
   ): void {
     switch (result.status) {
-      case 'completed':
-        this.validateOutputs(node, executor, result)
-        this.completeNode(state, execState, nodeInfo, 'completed', result.outputs)
+      case 'completed': {
+        let outputs: Record<string, unknown>
+        try {
+          this.validateOutputs(node, executor, result)
+          outputs = toJsonOutputs(result.outputs, `节点 ${node.id} 的输出`)
+        } catch (error: unknown) {
+          this.failNode(state, execState, nodeInfo, messageOf(error))
+          return
+        }
+        this.completeNode(state, execState, nodeInfo, 'completed', outputs)
         return
-      case 'failed':
-        this.failNode(state, execState, nodeInfo, result.error, result.outputs)
+      }
+      case 'failed': {
+        let outputs: Record<string, unknown> | undefined
+        try {
+          outputs = result.outputs === undefined ? undefined : toJsonOutputs(result.outputs, `节点 ${node.id} 的输出`)
+        } catch (error: unknown) {
+          this.failNode(state, execState, nodeInfo, `${result.error}（诊断输出已丢弃: ${messageOf(error)}）`)
+          return
+        }
+        this.failNode(state, execState, nodeInfo, result.error, outputs)
         return
+      }
       case 'skipped':
         this.completeNode(state, execState, nodeInfo, 'skipped', {})
         return
@@ -613,14 +899,9 @@ export class DagEngineProvider extends DagEngine {
   }
 
   /** 收集上游输出到当前节点的输入端口。 */
-  private collectInputs(
-    node: DagNodeDefinition,
-    definition: DagWorkflowDefinition,
-    state: RunState,
-  ): Record<string, unknown> {
-    const incomingEdges = definition.edges.filter(e => e.target === node.id)
+  private collectInputs(node: DagNodeDefinition, state: RunState): Record<string, unknown> {
+    const incomingEdges = state.definition.edges.filter(e => e.target === node.id)
     const inputs: Record<string, unknown> = {}
-
     for (const edge of incomingEdges) {
       const sourceState = this.nodeState(state, edge.source)
       const sourcePort = edge.sourcePort ?? 'output'
@@ -630,47 +911,7 @@ export class DagEngineProvider extends DagEngine {
         inputs[targetPort] = outputs[sourcePort]
       }
     }
-
     return inputs
-  }
-
-  private async checkPause(state: RunState): Promise<void> {
-    if (!state.pauseRequested || state.status !== 'running') return
-    const resumed = this.waitForResume(state)
-    state.status = 'paused'
-    this.emitEvent('dag/paused', this.runInfo(state))
-    await resumed
-  }
-
-  private async handleHumanInTheLoop(
-    state: RunState,
-    execState: NodeExecState,
-    node: DagNodeDefinition,
-  ): Promise<void> {
-    this.ctx.logger.info(`[workflow] 节点 ${node.label ?? node.type} 需要人工确认，暂停等待`)
-    const resumed = this.waitForResume(state)
-    state.status = 'paused'
-    execState.record.status = 'paused'
-    this.emitEvent('dag/paused', this.runInfo(state))
-
-    try {
-      await resumed
-    } finally {
-      if (!state.abortController.signal.aborted) execState.record.status = 'running'
-    }
-  }
-
-  private waitForResume(state: RunState): Promise<void> {
-    const { promise, resolve } = Promise.withResolvers<void>()
-    state.pauseResolvers.add(resolve)
-    return promise.finally(() => {
-      state.pauseResolvers.delete(resolve)
-    })
-  }
-
-  private releasePauseWaiters(state: RunState): void {
-    for (const resolve of state.pauseResolvers) resolve()
-    state.pauseResolvers.clear()
   }
 
   private cancelRemaining(state: RunState, reason: unknown): void {
@@ -736,13 +977,15 @@ export class DagEngineProvider extends DagEngine {
     this.emitEvent('dag/node-end', this.runInfo(state), { ...nodeInfo, status: 'failed' })
   }
 
-  private workflowResult(
-    state: RunState,
-    status: WorkflowRunStatus,
-    error?: string,
-  ): WorkflowResult {
+  private snapshot(state: RunState): WorkflowResult {
+    return resultOfRecord(this.toRecord(state))
+  }
+
+  private workflowResult(state: RunState, status: WorkflowRunStatus, error?: string): WorkflowResult {
     return {
       runId: state.runId,
+      workflowId: state.workflowId,
+      name: state.definition.name,
       status,
       nodeRecords: structuredClone([...state.nodeStates.values()].map(item => item.record)),
       startedAt: state.startedAt,
@@ -775,6 +1018,32 @@ function workflowSummary(
     id,
     name: definition.name,
     ...(definition.description === undefined ? {} : { description: definition.description }),
+  }
+}
+
+function resultOfRecord(record: WorkflowRunRecord): WorkflowResult {
+  return {
+    runId: record.runId,
+    workflowId: record.workflowId,
+    name: record.definition.name,
+    status: record.status,
+    nodeRecords: structuredClone(record.nodes),
+    startedAt: record.startedAt,
+    ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+    ...(record.error === undefined ? {} : { error: record.error }),
+  }
+}
+
+function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
+  return {
+    runId: record.runId,
+    workflowId: record.workflowId,
+    name: record.definition.name,
+    status: record.status,
+    startedAt: record.startedAt,
+    updatedAt: record.updatedAt,
+    ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+    ...(record.error === undefined ? {} : { error: record.error }),
   }
 }
 

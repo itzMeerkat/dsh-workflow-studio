@@ -48,6 +48,7 @@ export interface EditorNode {
   readonly label?: string
   readonly config: Record<string, unknown>
   readonly requiresHumanInput?: boolean
+  readonly recovery?: 'rerun' | 'hold'
   readonly inputs?: readonly EditorPort[]
   readonly outputs?: readonly EditorPort[]
   readonly position?: { readonly x: number; readonly y: number }

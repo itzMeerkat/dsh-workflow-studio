@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 摘要
 
-`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、供节点作者使用的 `WorkflowNode` 基类、单独挂载的演示节点插件、两个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。运行、重试和审批集成仍局限于进程内或尚未实现。
+`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、供节点作者使用的 `WorkflowNode` 基类、单独挂载的演示节点插件、两个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。每次运行都会写入独立记录的检查点，并在 Host 重启后继续；审批集成尚未实现。
 
 ## 目录
 
@@ -78,14 +78,26 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio` 插件和 `dsh-workflow-studio/demo` 插件插入 Harness profile。核心插件不注册任何节点；演示插件注册示例节点 `input`、`arithmetic`、`if`、`coalesce` 和 `output`，禁用其 `workflow-studio-demo` 行后只保留其他插件提供的节点。核心插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
 
-模型可以使用两个工具：
+模型可以使用三个工具：
 
 | 工具 | 用途 |
 |---|---|
 | `create_workflow` | 校验并持久化保存一个具名工作流定义 |
-| `run_workflow` | 按准确名称启动已保存的工作流 |
+| `run_workflow` | 按准确名称启动已保存的工作流并返回运行 ID |
+| `get_workflow_run` | 报告运行状态以及每个节点的状态和调用次数 |
 
 `create_workflow` 要求显式提供节点和边 ID。每个节点类型必须已经注册，每个引用端口必须存在，每个必填输入端口必须恰好有一条入边，可选输入可以不连接。连接的端口必须类型相同，除非其中一端使用 `any`。无效定义在进入引擎前就会失败。
+
+每次运行都作为独立记录保存在 `workflow_studio_runs` storage domain 中，并附带运行启动时的定义快照；之后对工作流的修改不影响该运行。引擎在调用节点前写入节点的运行中状态，并且只在节点的结束状态写入后才视其完成。Host 停止时，未结束的运行保留最后保存的状态。下次启动且所有插件加载完成后，引擎会再次调用之前处于运行中的每个节点，从而提供至少一次调用语义，已完成的节点不会再次调用。已暂停的运行保持暂停。节点输出和 notepad 值必须是 JSON 值：值为 `undefined` 的输出端口视为未产生值，其他非 JSON 值会使节点失败。
+
+| 配置字段 | 默认值 | 含义 |
+|---|---|---|
+| `autoRestart` | `true` | Host 启动时自动重新执行被中断的运行 |
+| `retainRuns` | `100` | 保留的已结束运行数量；运行结束时删除更早的记录 |
+
+当 `autoRestart` 为 `false`、被中断节点的恢复策略为 `hold`，或其某个节点类型未注册时，重启后恢复的运行会进入 `interrupted`，而不是重新执行。执行器声明 `recovery: 'rerun' | 'hold'`（默认 `rerun`），工作流定义中的节点可以用自身的 `recovery` 覆盖它。interrupted 运行在调用 `resumeRun()` 或 `resume` Remote 后继续，并再次调用未完成的节点。
+
+不应重复已完成工作的节点可以使用 `context.invocationKey`（同一运行中该节点每次调用都相同）和 `context.notepad`。`await context.notepad.save(value)` 会把 JSON 值保存到运行记录中，重启后再次被调用的节点可从 `context.notepad.value` 读取它。
 
 ```json
 {
@@ -122,9 +134,9 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 `WorkflowNodeRegistry` 管理节点类型注册。`DagEngineProvider` 将已校验定义存入 `workflow_studio` domain，使用 Kahn 算法计算拓扑层，并并行执行每一层。该 domain 使用 `per-record` 布局，因此 JSON 后端会将每个 ID 写入 `<storage-root>/workflow_studio/workflows/<id>.json`。名称查找和写入共用一个引擎变更队列，因此并发保存同名工作流时会复用同一个 ID。节点失败后，引擎等待当前层结束，再将工作流标记为失败，并取消尚未启动的下游节点。
 
-当上游输出对象自身包含选定 key 时，该输入端口存在，即使其值为 `undefined`。`preflight()` 返回的结果会在引擎检查输入之前结束节点；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
+当上游输出对象包含选定 key 时，该输入端口存在。`preflight()` 返回的结果会在引擎检查输入之前结束节点；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
 
-`pause()` 在拓扑层之间生效。标记 `requiresHumanInput` 的节点会在执行前暂停。一次 `resume()` 调用会释放同一并行层中等待的全部节点。`cancel()` 会中止运行并释放全部暂停等待者。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。
+`pause()` 在拓扑层之间生效。标记 `requiresHumanInput` 的节点会在执行前暂停。一次 `resume()` 调用会释放同一并行层中等待的全部节点。`cancel()` 会中止运行并释放全部暂停等待者。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume` 和 `cancel`；`run` 启动运行并等待其结束。
 
 `get()` 返回的定义、`getRun()` 返回的运行记录和最终结果都是独立快照。调用方修改这些值不会改变引擎内部状态。
 
@@ -137,8 +149,10 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/engine-provider.ts`](src/engine-provider.ts) | 校验、调度、暂停、恢复和取消 |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类、`NodeFailure` 和 condition 门控 |
 | [`src/demo/`](src/demo/) | 演示节点 `input`、`arithmetic`、`if`、`coalesce`、`output` 及其插件入口 |
+| [`src/run-persistence.ts`](src/run-persistence.ts) | 运行记录 schema 和 storage-domain 声明 |
+| [`src/json.ts`](src/json.ts) | 节点输出和 notepad 值的 JSON 检查 |
 | [`src/tools.ts`](src/tools.ts) | 模型工具注册和 JSON 输入解析 |
-| [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行所用的 Host Remote |
+| [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行控制所用的 Host Remote |
 | [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序视图、保存和运行操作 |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | 只读执行依赖图和运行状态 |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布、自定义节点、连线、底部详情面板和运行状态 |
@@ -165,22 +179,22 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 ### 工具界面
 
-模型会看到 `create_workflow` 和 `run_workflow` 的 schema 及其渲染结果。本包不添加系统提示词或运行时 Skill。
+模型会看到 `create_workflow`、`run_workflow` 和 `get_workflow_run` 的 schema 及其渲染结果。本包不添加系统提示词或运行时 Skill。
 
 ### Token 与缓存影响
 
-两个工具 schema 会增加每个暴露全局工具集的请求。已保存定义属于 Host 侧持久化数据，运行状态仍保存在 Host 内存中；除非工具结果报告，否则两者都不会进入模型上下文。
+三个工具 schema 会增加每个暴露全局工具集的请求。已保存定义和运行记录属于 Host 侧持久化数据；除非工具结果报告，否则两者都不会进入模型上下文。
 
 ## 已知限制与延期工作
 
 <a id="known-limitations-and-deferred-work"></a>
 
 - 定义会在 Host 重启后恢复，但 JSON 后端不提供跨进程写锁。
-- 运行不会写入 Session 事件，进程失败后无法恢复。
-- 不提供重试调度或 at-least-once 执行保证。
+- 运行不会写入 Session 事件，`run_workflow` 启动的运行也不会关联到调用它的 Session。
+- 节点只在 Host 重启后被再次调用；运行中的 Host 不会重试失败的节点。
 - `start()` 不接受工作流级输入值。
 - `PortDefinition.type` 用于控制边的兼容性，但引擎不执行通用运行时值类型校验。
-- HITL 只能通过 `DagRun` handle 控制，尚未连接 Harness 审批服务或浏览器 UI；因此从编辑器运行 HITL 工作流会等待外部恢复。
+- HITL 只能通过 `DagRun` handle 控制，尚未连接 Harness 审批服务或浏览器 UI；因此从编辑器运行 HITL 工作流会等待外部恢复。Host 停止时正在等待确认的 HITL 节点会在运行恢复后再次请求确认。
 - 执行器运行期间能否取消，取决于执行器是否观察 `context.signal`。
 - 可视化编辑器尚未提供撤销/重做、复制/粘贴、分组、自动布局或多节点批量配置。
 

@@ -43,6 +43,7 @@ export const workflowNodeSchema = z.object({
   label: nonEmptyString.optional(),
   config: z.record(z.string(), z.json()).default({}),
   requiresHumanInput: z.boolean().optional(),
+  recovery: z.enum(['rerun', 'hold']).optional(),
   position: z.object({
     x: z.number().finite(),
     y: z.number().finite(),
@@ -55,6 +56,7 @@ export const workflowNodeSchema = z.object({
   config: raw.config,
   ...(raw.label === undefined ? {} : { label: raw.label }),
   ...(raw.requiresHumanInput === undefined ? {} : { requiresHumanInput: raw.requiresHumanInput }),
+  ...(raw.recovery === undefined ? {} : { recovery: raw.recovery }),
   ...(raw.position === undefined ? {} : { position: raw.position }),
   ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
   ...(raw.inputs === undefined ? {} : { inputs: raw.inputs }),

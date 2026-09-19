@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, a separately mounted demo node plugin, two model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Runs, retries, and approval integration remain process-local or unimplemented.
+`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, a separately mounted demo node plugin, two model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Each run is checkpointed to its own record and continues after a Host restart; approval integration remains unimplemented.
 
 ## Table of Contents
 
@@ -78,14 +78,26 @@ The profile loads the checkout's `lib/` directly. After editing the source, run 
 
 The package's [`cordis.patch.yml`](cordis.patch.yml) inserts the `dsh-workflow-studio` plugin and the `dsh-workflow-studio/demo` plugin into a Harness profile. The core plugin registers no nodes; the demo plugin registers the example `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes, and disabling its `workflow-studio-demo` row leaves only nodes from other plugins. The core plugin requires `ctx.tools` and `ctx.storageDomain`, then provides `ctx.workflowNodeRegistry` and `ctx.dagEngine`. The base bundle supplies the JSON backend and routes domains to it.
 
-The model receives two tools:
+The model receives three tools:
 
 | Tool | Purpose |
 |---|---|
 | `create_workflow` | Validate and durably save one named workflow definition |
-| `run_workflow` | Start a saved workflow by exact name |
+| `run_workflow` | Start a saved workflow by exact name and return its run ID |
+| `get_workflow_run` | Report a run's status and each node's status and call count |
 
 `create_workflow` requires explicit node and edge IDs. Every node type must already be registered, each referenced port must exist, and every required input port must have exactly one incoming edge. Optional inputs may remain disconnected. Connected ports must have equal types unless either side uses `any`. Invalid definitions fail before they enter the engine.
+
+Every run is saved as its own record in the `workflow_studio_runs` storage domain, together with a snapshot of the definition taken when the run started; later edits to the workflow do not affect it. The engine writes a node's running state before calling it and counts the node as finished only after its final state is written. When the Host stops, unfinished runs keep their last saved state. On the next start, after all plugins have loaded, the engine calls every node that was running again, which gives at-least-once invocation, and never calls finished nodes again. A paused run stays paused. Node outputs and notepad values must be JSON values: an output port whose value is `undefined` counts as not produced, and any other non-JSON value fails the node.
+
+| Config field | Default | Meaning |
+|---|---|---|
+| `autoRestart` | `true` | Restart interrupted runs automatically on Host start |
+| `retainRuns` | `100` | Number of finished runs kept; older records are deleted when a run ends |
+
+A run restored after a restart becomes `interrupted` instead of restarting when `autoRestart` is `false`, when an interrupted node's recovery policy is `hold`, or when one of its node types is not registered. An executor declares `recovery: 'rerun' | 'hold'` (default `rerun`), and a node in a workflow definition may override it with its own `recovery`. An interrupted run continues after `resumeRun()` or the `resume` Remote, which call the unfinished nodes again.
+
+A node that should not repeat completed work uses `context.invocationKey`, which stays the same for every call of that node in one run, and `context.notepad`. `await context.notepad.save(value)` stores a JSON value in the run record, and a node called again after a restart reads it from `context.notepad.value`.
 
 ```json
 {
@@ -122,9 +134,9 @@ The sidebar's **Workflow Studio** panel opens the editor. The toolbar provides a
 
 `WorkflowNodeRegistry` owns node-type registration. `DagEngineProvider` stores validated definitions in the `workflow_studio` domain, computes Kahn topological levels, and executes each level in parallel. The domain uses `per-record` layout, so the JSON backend writes each ID to `<storage-root>/workflow_studio/workflows/<id>.json`. Name lookup and writes share one engine mutation queue, so concurrent same-name saves reuse one ID. A failed node makes the workflow fail after its current level settles, and pending downstream nodes become cancelled.
 
-An input port is present when the upstream output object owns the selected key, even when its value is `undefined`. A `preflight()` result settles the node before the engine checks inputs. A missing required input from a skipped dependency also propagates `skipped`; other partial required inputs fail. Missing optional inputs do not block execution.
+An input port is present when the upstream output object has the selected key. A `preflight()` result settles the node before the engine checks inputs. A missing required input from a skipped dependency also propagates `skipped`; other partial required inputs fail. Missing optional inputs do not block execution.
 
-`pause()` takes effect between levels. A node marked `requiresHumanInput` pauses before its executor runs. One `resume()` call releases every node waiting in the same parallel level. `cancel()` aborts the run and releases all pause waiters. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work.
+`pause()` takes effect between levels. A node marked `requiresHumanInput` pauses before its executor runs. One `resume()` call releases every node waiting in the same parallel level. `cancel()` aborts the run and releases all pause waiters. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work. The `workflowStudio` Remote exposes `start`, `listRuns`, `getRun`, `pause`, `resume`, and `cancel` by run ID; `run` starts a run and waits for it to settle.
 
 Definitions returned by `get()`, run records returned by `getRun()`, and final results are independent snapshots. Caller mutation cannot alter saved definitions or internal run state.
 
@@ -137,8 +149,10 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/engine-provider.ts`](src/engine-provider.ts) | Validation, scheduling, pause, resume, and cancellation |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` base class, `NodeFailure`, and the condition gate |
 | [`src/demo/`](src/demo/) | Demo `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes and their plugin entry |
+| [`src/run-persistence.ts`](src/run-persistence.ts) | Run record schema and storage-domain declaration |
+| [`src/json.ts`](src/json.ts) | JSON checks for node outputs and notepad values |
 | [`src/tools.ts`](src/tools.ts) | Model tool registration and JSON input parsing |
-| [`src/controller.ts`](src/controller.ts) | Host Remote for browser snapshots, saves, and runs |
+| [`src/controller.ts`](src/controller.ts) | Host Remote for browser snapshots, saves, and run control |
 | [`src/client/index.tsx`](src/client/index.tsx) | Localized workflow picker, canvas/execution views, save, and run actions |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | Read-only execution dependency graph and run status |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow canvas, custom nodes, connections, bottom details panel, and run state |
@@ -165,22 +179,22 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 
 ### Tool surface
 
-The model sees the `create_workflow` and `run_workflow` schemas and their rendered results. This package adds no system-prompt text and no runtime Skill.
+The model sees the `create_workflow`, `run_workflow`, and `get_workflow_run` schemas and their rendered results. This package adds no system-prompt text and no runtime Skill.
 
 ### Token and cache effect
 
-The two tool schemas increase every request that exposes the global tool set. Saved definitions remain Host-side durable data and run state remains Host memory; neither enters model context unless a tool result reports it.
+The three tool schemas increase every request that exposes the global tool set. Saved definitions and run records remain Host-side durable data; neither enters model context unless a tool result reports it.
 
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
 
 - Definitions persist across Host restarts, but the JSON backend provides no cross-process write locking.
-- Runs are not written to Session events and cannot resume after process failure.
-- There is no retry scheduler or at-least-once execution guarantee.
+- Runs are not written to Session events, and a run started by `run_workflow` is not linked to the calling Session.
+- Nodes are called again only after a Host restart; a failed node is not retried within a running Host.
 - `start()` accepts no workflow-level input values.
 - `PortDefinition.type` controls edge compatibility, but the engine does not perform general runtime value-type validation.
-- HITL is controlled only through the `DagRun` handle and is not connected to the Harness approval service or browser UI; running a HITL workflow from the editor therefore waits for an external resume.
+- HITL is controlled only through the `DagRun` handle and is not connected to the Harness approval service or browser UI; running a HITL workflow from the editor therefore waits for an external resume. A HITL node waiting for confirmation when the Host stops asks again after the run resumes.
 - Cancellation during executor work depends on the executor observing `context.signal`.
 - The visual editor does not yet provide undo/redo, copy/paste, groups, automatic layout, or multi-node configuration editing.
 
