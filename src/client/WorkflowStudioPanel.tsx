@@ -7,7 +7,7 @@ import {
   IconPlayOutline16,
   IconRefreshOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsLocale, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import type { DagWorkflowDefinition, NodeTypeSummary, WorkflowStudioSnapshot } from '../shared/types.ts'
@@ -38,12 +38,12 @@ const VIEWS = [
 ] as const satisfies readonly { view: View; Icon: unknown }[]
 
 /** Props the `main` slot passes to the panel. */
-export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
+export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS>, PropsRenderSlots<'workflowStudio.request'> {
   remote: WorkflowStudioRemoteNamespace
 }
 
 /** Main workflow authoring surface. */
-export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
+export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPanelProps) {
   const [snapshot, setSnapshot] = useState<WorkflowStudioSnapshot>({ workflows: [], nodeTypes: [] })
   const [selectedId, setSelectedId] = useState<string>()
   const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1'))
@@ -244,6 +244,7 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
               onSelect={runs.select}
               onAction={runs.act}
               onSignal={runs.signal}
+              renderSlot={renderSlot}
             />
           )}
           {view === 'canvas' && (

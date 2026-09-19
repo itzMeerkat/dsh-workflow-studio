@@ -3,21 +3,18 @@
  */
 
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
-import { useState } from 'react'
+import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
 import type { JsonValue, NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
-import { requestQuestions } from '../shared/questions.ts'
+import { RawRequest } from './QuestionsRequestForm.tsx'
 import {
-  buildAnswer,
   groupRuns,
-  isAnswerComplete,
   pendingRequests,
+  requestKind,
   runActions,
   runRecordsByNode,
-  type AnswerDraft,
-  type PendingRequest,
 } from './runs-model.ts'
+import type {} from './slot-contract.ts'
 import css from './WorkflowStudioPanel.module.css'
 import type { Translate, WorkflowStudioKey } from './locale.ts'
 
@@ -40,6 +37,8 @@ interface RunsViewProps {
   readonly onSelect: (runId: string) => void
   readonly onAction: (action: RunAction) => void
   readonly onSignal: (nodeId: string, requestId: string, result: JsonValue) => void
+  /** Renders a waiting request through the component registered for its kind. */
+  readonly renderSlot: PropsRenderSlots<'workflowStudio.request'>['renderSlot']
 }
 
 /** List runs beside the selected run's details. */
@@ -106,7 +105,7 @@ function RunGroup({ title, rows, selectedRunId, showName, t, onSelect }: {
   )
 }
 
-function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal }: RunsViewProps & { readonly record: WorkflowRunRecord }) {
+function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal, renderSlot }: RunsViewProps & { readonly record: WorkflowRunRecord }) {
   const actions = runActions(record.status)
   const pending = pendingRequests(record)
   const labels = new Map(record.definition.nodes.map(node => [node.id, node.label ?? node.id]))
@@ -132,15 +131,19 @@ function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal }: RunsViewP
         </div>
       </header>
 
-      {pending.map(item => (
-        <PendingRequestCard
-          key={`${item.nodeId}/${item.request.id}`}
-          item={item}
-          busy={busy}
-          t={t}
-          onSubmit={(result) => { onSignal(item.nodeId, item.request.id, result) }}
-        />
-      ))}
+      {pending.map(item => renderSlot('workflowStudio.request', {
+        runId: record.runId,
+        nodeId: item.nodeId,
+        nodeLabel: item.nodeLabel,
+        nodeType: item.nodeType,
+        requestId: item.request.id,
+        request: item.request.request,
+        busy,
+        submit: (result: JsonValue) => { onSignal(item.nodeId, item.request.id, result) },
+      }, {
+        entryKey: requestKind(item.request.request),
+        fallback: <RawRequest request={item.request.request} nodeLabel={item.nodeLabel} t={t} />,
+      }))}
 
       <div className={css.runGraph}>
         <ExecutionOrderView definition={record.definition} nodeTypes={nodeTypes} runRecords={runRecordsByNode(record)} t={t} />
@@ -172,87 +175,6 @@ function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal }: RunsViewP
         </tbody>
       </table>
     </>
-  )
-}
-
-/** Render one pending request: the built-in form for `questions`, otherwise the raw payload. */
-function PendingRequestCard({ item, busy, t, onSubmit }: {
-  readonly item: PendingRequest
-  readonly busy: boolean
-  readonly t: Translate
-  readonly onSubmit: (result: JsonValue) => void
-}) {
-  const questions = requestQuestions(item.request.request)
-  if (questions === undefined) {
-    return (
-      <div className={css.questionCard}>
-        <p className={css.questionSource}>{t('requests.title')} · {t('questions.from')} {item.nodeLabel}</p>
-        <strong>{t('requests.payload')}</strong>
-        <pre>{JSON.stringify(item.request.request, null, 2)}</pre>
-      </div>
-    )
-  }
-  return <QuestionForm item={item} questions={questions} busy={busy} t={t} onSubmit={onSubmit} />
-}
-
-function QuestionForm({ item, questions, busy, t, onSubmit }: {
-  readonly item: PendingRequest
-  readonly questions: readonly AskUserQuestionItem[]
-  readonly busy: boolean
-  readonly t: Translate
-  readonly onSubmit: (result: JsonValue) => void
-}) {
-  const [draft, setDraft] = useState<AnswerDraft>({ selected: {}, custom: {} })
-  const toggle = (question: AskUserQuestionItem, label: string): void => {
-    const current = draft.selected[question.id] ?? []
-    const next = question.multiSelect === true
-      ? (current.includes(label) ? current.filter(value => value !== label) : [...current, label])
-      : [label]
-    setDraft({ ...draft, selected: { ...draft.selected, [question.id]: next } })
-  }
-  return (
-    <form
-      className={css.questionCard}
-      onSubmit={(event) => {
-        event.preventDefault()
-        // 答案是 JSON 对象；声明类型没有索引签名，断言只让它满足 JsonValue。
-        onSubmit(buildAnswer(questions, draft) as unknown as JsonValue)
-      }}
-    >
-      <p className={css.questionSource}>{t('questions.title')} · {t('questions.from')} {item.nodeLabel}</p>
-      {questions.map(question => (
-        <fieldset key={question.id}>
-          {question.header !== undefined && <legend>{question.header}</legend>}
-          <strong>{question.question}</strong>
-          {question.detail !== undefined && <pre>{question.detail}</pre>}
-          <div className={css.questionOptions}>
-            {(question.options ?? []).map(option => (
-              <label key={option.label}>
-                <input
-                  type={question.multiSelect === true ? 'checkbox' : 'radio'}
-                  name={`${item.nodeId}/${item.request.id}/${question.id}`}
-                  checked={(draft.selected[question.id] ?? []).includes(option.label)}
-                  onChange={() => { toggle(question, option.label) }}
-                />
-                <span>{option.label}</span>
-                {option.description !== undefined && <small>{option.description}</small>}
-              </label>
-            ))}
-          </div>
-          <input
-            className={css.questionCustom}
-            placeholder={t('questions.other')}
-            value={draft.custom[question.id] ?? ''}
-            onChange={(event) => {
-              setDraft({ ...draft, custom: { ...draft.custom, [question.id]: event.currentTarget.value } })
-            }}
-          />
-        </fieldset>
-      ))}
-      <Button size="sm" variant="primary" type="submit" disabled={busy || !isAnswerComplete(questions, draft)}>
-        {t('questions.submit')}
-      </Button>
-    </form>
   )
 }
 

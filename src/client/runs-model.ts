@@ -8,7 +8,7 @@ import type {
 } from '@deepseek-ai/dsh-user-questions/types'
 import { z } from 'zod'
 import type {
-  NodeRunRecord, NodeSignalRequest, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
+  JsonValue, NodeRunRecord, NodeSignalRequest, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from '../shared/types.ts'
 import { workflowRunRecordSchema, workflowRunSummarySchema } from '../shared/workflow-schema.ts'
 
@@ -86,6 +86,17 @@ export function pendingRequests(record: WorkflowRunRecord): PendingRequest[] {
       nodeType: nodes.get(node.nodeId)?.type ?? '',
       request,
     })))
+}
+
+/**
+ * The `kind` a request payload declares, which picks the component that renders it.
+ * @param request - The payload the node passed to `awaitSignal`.
+ * @returns The kind, or an empty string when the payload declares none.
+ */
+export function requestKind(request: JsonValue): string {
+  if (typeof request !== 'object' || request === null || Array.isArray(request)) return ''
+  const kind = request.kind
+  return typeof kind === 'string' ? kind : ''
 }
 
 /** Selected option labels and custom text for each question of one request. */

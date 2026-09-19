@@ -10,6 +10,8 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { NS, dictionaries } from './locale.ts'
+import { QuestionsRequestForm } from './QuestionsRequestForm.tsx'
+import { QUESTIONS_KIND } from '../shared/questions.ts'
 import workflowStudioRemote, { type WorkflowStudioRemoteNamespace } from './remote.ts'
 import { WorkflowStudioPanel } from './WorkflowStudioPanel.tsx'
 
@@ -38,7 +40,14 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       if (remote === undefined) throw new Error('workflowStudio Remote is not mounted')
       return { remote }
     },
+    children: {
+      'workflowStudio.request': { kind: 'keyed', scope: 'root' },
+    },
   }, WorkflowStudioPanel))
+  ctx.slots.inject('workflowStudio.request', () => ctx.slots.register(
+    { name: 'workflowStudio.request', key: QUESTIONS_KIND, locale: NS },
+    QuestionsRequestForm,
+  ))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist',
     id: PANEL_ID,
