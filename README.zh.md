@@ -1,0 +1,194 @@
+---
+description: "用于定义、持久化存储、校验和运行 DAG 工作流的 DeepSeek Harness 本地 bundle。"
+kind: "package-bundle"
+---
+
+# dsh-workflow-studio
+
+[English](README.md) | 中文
+
+## 摘要
+
+`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、五个基础节点、两个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。运行、重试和审批集成仍局限于进程内或尚未实现。
+
+## 目录
+
+- [安装](#install)
+- [使用此包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [延伸阅读](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与延期工作](#known-limitations-and-deferred-work)
+- [开发说明](#dev-note)
+
+-----
+
+<a id="install"></a>
+## 安装
+
+Workflow Studio 会添加一个 Web 面板，因此需要安装到包含 `@deepseek-ai/dsh-web-app` bundle 的 profile。`dsh plugin` 创建不存在的 profile 时只包含 `@deepseek-ai/dsh-base`，没有 Web UI；请先从 `web` 模板创建 profile。`--dump-config` 只创建 profile，不启动它：
+
+```sh
+dsh --profile <name> --from-default-profile web --dump-config
+```
+
+### 从 GitHub 安装
+
+git 安装只获取源码。包的 `prepare` 脚本会运行 `pnpm build` 生成 `lib/`，profile 允许之前，pnpm 会拒绝运行该脚本。
+
+1. 运行安装命令并固定一个 commit：
+
+   ```sh
+   dsh plugin --profile <name> add github:itzMeerkat/dsh-workflow-studio#<commit>
+   ```
+
+2. 第一次运行会以 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 失败。把错误信息中完整的 `allowBuilds` 键复制到 `$DSH_HOME/profiles/<name>/pnpm-workspace.yaml`（`$DSH_HOME` 默认为 `~/.dsh`）。该键包含包名、仓库 URL 和 commit；只写包名不会生效：
+
+   ```yaml
+   allowBuilds:
+     "dsh-workflow-studio@git+https://github.com/itzMeerkat/dsh-workflow-studio.git#<commit>": true
+   ```
+
+3. 重新运行第 1 步的命令。然后确认组合后的配置包含 `# == dsh-workflow-studio` 层，再启动 profile：
+
+   ```sh
+   dsh --profile <name> --dump-config
+   dsh --profile <name>
+   ```
+
+该许可允许此包的构建以你的用户权限在你的机器上、在 agent 沙箱之外运行。只允许你信任其源码的 commit。
+
+更新时，用新的 commit 重复第 1–3 步；每个 commit 都需要单独的 `allowBuilds` 键。卸载时运行 `dsh plugin --profile <name> remove dsh-workflow-studio`，它会同时移除依赖和对应的 bundle 层。
+
+### 从本地 checkout 安装
+
+在 checkout 中运行 `pnpm install` 会执行 `prepare` 并构建 `lib/`。然后把 checkout 链接到 profile；链接的 checkout 不需要 `allowBuilds` 条目：
+
+```sh
+pnpm install
+dsh plugin --profile <name> add /path/to/dsh-workflow-studio
+```
+
+profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build` 并重启 profile。
+
+-----
+
+<a id="use-this-package"></a>
+## 使用此包
+
+包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio` 插件插入 Harness profile。插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
+
+模型可以使用两个工具：
+
+| 工具 | 用途 |
+|---|---|
+| `create_workflow` | 校验并持久化保存一个具名工作流定义 |
+| `run_workflow` | 按准确名称启动已保存的工作流 |
+
+`create_workflow` 要求显式提供节点和边 ID。每个节点类型必须已经注册，每个引用端口必须存在，每个必填输入端口必须恰好有一条入边，可选输入可以不连接。连接的端口必须类型相同，除非其中一端使用 `any`。无效定义在进入引擎前就会失败。
+
+```json
+{
+  "name": "sum",
+  "nodes": [
+    { "id": "left", "type": "input", "config": { "defaultValue": 10 } },
+    { "id": "right", "type": "input", "config": { "defaultValue": 20 } },
+    { "id": "add", "type": "arithmetic", "config": { "operator": "add" } },
+    { "id": "result", "type": "output", "config": {} }
+  ],
+  "edges": [
+    { "id": "left-add", "source": "left", "target": "add", "targetPort": "left" },
+    { "id": "right-add", "source": "right", "target": "add", "targetPort": "right" },
+    { "id": "add-result", "source": "add", "sourcePort": "result", "target": "result" }
+  ]
+}
+```
+
+第三方 Cordis 插件通过 `ctx.workflowNodeRegistry.register(executor, sourcePlugin)` 注册 `WorkflowNodeExecutor`。必填的来源插件名会随每种节点类型显示在浏览器目录中，返回的 disposer 只移除该次注册。执行器声明连接端口、各输入是否必填、写入 `config` 的可选卡片控件，以及需要在卡片上渲染的输出。执行器返回 `{ status: 'completed', outputs }` 或 `{ status: 'failed', error, outputs? }`。
+
+引擎为每个普通节点添加可选的布尔 `condition` 输入。未连接的 condition 不影响执行；已连接的 condition 必须产生 `true`，否则引擎跳过该节点且不调用执行器。内置 `if` 节点针对两个类型为 `any` 的必填输入 `left` 和 `right` 计算用户配置的 JEXL 表达式，然后产生互斥的 `true` 和 `false` condition 信号。表达式支持 JavaScript 风格的比较、算术、属性访问、`&&`、`||`、`!` 和三元运算，包括 `===` 与 `!==`。求值器不暴露 Host 全局对象或函数，拒绝语句和赋值，并要求结果为布尔值。
+
+内置 `coalesce` 节点用于合并互斥的数据分支。每个 coalesce 实例声明至少两个同类型可选输入和一个相同类型的输出。运行时必须恰好有一个已连接输入包含非 `null` 值；零个或多个非 `null` 值都会使节点失败。实例可以通过 `inputs` 增加候选端口，但必须保持这些类型规则。
+
+侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按照调度器拓扑阶段排列的节点图替代原始 JSON 视图。它对数据和 condition 依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。保留的 condition 边会从分支节点上标有 `true` 或 `false` 等名称的输出发出；同一阶段的节点并发运行。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
+
+-----
+
+<a id="understand-the-implementation"></a>
+## 理解实现
+
+<details>
+<summary>实现细节</summary>
+
+`WorkflowNodeRegistry` 管理节点类型注册。`DagEngineProvider` 将已校验定义存入 `workflow_studio` domain，使用 Kahn 算法计算拓扑层，并并行执行每一层。该 domain 使用 `per-record` 布局，因此 JSON 后端会将每个 ID 写入 `<storage-root>/workflow_studio/workflows/<id>.json`。名称查找和写入共用一个引擎变更队列，因此并发保存同名工作流时会复用同一个 ID。节点失败后，引擎等待当前层结束，再将工作流标记为失败，并取消尚未启动的下游节点。
+
+当上游输出对象自身包含选定 key 时，该输入端口存在，即使其值为 `undefined`。已连接 condition 为 false 或未产出时，目标节点会被跳过；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
+
+`pause()` 在拓扑层之间生效。标记 `requiresHumanInput` 的节点会在执行前暂停。一次 `resume()` 调用会释放同一并行层中等待的全部节点。`cancel()` 会中止运行并释放全部暂停等待者。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。
+
+`get()` 返回的定义、`getRun()` 返回的运行记录和最终结果都是独立快照。调用方修改这些值不会改变引擎内部状态。
+
+| 文件 | 职责 |
+|---|---|
+| [`src/registry.ts`](src/registry.ts) | 节点执行器注册表 |
+| [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` 服务 API 和事件 |
+| [`src/workflow-schema.ts`](src/workflow-schema.ts) | Host 与浏览器共享的工作流 JSON schema |
+| [`src/persistence.ts`](src/persistence.ts) | per-record storage-domain 声明 |
+| [`src/engine-provider.ts`](src/engine-provider.ts) | 校验、调度、暂停、恢复和取消 |
+| [`src/basic-nodes.ts`](src/basic-nodes.ts) | `input`、`arithmetic`、`if`、`coalesce` 和 `output` 执行器 |
+| [`src/tools.ts`](src/tools.ts) | 模型工具注册和 JSON 输入解析 |
+| [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行所用的 Host Remote |
+| [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序视图、保存和运行操作 |
+| [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | 只读执行依赖图和运行状态 |
+| [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布、自定义节点、连线、底部详情面板和运行状态 |
+| [`src/client/model.ts`](src/client/model.ts) | 浏览器侧 JSON 解析和编辑器 DTO |
+
+</details>
+
+-----
+
+<a id="further-exploration"></a>
+## 延伸阅读
+
+- [`AGENTS.md`](AGENTS.md) 描述当前扩展和维护规则。
+- [`dsh-workflow-studio-operations`](.agents/skills/dsh-workflow-studio-operations/SKILL.md) 指导工作流的创建、修改、执行和诊断。
+- [`dsh-workflow-studio-custom-nodes`](.agents/skills/dsh-workflow-studio-custom-nodes/SKILL.md) 指导自定义节点的实现和注册。
+- [`docs/architecture.zh.md`](../docs/architecture.zh.md) 描述 Harness 插件组合和应用启动方式。
+- [`docs/subsystems/storage.zh.md`](../docs/subsystems/storage.zh.md) 描述持久化 domain 和后端路由。
+- [`docs/cookbook/adding-a-tool.zh.md`](../docs/cookbook/adding-a-tool.zh.md) 描述模型工具注册与呈现。
+
+-----
+
+<a id="model-experience"></a>
+## 模型体验
+
+### 工具界面
+
+模型会看到 `create_workflow` 和 `run_workflow` 的 schema 及其渲染结果。本包不添加系统提示词或运行时 Skill。
+
+### Token 与缓存影响
+
+两个工具 schema 会增加每个暴露全局工具集的请求。已保存定义属于 Host 侧持久化数据，运行状态仍保存在 Host 内存中；除非工具结果报告，否则两者都不会进入模型上下文。
+
+## 已知限制与延期工作
+
+<a id="known-limitations-and-deferred-work"></a>
+
+- 定义会在 Host 重启后恢复，但 JSON 后端不提供跨进程写锁。
+- 运行不会写入 Session 事件，进程失败后无法恢复。
+- 不提供重试调度或 at-least-once 执行保证。
+- `start()` 不接受工作流级输入值。
+- `PortDefinition.type` 用于控制边的兼容性，但引擎不执行通用运行时值类型校验。
+- HITL 只能通过 `DagRun` handle 控制，尚未连接 Harness 审批服务或浏览器 UI；因此从编辑器运行 HITL 工作流会等待外部恢复。
+- 执行器运行期间能否取消，取决于执行器是否观察 `context.signal`。
+- 可视化编辑器尚未提供撤销/重做、复制/粘贴、分组、自动布局或多节点批量配置。
+
+<a id="dev-note"></a>
+### 开发说明
+
+<details>
+<summary>维护者工作上下文</summary>
+
+在本目录运行 `pnpm test` 执行针对性 Node 测试，运行 `pnpm build` 完成打包和声明生成。新的节点注册必须声明来源插件，由 Cordis effect 或返回的 disposer 管理，并准确声明工作流边使用的全部端口。
+
+</details>

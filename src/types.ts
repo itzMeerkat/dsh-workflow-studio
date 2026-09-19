@@ -1,0 +1,227 @@
+/**
+ * dsh-workflow-studio 核心类型定义。
+ *
+ * 定义 DAG 工作流的节点/边/运行期类型，以及节点插件和引擎接口。
+ * @module dsh-workflow-studio
+ */
+
+import type { Branded } from '@deepseek-ai/dsh-brand'
+
+// ---- Branded IDs ----
+
+/** 工作流定义 ID。 */
+export type WorkflowId = Branded<'WorkflowId'>
+export function WorkflowId(id: string): WorkflowId { return id as WorkflowId }
+
+/** 工作流运行时运行 ID。每次执行唯一，用于幂等。 */
+export type RunId = Branded<'RunId'>
+export function RunId(id: string): RunId { return id as RunId }
+
+/** DAG 节点 ID。 */
+export type NodeId = Branded<'NodeId'>
+export function NodeId(id: string): NodeId { return id as NodeId }
+
+/** DAG 边 ID。 */
+export type EdgeId = Branded<'EdgeId'>
+export function EdgeId(id: string): EdgeId { return id as EdgeId }
+
+// ---- 工作流定义 ----
+
+/** 端口类型约束（仅文档用途，运行时不检查）。 */
+export type PortType = 'number' | 'string' | 'boolean' | 'any'
+
+/** 端口描述。 */
+export interface PortDefinition {
+  name: string
+  type: PortType
+  description?: string
+  /** 输入端口是否必须连接；省略时为 true。 */
+  required?: boolean
+  /** 引擎赋予该端口的特殊执行语义。 */
+  role?: 'condition'
+  /** 在节点卡片中展示输出值的方式。 */
+  display?: 'value' | 'json'
+}
+
+/** 节点卡片中编辑 config 字段的控件定义。 */
+export type NodeControlDefinition =
+  | {
+    readonly name: string
+    readonly label: string
+    readonly kind: 'number'
+    readonly defaultValue: number
+    readonly min?: number
+    readonly max?: number
+    readonly step?: number
+  }
+  | {
+    readonly name: string
+    readonly label: string
+    readonly kind: 'text'
+    readonly defaultValue: string
+    readonly placeholder?: string
+  }
+  | {
+    readonly name: string
+    readonly label: string
+    readonly kind: 'boolean'
+    readonly defaultValue: boolean
+  }
+  | {
+    readonly name: string
+    readonly label: string
+    readonly kind: 'select'
+    readonly defaultValue: string
+    readonly options: readonly {
+      readonly label: string
+      readonly value: string
+    }[]
+  }
+
+/** DAG 节点定义。 */
+export interface DagNodeDefinition {
+  id: NodeId
+  /** 节点类型名，与注册的 {@link WorkflowNodeExecutor.type} 匹配。 */
+  type: string
+  label?: string
+  config: Record<string, unknown>
+  /** 是否需人工确认后执行。 */
+  requiresHumanInput?: boolean
+  /** 可视化编辑器中的节点坐标。 */
+  position?: { x: number; y: number }
+  /** 节点声明的输出端口；省略时使用执行器声明。 */
+  outputs?: PortDefinition[]
+  /** 节点声明的输入端口；省略时使用执行器声明。 */
+  inputs?: PortDefinition[]
+}
+
+/** DAG 边定义。 */
+export interface DagEdgeDefinition {
+  id: EdgeId
+  source: NodeId
+  /** 源节点输出端口（默认 "output"）。 */
+  sourcePort?: string
+  target: NodeId
+  /** 目标节点输入端口（默认 "input"）。 */
+  targetPort?: string
+}
+
+/** 可 JSON 导入导出的完整工作流定义。 */
+export interface DagWorkflowDefinition {
+  name: string
+  description?: string
+  nodes: DagNodeDefinition[]
+  edges: DagEdgeDefinition[]
+  inputs?: PortDefinition[]
+  outputs?: PortDefinition[]
+}
+
+/** 工作流摘要（列表用）。 */
+export interface WorkflowSummary {
+  id: WorkflowId
+  name: string
+  description?: string
+}
+
+// ---- 运行期类型 ----
+
+/** 节点执行上下文，由引擎在每次调用节点 execute() 时传入。 */
+export interface NodeExecutionContext {
+  /** 本次运行的唯一 ID，每次执行都不同。 */
+  runId: RunId
+  /** 节点配置（来自 {@link DagNodeDefinition.config}）。 */
+  config: Record<string, unknown>
+  /** 上游端口数据，key 为当前节点的输入端口名。 */
+  inputs: Record<string, unknown>
+  /** 取消信号。 */
+  signal: AbortSignal
+  /** 输出一条日志。 */
+  log: (message: string) => void
+}
+
+/** 节点执行成功结果。 */
+export interface NodeExecutionCompleted {
+  status: 'completed'
+  /** 输出端口数据，key 为端口名。 */
+  outputs: Record<string, unknown>
+}
+
+/** 节点执行失败结果。 */
+export interface NodeExecutionFailed {
+  status: 'failed'
+  /** 可直接写入运行记录的失败原因。 */
+  error: string
+  /** 失败前已产生的诊断输出。 */
+  outputs?: Record<string, unknown>
+}
+
+/** 节点执行结果。 */
+export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed
+
+/** 节点运行状态。 */
+export type NodeRunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'skipped' | 'failed' | 'cancelled'
+
+/** 节点运行记录。 */
+export interface NodeRunRecord {
+  nodeId: NodeId
+  status: NodeRunStatus
+  inputs?: Record<string, unknown>
+  outputs?: Record<string, unknown>
+  error?: string
+  startedAt: number
+  completedAt?: number
+  runId: RunId
+}
+
+/** 工作流运行状态。 */
+export type WorkflowRunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+
+/** 工作流运行结果。 */
+export interface WorkflowResult {
+  runId: RunId
+  status: WorkflowRunStatus
+  error?: string
+  nodeRecords: NodeRunRecord[]
+  startedAt: number
+  completedAt?: number
+}
+
+/** 运行信息（事件负载用）。 */
+export interface DagRunInfo {
+  runId: RunId
+  workflowId: WorkflowId
+  name: string
+  status: WorkflowRunStatus
+}
+
+/** 节点运行信息（事件负载用）。 */
+export interface NodeRunInfo {
+  nodeId: NodeId
+  nodeType: string
+  label: string
+  status: NodeRunStatus
+}
+
+// ---- 节点插件接口 ----
+
+/** 节点插件的执行器。通过 {@link WorkflowNodeRegistry.register} 注入。 */
+export interface WorkflowNodeExecutor {
+  /** 节点类型标识符（小写 kebab-case）。 */
+  readonly type: string
+  readonly label: string
+  readonly description: string
+  readonly inputs?: PortDefinition[]
+  readonly outputs?: PortDefinition[]
+  /** 浏览器节点卡片直接渲染的配置控件。 */
+  readonly controls?: readonly NodeControlDefinition[]
+  /** false 表示该流程控制节点不接受引擎提供的 condition 门控。 */
+  readonly acceptsCondition?: boolean
+  /** 节点实例可以声明的同型可变输入端口约束。 */
+  readonly variadicInputs?: {
+    readonly min: number
+    readonly outputType?: 'same'
+  }
+  /** 是否需要人工介入执行该节点。 */
+  readonly requiresHumanInput?: boolean
+  execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult>
+}

@@ -1,0 +1,4 @@
+# Add Workflow Studio to the official global panel composition.
+- insert:
+    - id: workflow-studio
+      name: dsh-workflow-studio
