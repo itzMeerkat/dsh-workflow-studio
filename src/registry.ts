@@ -88,7 +88,6 @@ export class WorkflowNodeRegistry extends Service {
         outputs: e.outputs ?? [],
         controls: e.controls ?? [],
       }
-      if (e.requiresHumanInput !== undefined) s.requiresHumanInput = e.requiresHumanInput
       if (e.variadicInputs !== undefined) s.variadicInputs = e.variadicInputs
       return s
     })

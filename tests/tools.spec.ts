@@ -61,14 +61,13 @@ describe('workflow tools', () => {
         id: 'approval',
         type: 'hitl',
         config: {},
-        requiresHumanInput: true,
         inputs: [],
         outputs: [{ name: 'output', type: 'any' }],
       }],
       edges: [],
     }, {})
 
-    assert.equal(fixture.saved()?.nodes[0]?.requiresHumanInput, true)
+    assert.deepEqual(fixture.saved()?.nodes[0]?.outputs, [{ name: 'output', type: 'any' }])
   })
 
   it('run_workflow 对未知名称抛错，卸载 context 时移除全部工具', async () => {

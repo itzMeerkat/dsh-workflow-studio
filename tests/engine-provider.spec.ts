@@ -19,7 +19,7 @@ import {
   inject as storageDomainInject, name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
 import { registerFixtureNodes } from './fixture-nodes.ts'
-import { WorkflowNode } from '../src/node.ts'
+import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
@@ -108,17 +108,26 @@ const binary: WorkflowNodeExecutor = {
   }),
 }
 
-const hitl: WorkflowNodeExecutor = {
-  type: 'hitl',
-  label: 'HITL',
-  description: 'Waits for human confirmation',
-  inputs: [],
-  outputs: [{ name: 'output', type: 'any' }],
-  requiresHumanInput: true,
-  execute: () => ({ status: 'completed', outputs: { output: true } }),
+/** 等待一个外部结果；结果为 `{ ok: false }` 时节点失败。 */
+class WaiterNode extends WorkflowNode<{ output: unknown }> {
+  readonly type = 'waiter'
+  readonly label = 'Waiter'
+  readonly description = 'Waits for an external result'
+  protected readonly ports: WorkflowNodePorts = {
+    inputs: [],
+    outputs: [{ name: 'output', type: 'any' }],
+  }
+
+  protected async run(context: NodeExecutionContext): Promise<{ output: unknown }> {
+    const result = await context.awaitSignal('go', { kind: 'go' })
+    if (typeof result === 'object' && result !== null && 'ok' in result && result.ok === false) {
+      throw new NodeFailure('外部结果为拒绝')
+    }
+    return { output: result }
+  }
 }
 
-const executors = [source, pass, plain, decline, fail, branch, binary, hitl]
+const executors = [source, pass, plain, decline, fail, branch, binary, new WaiterNode()]
 
 function linearWorkflow(name: string): DagWorkflowDefinition {
   return {
@@ -483,13 +492,13 @@ describe('DagEngineProvider', () => {
     assert.deepEqual(result.nodes.map(record => record.status), ['skipped', 'skipped'])
   })
 
-  it('condition 为 false 时 HITL 节点直接跳过而不暂停', { timeout: 1000 }, async () => {
+  it('condition 为 false 时等待节点直接跳过而不等待结果', { timeout: 1000 }, async () => {
     const { engine } = await setup()
     const id = await engine.save({
-      name: 'gated-hitl',
+      name: 'gated-waiter',
       nodes: [
         { id: NodeId('flag'), type: 'source', config: { value: false } },
-        { id: NodeId('confirm'), type: 'source', config: { value: 1 }, requiresHumanInput: true },
+        { id: NodeId('confirm'), type: 'waiter', config: {} },
       ],
       edges: [{ id: EdgeId('flag'), source: NodeId('flag'), target: NodeId('confirm'), targetPort: 'condition' }],
     })
@@ -646,19 +655,19 @@ describe('DagEngineProvider', () => {
     assert.match(result.error ?? '', /缺少输入端口: left/)
   })
 
-  it('requiresHumanInput 节点等待确认，取消运行时结束等待', { timeout: 1000 }, async () => {
+  it('等待结果的节点保持 running，取消运行时结束等待', { timeout: 1000 }, async () => {
     const { ctx, engine } = await setup()
     const id = await engine.save({
-      name: 'cancel-hitl',
-      nodes: [{ id: NodeId('approval'), type: 'hitl', config: {} }],
+      name: 'cancel-waiter',
+      nodes: [{ id: NodeId('approval'), type: 'waiter', config: {} }],
       edges: [],
     })
     const requested = Promise.withResolvers<string>()
-    ctx.on('dag/input-requested', (_info, _node, requestId) => { requested.resolve(requestId) })
+    ctx.on('dag/signal-requested', (_info, _node, requestId) => { requested.resolve(requestId) })
     const run = engine.start(id)
-    assert.equal(await requested.promise, 'dsh.confirm')
-    assert.equal(engine.getRun(run.runId)?.nodes[0]?.status, 'awaiting-input')
-    assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
+    assert.equal(await requested.promise, 'go')
+    assert.equal(engine.getRun(run.runId)?.nodes[0]?.status, 'running')
+    assert.equal(engine.listRuns()[0]?.pendingRequests, 1)
 
     engine.cancelRun(run.runId, 'operator cancelled')
     const result = await run.result
@@ -667,37 +676,33 @@ describe('DagEngineProvider', () => {
     assert.equal(result.nodes[0]?.status, 'cancelled')
   })
 
-  it('requiresHumanInput 批准后执行，拒绝时节点失败', { timeout: 1000 }, async () => {
+  it('同级的等待节点各自收到结果', { timeout: 1000 }, async () => {
     const { ctx, engine } = await setup()
     const id = await engine.save({
-      name: 'parallel-hitl',
+      name: 'parallel-waiters',
       nodes: [
-        { id: NodeId('approval-a'), type: 'hitl', config: {} },
-        { id: NodeId('approval-b'), type: 'hitl', config: {} },
+        { id: NodeId('approval-a'), type: 'waiter', config: {} },
+        { id: NodeId('approval-b'), type: 'waiter', config: {} },
       ],
       edges: [],
     })
     const requested: string[] = []
     const both = Promise.withResolvers<void>()
-    ctx.on('dag/input-requested', (_info, node) => {
+    ctx.on('dag/signal-requested', (_info, node) => {
       requested.push(node.nodeId)
       if (requested.length === 2) both.resolve()
     })
     const run = engine.start(id)
     await both.promise
 
-    await engine.answerInput(run.runId, NodeId('approval-a'), 'dsh.confirm', {
-      answers: [{ id: 'decision', selected: ['批准'] }],
-    })
-    await engine.answerInput(run.runId, NodeId('approval-b'), 'dsh.confirm', {
-      answers: [{ id: 'decision', selected: [], custom: 'not now' }],
-    })
+    await engine.signal(run.runId, NodeId('approval-a'), 'go', { ok: true })
+    await engine.signal(run.runId, NodeId('approval-b'), 'go', { ok: false })
     const result = await run.result
 
     assert.equal(result.status, 'failed')
     assert.deepEqual(result.nodes.map(record => [record.nodeId, record.status, record.error]), [
       ['approval-a', 'completed', undefined],
-      ['approval-b', 'failed', '人工拒绝执行: not now'],
+      ['approval-b', 'failed', '外部结果为拒绝'],
     ])
   })
 

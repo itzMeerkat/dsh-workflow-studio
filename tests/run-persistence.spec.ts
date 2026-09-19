@@ -8,7 +8,8 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { DagEngineConfig, DagEngineProvider } from '../src/engine-provider.ts'
-import { TestHosts, inputRequested, runEnded } from './host.ts'
+import { TestHosts, runEnded, signalRequested } from './host.ts'
+import { askUser, validateQuestionsSignal } from '../src/shared/questions.ts'
 import { EdgeId, NodeId, type RunId, type WorkflowId, type WorkflowRunRecord } from '../src/shared/types.ts'
 import type {
   NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor,
@@ -374,7 +375,7 @@ describe('运行持久化与恢复', () => {
     assert.deepEqual([result.nodes[0]?.status, result.nodes[0]?.error], ['cancelled', 'stop'])
   })
 
-  it('答案写入失败时请求保持未回答，可再次回答', async () => {
+  it('结果写入失败时请求保持等待，可再次送达', async () => {
     const root = await newRoot()
     const { ctx, engine } = await host(root, freshCalls(), { block: false })
     ctx.workflowNodeRegistry.register({
@@ -382,21 +383,22 @@ describe('运行持久化与恢复', () => {
       label: 'Ask',
       description: 'Asks one question and outputs the answer',
       outputs: [{ name: 'output', type: 'any' }],
+      validateSignal: validateQuestionsSignal,
       async execute(context) {
-        const answer = await context.askHuman('q', [{ id: 'a', question: 'Go?', options: [{ label: 'yes' }] }])
+        const answer = await askUser(context, 'q', [{ id: 'a', question: 'Go?', options: [{ label: 'yes' }] }])
         return { status: 'completed', outputs: { output: answer.answers[0]?.selected[0] } }
       },
     }, 'run-persistence-tests')
-    const asked = inputRequested(ctx)
+    const asked = signalRequested(ctx)
     const run = engine.start(await engine.save({ name: 'ask', nodes: [{ id: NodeId('n'), type: 'ask', config: {} }], edges: [] }))
     await asked
     let failNext = true
     failWrites(engine, () => failNext)
     const answer = { answers: [{ id: 'a', selected: ['yes'] }] }
-    await assert.rejects(engine.answerInput(run.runId, NodeId('n'), 'q', answer), /disk full/)
-    assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
+    await assert.rejects(engine.signal(run.runId, NodeId('n'), 'q', answer), /disk full/)
+    assert.equal(engine.listRuns()[0]?.pendingRequests, 1)
     failNext = false
-    await engine.answerInput(run.runId, NodeId('n'), 'q', answer)
+    await engine.signal(run.runId, NodeId('n'), 'q', answer)
     assert.deepEqual((await run.result).nodes[0]?.outputs, { output: 'yes' })
   })
 })

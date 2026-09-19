@@ -1,9 +1,8 @@
 /** Run list, selected run, and run controls of the Workflow Studio panel. */
 
-import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { useEffect, useRef, useState } from 'react'
-import type { WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
+import type { JsonValue, WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import type { RunAction, RunsFilter } from './RunsView.tsx'
 import { parseRunRecord, parseRunSummaries } from './runs-model.ts'
@@ -74,9 +73,9 @@ export function useRuns(remote: WorkflowStudioRemoteNamespace, setNotice: (messa
       const runId = selectedRunRef.current
       if (runId !== undefined) void control(() => remote[action](runId))
     },
-    answer: (nodeId: string, requestId: string, answer: AskUserQuestionAnswer): void => {
+    signal: (nodeId: string, requestId: string, result: JsonValue): void => {
       const runId = selectedRunRef.current
-      if (runId !== undefined) void control(() => remote.answer(runId, nodeId, requestId, JSON.stringify(answer)))
+      if (runId !== undefined) void control(() => remote.signal(runId, nodeId, requestId, JSON.stringify(result)))
     },
   }
 }

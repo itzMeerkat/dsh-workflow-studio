@@ -18,7 +18,7 @@ function context(overrides: Partial<NodeExecutionContext> = {}): NodeExecutionCo
     connected: new Set(),
     invocationKey: 'run/node',
     notepad: { value: undefined, save: async () => {} },
-    askHuman: async () => { throw new Error('unused') },
+    awaitSignal: async () => { throw new Error('unused') },
     signal: new AbortController().signal,
     log: () => {},
     ...overrides,

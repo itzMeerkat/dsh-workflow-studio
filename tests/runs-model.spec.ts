@@ -16,8 +16,8 @@ import {
 } from '../src/client/runs-model.ts'
 import { RunId, WorkflowId, type WorkflowRunSummary } from '../src/shared/types.ts'
 
-function row(runId: string, status: WorkflowRunSummary['status'], workflowId = 'w1', awaitingInput = 0): WorkflowRunSummary {
-  return { runId: RunId(runId), workflowId: WorkflowId(workflowId), name: 'flow', status, awaitingInput, startedAt: 1, updatedAt: 1 }
+function row(runId: string, status: WorkflowRunSummary['status'], workflowId = 'w1', pendingRequests = 0): WorkflowRunSummary {
+  return { runId: RunId(runId), workflowId: WorkflowId(workflowId), name: 'flow', status, pendingRequests, startedAt: 1, updatedAt: 1 }
 }
 
 const QUESTIONS = [
@@ -25,7 +25,7 @@ const QUESTIONS = [
   { id: 'multi', question: 'Many?', options: [{ label: 'x' }, { label: 'y' }], multiSelect: true },
 ]
 
-function recordSource(status: string, interactions: unknown[]): string {
+function recordSource(status: string, requests: unknown[]): string {
   return JSON.stringify({
     runId: 'r1',
     workflowId: 'w1',
@@ -38,7 +38,7 @@ function recordSource(status: string, interactions: unknown[]): string {
       edges: [],
     },
     nodes: [
-      { nodeId: 'ask', runId: 'r1', status: 'awaiting-input', attempts: 1, startedAt: 1, interactions },
+      { nodeId: 'ask', runId: 'r1', status: 'running', attempts: 1, startedAt: 1, requests },
       { nodeId: 'out', runId: 'r1', status: 'completed', attempts: 1, startedAt: 1, outputs: { output: 3 } },
     ],
   })
@@ -62,14 +62,17 @@ describe('runs model', () => {
     assert.deepEqual(groupRuns(rows, undefined).active.map(item => item.runId), ['running', 'other', 'waiting'])
   })
 
-  it('lists unanswered requests with node labels, and none for finished runs', () => {
-    const interactions = [
-      { id: 'done', questions: QUESTIONS, answer: { answers: [] }, askedAt: 1, answeredAt: 2 },
-      { id: 'open', questions: QUESTIONS, askedAt: 3 },
+  it('lists requests still waiting with their node, and none for finished runs', () => {
+    const requests = [
+      { id: 'done', request: { kind: 'questions', questions: QUESTIONS }, result: { answers: [] }, createdAt: 1, resolvedAt: 2 },
+      { id: 'open', request: { kind: 'questions', questions: QUESTIONS }, createdAt: 3 },
     ]
-    const pending = pendingRequests(parseRunRecord(recordSource('running', interactions)))
-    assert.deepEqual(pending.map(item => [item.nodeId, item.nodeLabel, item.request.id]), [['ask', 'Ask me', 'open']])
-    assert.deepEqual(pendingRequests(parseRunRecord(recordSource('cancelled', interactions))), [])
+    const pending = pendingRequests(parseRunRecord(recordSource('running', requests)))
+    assert.deepEqual(
+      pending.map(item => [item.nodeId, item.nodeLabel, item.nodeType, item.request.id]),
+      [['ask', 'Ask me', 'asker', 'open']],
+    )
+    assert.deepEqual(pendingRequests(parseRunRecord(recordSource('cancelled', requests))), [])
   })
 
   it('builds answers: custom text replaces a single choice and supplements multiple choices', () => {

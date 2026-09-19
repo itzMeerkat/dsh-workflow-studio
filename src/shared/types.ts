@@ -6,7 +6,6 @@
  */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 
 // ---- Branded IDs ----
 
@@ -103,8 +102,6 @@ export interface DagNodeDefinition {
   type: string
   label?: string
   config: Record<string, unknown>
-  /** 是否需人工确认后执行。 */
-  requiresHumanInput?: boolean
   /** 覆盖执行器声明的中断恢复策略。 */
   recovery?: NodeRecoveryPolicy
   /** 可视化编辑器中的节点坐标。 */
@@ -160,13 +157,14 @@ export interface NodeExecutionContext {
   /** 随运行记录持久化的节点私有值，在同一运行中该节点的重新调用间保留。 */
   notepad: NodeNotepad
   /**
-   * 向人提问并等待答案。请求与答案写入运行记录：节点被重新调用后，以相同 `requestId` 再次提问时，
-   * 已回答的请求立即返回保存的答案，未回答的请求继续等待，不会重复提问。
-   * @param requestId - 节点内唯一的请求 ID；不得以 `dsh.` 开头。
-   * @param questions - Harness `ask_user_question` 格式的问题。
-   * @returns 按问题顺序排列的答案；运行取消时拒绝。
+   * 声明等待一个外部结果并等待其送达，例如人工回答、外部作业回调或另一系统的结果。
+   * 请求与结果写入运行记录：节点被重新调用后，以相同 `requestId` 再次等待时，已送达的结果立即返回，
+   * 未送达的请求继续等待，不会重复声明。
+   * @param requestId - 节点内唯一且在重新调用间保持不变的请求 ID。
+   * @param request - 请求内容；引擎不解释，浏览器按其 `kind` 字段选择渲染方式。
+   * @returns 送达的结果；运行取消时拒绝。
    */
-  askHuman(requestId: string, questions: AskUserQuestionItem[]): Promise<AskUserQuestionAnswer>
+  awaitSignal(requestId: string, request: JsonValue): Promise<JsonValue>
   /** 取消信号。 */
   signal: AbortSignal
   /** 输出一条日志。 */
@@ -209,19 +207,20 @@ export interface NodeExecutionSkipped {
 /** 节点执行结果。 */
 export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed | NodeExecutionSkipped
 
-/** 节点运行状态。 */
+/** 节点运行状态。等待外部结果的节点仍为 running。 */
 export type NodeRunStatus =
-  | 'pending' | 'running' | 'awaiting-input' | 'completed' | 'skipped' | 'failed' | 'cancelled'
+  | 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'cancelled'
 
-/** 节点发起的一次人工输入请求。 */
-export interface HumanInputRequest {
-  /** 节点内唯一的请求 ID。 */
+/** 节点声明的一次外部结果等待。引擎不解释 {@link request} 和 {@link result}。 */
+export interface NodeSignalRequest {
+  /** 节点内唯一、在重新调用间保持不变的请求 ID。 */
   id: string
-  questions: AskUserQuestionItem[]
-  /** 已提交的答案；未回答时不存在。 */
-  answer?: AskUserQuestionAnswer
-  askedAt: number
-  answeredAt?: number
+  /** 请求内容；浏览器按其 `kind` 字段选择渲染方式。 */
+  request: JsonValue
+  /** 已送达的结果；未送达时不存在。 */
+  result?: JsonValue
+  createdAt: number
+  resolvedAt?: number
 }
 
 /** 节点运行记录。 */
@@ -235,8 +234,8 @@ export interface NodeRunRecord {
   attempts: number
   /** 节点通过 {@link NodeNotepad.save} 保存的最近值。 */
   notepad?: JsonValue
-  /** 节点在本次运行中发起的人工输入请求，按提问顺序排列。 */
-  interactions?: HumanInputRequest[]
+  /** 节点在本次运行中声明的外部结果等待，按声明顺序排列。 */
+  requests?: NodeSignalRequest[]
   startedAt: number
   completedAt?: number
   runId: RunId
@@ -265,8 +264,8 @@ export interface WorkflowRunSummary {
   workflowId: WorkflowId
   name: string
   status: WorkflowRunStatus
-  /** 未结束运行中尚未回答的人工输入请求数量。 */
-  awaitingInput: number
+  /** 未结束运行中尚未送达结果的请求数量。 */
+  pendingRequests: number
   error?: string
   startedAt: number
   updatedAt: number
@@ -306,12 +305,18 @@ export interface WorkflowNodeExecutor {
     readonly min: number
     readonly outputType?: 'same'
   }
-  /** 是否需要人工介入执行该节点。 */
-  readonly requiresHumanInput?: boolean
   /** 中断后的恢复策略；省略时为 `rerun`。工作流节点的 `recovery` 覆盖此值。 */
   readonly recovery?: NodeRecoveryPolicy
   /**
-   * 在引擎的输入检查和人工确认之前调用。返回结果时节点直接以该结果结束，不调用 {@link execute}；
+   * 校验送达 {@link NodeExecutionContext.awaitSignal} 请求的结果。省略时引擎接受任何 JSON 值。
+   * 引擎在写入运行记录前调用它，因此格式错误在送达方一侧被拒绝，而不是使节点失败。
+   * @param request - 节点声明的请求内容。
+   * @param result - 送达的结果。
+   * @returns 写入运行记录的结果；结果无效时抛出。
+   */
+  validateSignal?(request: JsonValue, result: unknown): JsonValue
+  /**
+   * 在引擎的输入检查之前调用。返回结果时节点直接以该结果结束，不调用 {@link execute}；
    * 返回 undefined 时继续执行。
    * @param context - 与随后 {@link execute} 相同的执行上下文。
    * @returns 结束节点的结果，或 undefined。
@@ -332,7 +337,6 @@ export interface NodeTypeSummary {
   description: string
   /** 注册该节点类型的 Cordis 插件名。 */
   sourcePlugin: string
-  requiresHumanInput?: boolean
   inputs: readonly PortDefinition[]
   outputs: readonly PortDefinition[]
   controls: readonly NodeControlDefinition[]

@@ -3,10 +3,8 @@
  * @module dsh-workflow-studio
  */
 
-import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions/types'
-import { CONFIRM_REQUEST_ID } from './human-input.ts'
 import type {
-  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, NodeId, NodeRunRecord, RunId, WorkflowId,
+  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, JsonValue, NodeId, NodeRunRecord, RunId, WorkflowId,
   WorkflowNodeExecutor, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from './shared/types.ts'
 
@@ -38,8 +36,8 @@ export interface RunState {
   resultResolve: (result: WorkflowRunRecord) => void
   /** 本运行的检查点写入按顺序排队。 */
   writeTail: Promise<void>
-  /** 等待答案的节点请求，按节点 ID 和请求 ID 索引。 */
-  inputWaiters: Map<NodeId, Map<string, (answer: AskUserQuestionAnswer) => void>>
+  /** 等待结果送达的节点请求，按节点 ID 和请求 ID 索引。 */
+  signalWaiters: Map<NodeId, Map<string, (result: JsonValue) => void>>
 }
 
 /** 运行的结束状态。 */
@@ -78,7 +76,7 @@ export function createRunState(record: WorkflowRunRecord): RunState {
     resultPromise,
     resultResolve,
     writeTail: Promise.resolve(),
-    inputWaiters: new Map(),
+    signalWaiters: new Map(),
   }
 }
 
@@ -102,34 +100,25 @@ export function toRunRecord(state: RunState): WorkflowRunRecord {
 }
 
 /**
- * 运行列表中的一行；已结束运行没有待回答请求。
+ * 运行列表中的一行；已结束运行没有待送达请求。
  * @param record - 运行记录。
  */
 export function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
-  const awaitingInput = TERMINAL_STATUSES.has(record.status)
+  const pendingRequests = TERMINAL_STATUSES.has(record.status)
     ? 0
     : record.nodes.reduce((count, node) =>
-      count + (node.interactions ?? []).filter(item => item.answer === undefined).length, 0)
+      count + (node.requests ?? []).filter(item => item.result === undefined).length, 0)
   return {
     runId: record.runId,
     workflowId: record.workflowId,
     name: record.definition.name,
     status: record.status,
-    awaitingInput,
+    pendingRequests,
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
     ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
     ...(record.error === undefined ? {} : { error: record.error }),
   }
-}
-
-/**
- * 节点仅在等待执行前确认、尚未调用执行器。
- * @param record - 节点运行记录。
- */
-export function awaitingConfirmation(record: NodeRunRecord): boolean {
-  const pending = (record.interactions ?? []).filter(item => item.answer === undefined)
-  return record.status === 'awaiting-input' && pending.length === 1 && pending[0]?.id === CONFIRM_REQUEST_ID
 }
 
 /**

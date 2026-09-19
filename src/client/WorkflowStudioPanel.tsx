@@ -137,7 +137,7 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
   const runRecords = overlay === undefined ? new Map() : runRecordsByNode(overlay)
   const runResult = overlay === undefined ? undefined : JSON.stringify(overlay.nodes, null, 2)
   const activeRuns = runs.runs.filter(row => isActiveRun(row)).length
-  const awaitingInput = runs.runs.reduce((count, row) => count + row.awaitingInput, 0)
+  const waitingRequests = runs.runs.reduce((count, row) => count + row.pendingRequests, 0)
   return (
     <main className={css.page}>
       <header className={css.header}>
@@ -150,9 +150,9 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
               {activeRuns} {t('runs.activeCount')}
             </button>
           )}
-          {awaitingInput > 0 && (
-            <button type="button" className={css.runBadge} data-status="awaiting-input" onClick={showAllRuns}>
-              {awaitingInput} {t('runs.awaitingCount')}
+          {waitingRequests > 0 && (
+            <button type="button" className={css.runBadge} data-status="waiting" onClick={showAllRuns}>
+              {waitingRequests} {t('runs.waitingCount')}
             </button>
           )}
           <Button
@@ -243,7 +243,7 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
               onFilter={runs.setFilter}
               onSelect={runs.select}
               onAction={runs.act}
-              onAnswer={runs.answer}
+              onSignal={runs.signal}
             />
           )}
           {view === 'canvas' && (

@@ -66,7 +66,6 @@ implements WorkflowNodeExecutor {
   protected abstract readonly ports: WorkflowNodePorts
   declare readonly controls?: readonly NodeControlDefinition[]
   declare readonly variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
-  declare readonly requiresHumanInput?: boolean
   /** 为 false 时节点不获得 condition 端口，也不做门控。 */
   protected readonly conditional: boolean = true
 

@@ -86,13 +86,13 @@ export function runEnded(ctx: Context, runId: RunId): Promise<WorkflowRunRecord>
 }
 
 /**
- * 等待节点发起人工输入请求。
+ * 等待节点声明外部结果等待。
  * @param ctx - 运行所在的 Host。
  * @param nodeId - 节点 ID；省略时等待任意节点。
  */
-export function inputRequested(ctx: Context, nodeId?: string): Promise<{ runId: RunId; nodeId: string; requestId: string }> {
+export function signalRequested(ctx: Context, nodeId?: string): Promise<{ runId: RunId; nodeId: string; requestId: string }> {
   return new Promise((resolve) => {
-    const dispose = ctx.on('dag/input-requested', (info, node, requestId) => {
+    const dispose = ctx.on('dag/signal-requested', (info, node, requestId) => {
       if (nodeId !== undefined && node.nodeId !== nodeId) return
       dispose()
       resolve({ runId: info.runId, nodeId: node.nodeId, requestId })

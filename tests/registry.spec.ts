@@ -93,7 +93,6 @@ describe('WorkflowNodeRegistry', () => {
       inputs: [{ name: 'x', type: 'number' }],
       outputs: [{ name: 'y', type: 'number' }],
       controls: [{ name: 'factor', label: 'Factor', kind: 'number', defaultValue: 1 }],
-      requiresHumanInput: true,
       execute() { return { status: 'completed', outputs: { y: 1 } } },
     }, 'plugin-b')
 
@@ -109,7 +108,6 @@ describe('WorkflowNodeRegistry', () => {
 
     const b = types.find(t => t.type === 'type-b')
     assert.ok(b !== undefined)
-    assert.equal(b.requiresHumanInput, true)
     assert.equal(b.sourcePlugin, 'plugin-b')
     assert.deepEqual(b.inputs.map(port => port.name), ['x'])
     assert.deepEqual(b.outputs.map(port => port.name), ['y'])

@@ -10,7 +10,7 @@ import type {
   DagEdgeDefinition,
   DagNodeDefinition,
   DagWorkflowDefinition,
-  HumanInputRequest,
+  NodeSignalRequest,
   NodeControlDefinition,
   NodeRunRecord,
   PortDefinition,
@@ -64,7 +64,8 @@ export const workflowNodeSchema = z.object({
   type: nonEmptyString,
   label: nonEmptyString.optional(),
   config: z.record(z.string(), z.json()).default({}),
-  requiresHumanInput: z.boolean().optional(),
+  // 引擎执行前的人工确认已被 human-approval 等节点取代；仍带该字段的定义在保存时失败，而不是静默失去确认。
+  requiresHumanInput: z.never({ error: 'requiresHumanInput 已移除：改用 human-approval 节点' }).optional(),
   recovery: z.enum(['rerun', 'hold']).optional(),
   position: z.object({
     x: z.number().finite(),
@@ -97,25 +98,25 @@ const runStatus = z.enum(['running', 'paused', 'interrupted', 'completed', 'fail
 
 const jsonObject = z.record(z.string(), z.json())
 
-// 问题和答案在提问与回答时由 human-input.ts 校验；此处只要求可读回的 JSON 结构。
-const humanInputRequestSchema = z.object({
+// 请求与结果的含义由声明该请求的节点决定；此处只要求可读回的 JSON 结构。
+const nodeSignalRequestSchema = z.object({
   id: z.string().min(1),
-  questions: z.array(z.json()),
-  answer: z.json().optional(),
-  askedAt: z.number(),
-  answeredAt: z.number().optional(),
-}) as unknown as z.ZodType<HumanInputRequest>
+  request: z.json(),
+  result: z.json().optional(),
+  createdAt: z.number(),
+  resolvedAt: z.number().optional(),
+}) as unknown as z.ZodType<NodeSignalRequest>
 
 const nodeRunRecordSchema = z.object({
   nodeId: z.string().min(1),
   runId: z.string().min(1),
-  status: z.enum(['pending', 'running', 'awaiting-input', 'completed', 'skipped', 'failed', 'cancelled']),
+  status: z.enum(['pending', 'running', 'completed', 'skipped', 'failed', 'cancelled']),
   attempts: z.number().int().nonnegative(),
   inputs: jsonObject.optional(),
   outputs: jsonObject.optional(),
   error: z.string().optional(),
   notepad: z.json().optional(),
-  interactions: z.array(humanInputRequestSchema).optional(),
+  requests: z.array(nodeSignalRequestSchema).optional(),
   startedAt: z.number(),
   completedAt: z.number().optional(),
 }) as unknown as z.ZodType<NodeRunRecord>
@@ -139,7 +140,7 @@ export const workflowRunSummarySchema = z.object({
   workflowId: z.string().min(1),
   name: z.string(),
   status: runStatus,
-  awaitingInput: z.number().int().nonnegative(),
+  pendingRequests: z.number().int().nonnegative(),
   error: z.string().optional(),
   startedAt: z.number(),
   updatedAt: z.number(),
@@ -159,7 +160,6 @@ export const workflowStudioSnapshotSchema = z.object({
     label: z.string(),
     description: z.string(),
     sourcePlugin: z.string(),
-    requiresHumanInput: z.boolean().optional(),
     inputs: z.array(workflowPortSchema),
     outputs: z.array(workflowPortSchema),
     controls: z.array(nodeControlSchema),

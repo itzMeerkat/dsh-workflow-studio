@@ -1,19 +1,17 @@
 /**
- * 一个运行的调度循环：按拓扑层级执行节点，处理暂停、人工输入和节点结果。
+ * 一个运行的调度循环：按拓扑层级执行节点，处理暂停、外部结果等待和节点结果。
  * @module dsh-workflow-studio
  */
 
-import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import type {
-  DagNodeDefinition, NodeExecutionContext, NodeExecutionResult, NodeRunInfo, NodeRunRecord,
+  DagNodeDefinition, JsonValue, NodeExecutionContext, NodeExecutionResult, NodeRunInfo, NodeRunRecord,
   WorkflowNodeExecutor, WorkflowRunStatus,
 } from './shared/types.ts'
-import { toJsonOutputs, toJsonValue } from './json.ts'
+import { toJsonOutputs, toJsonValue } from './shared/json.ts'
 import { messageOf } from './shared/errors.ts'
 import { resolveInputPorts } from './shared/graph.ts'
 import { topologicalSort } from './validation.ts'
 import { cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
-import { CONFIRM_REQUEST_ID, confirmQuestions, confirmRejection, parseQuestions } from './human-input.ts'
 
 /** 一次调度结束时的运行状态与原因。 */
 export interface RunOutcome {
@@ -97,38 +95,30 @@ export class RunExecutor {
   }
 
   /**
-   * 发起或复用节点的人工输入请求并等待答案。
-   * @param allowReserved - 引擎自身的请求可使用保留前缀。
-   * @returns 请求的答案；运行取消时以中止原因拒绝。
+   * 声明或复用节点的外部结果等待。节点保持 running；已送达结果的请求立即返回。
+   * @returns 送达的结果；运行取消时以中止原因拒绝。
    */
-  async askHuman(
-    task: NodeTask,
-    requestId: string,
-    questions: readonly AskUserQuestionItem[],
-    allowReserved = false,
-  ): Promise<AskUserQuestionAnswer> {
-    const parsed = parseQuestions(requestId, questions, allowReserved)
+  private async awaitSignal(task: NodeTask, requestId: string, request: unknown): Promise<JsonValue> {
+    if (requestId.trim() === '') throw new TypeError('requestId 必须为非空字符串')
     const { record } = task
-    record.interactions ??= []
-    let request = record.interactions.find(item => item.id === requestId)
-    if (request?.answer !== undefined) return structuredClone(request.answer)
+    record.requests ??= []
+    let pending = record.requests.find(item => item.id === requestId)
+    if (pending?.result !== undefined) return structuredClone(pending.result)
     this.signal.throwIfAborted()
-    if (request === undefined) {
-      request = { id: requestId, questions: parsed, askedAt: Date.now() }
-      record.interactions.push(request)
+    if (pending === undefined) {
+      pending = { id: requestId, request: toJsonValue(request, 'request'), createdAt: Date.now() }
+      record.requests.push(pending)
     }
-    const waiters = this.state.inputWaiters.get(record.nodeId) ?? new Map<string, (answer: AskUserQuestionAnswer) => void>()
-    this.state.inputWaiters.set(record.nodeId, waiters)
-    const { promise, resolve } = Promise.withResolvers<AskUserQuestionAnswer>()
+    const waiters = this.state.signalWaiters.get(record.nodeId) ?? new Map<string, (result: JsonValue) => void>()
+    this.state.signalWaiters.set(record.nodeId, waiters)
+    const { promise, resolve } = Promise.withResolvers<JsonValue>()
     waiters.set(requestId, resolve)
-    record.status = 'awaiting-input'
     try {
       await this.host.checkpoint(this.state)
-      this.host.emit('dag/input-requested', runInfo(this.state), { ...task.info, status: 'awaiting-input' }, requestId)
+      this.host.emit('dag/signal-requested', runInfo(this.state), task.info, requestId)
       return await abortable(promise, this.signal)
     } finally {
       waiters.delete(requestId)
-      if (record.status === 'awaiting-input' && waiters.size === 0) record.status = 'running'
     }
   }
 
@@ -170,7 +160,7 @@ export class RunExecutor {
     await this.host.checkpoint(this.state)
   }
 
-  /** 依次经过 preflight、输入检查和执行前确认后调用执行器。 */
+  /** 依次经过 preflight 和输入检查后调用执行器。 */
   private async runNode(task: NodeTask, inputs: Record<string, unknown>): Promise<NodeEnd> {
     const { node, executor } = task
     const context = this.nodeContext(task, inputs)
@@ -185,18 +175,6 @@ export class RunExecutor {
 
     const gate = this.inputGate(node, executor, inputs)
     if (gate !== undefined) return gate
-
-    if (executor.requiresHumanInput === true || node.requiresHumanInput === true) {
-      let answer: AskUserQuestionAnswer
-      try {
-        answer = await this.askHuman(task, CONFIRM_REQUEST_ID, confirmQuestions(node), true)
-      } catch (error: unknown) {
-        if (!this.signal.aborted) throw error
-        return { status: 'cancelled' }
-      }
-      const rejection = confirmRejection(answer)
-      if (rejection !== undefined) return { status: 'failed', error: rejection }
-    }
 
     try {
       const result = await executor.execute(context)
@@ -226,7 +204,7 @@ export class RunExecutor {
           await host.checkpoint(state)
         },
       },
-      askHuman: async (requestId, questions) => this.askHuman(task, requestId, questions),
+      awaitSignal: async (requestId, request) => this.awaitSignal(task, requestId, request),
       signal: this.signal,
       log: (message: string) => {
         host.log(`[${state.definition.name}/${node.label ?? node.type}] ${message}`)

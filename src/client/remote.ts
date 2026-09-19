@@ -17,7 +17,7 @@ export interface WorkflowStudioRemoteNamespace {
   pause(runId: string): Promise<RemoteResult<string>>
   resume(runId: string): Promise<RemoteResult<string>>
   cancel(runId: string): Promise<RemoteResult<string>>
-  answer(runId: string, nodeId: string, requestId: string, answer: string): Promise<RemoteResult<string>>
+  signal(runId: string, nodeId: string, requestId: string, result: string): Promise<RemoteResult<string>>
 }
 
 type Method = keyof WorkflowStudioRemoteNamespace
@@ -59,7 +59,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'workflowStudio/pause': WorkflowStudioRemoteNamespace['pause']
     'workflowStudio/resume': WorkflowStudioRemoteNamespace['resume']
     'workflowStudio/cancel': WorkflowStudioRemoteNamespace['cancel']
-    'workflowStudio/answer': WorkflowStudioRemoteNamespace['answer']
+    'workflowStudio/signal': WorkflowStudioRemoteNamespace['signal']
   }
 }
 
@@ -95,7 +95,7 @@ const contribution: TypertRemoteContribution = {
     descriptor('pause', ['runId']),
     descriptor('resume', ['runId']),
     descriptor('cancel', ['runId']),
-    descriptor('answer', ['runId', 'nodeId', 'requestId', 'answer']),
+    descriptor('signal', ['runId', 'nodeId', 'requestId', 'result']),
   ],
 }
 

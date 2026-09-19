@@ -6,7 +6,8 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { useState } from 'react'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
-import type { NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
+import type { JsonValue, NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
+import { requestQuestions } from '../shared/questions.ts'
 import {
   buildAnswer,
   groupRuns,
@@ -38,7 +39,7 @@ interface RunsViewProps {
   readonly onFilter: (filter: RunsFilter) => void
   readonly onSelect: (runId: string) => void
   readonly onAction: (action: RunAction) => void
-  readonly onAnswer: (nodeId: string, requestId: string, answer: AskUserQuestionAnswer) => void
+  readonly onSignal: (nodeId: string, requestId: string, result: JsonValue) => void
 }
 
 /** List runs beside the selected run's details. */
@@ -93,8 +94,8 @@ function RunGroup({ title, rows, selectedRunId, showName, t, onSelect }: {
           className={row.runId === selectedRunId ? `${css.runRow} ${css.runRowActive}` : css.runRow}
           onClick={() => { onSelect(row.runId) }}
         >
-          <span className={css.runStatus} data-status={row.awaitingInput > 0 ? 'awaiting-input' : row.status}>
-            {row.awaitingInput > 0 ? `${t('runStatus.awaiting')} · ${row.awaitingInput}` : t(`runStatus.${row.status}`)}
+          <span className={css.runStatus} data-status={row.pendingRequests > 0 ? 'waiting' : row.status}>
+            {row.pendingRequests > 0 ? `${t('runStatus.waiting')} · ${row.pendingRequests}` : t(`runStatus.${row.status}`)}
           </span>
           {showName && <strong>{row.name}</strong>}
           <time dateTime={new Date(row.startedAt).toISOString()}>{formatTime(row.startedAt)}</time>
@@ -105,7 +106,7 @@ function RunGroup({ title, rows, selectedRunId, showName, t, onSelect }: {
   )
 }
 
-function RunDetail({ t, record, nodeTypes, busy, onAction, onAnswer }: RunsViewProps & { readonly record: WorkflowRunRecord }) {
+function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal }: RunsViewProps & { readonly record: WorkflowRunRecord }) {
   const actions = runActions(record.status)
   const pending = pendingRequests(record)
   const labels = new Map(record.definition.nodes.map(node => [node.id, node.label ?? node.id]))
@@ -132,12 +133,12 @@ function RunDetail({ t, record, nodeTypes, busy, onAction, onAnswer }: RunsViewP
       </header>
 
       {pending.map(item => (
-        <QuestionForm
+        <PendingRequestCard
           key={`${item.nodeId}/${item.request.id}`}
           item={item}
           busy={busy}
           t={t}
-          onSubmit={(answer) => { onAnswer(item.nodeId, item.request.id, answer) }}
+          onSubmit={(result) => { onSignal(item.nodeId, item.request.id, result) }}
         />
       ))}
 
@@ -174,14 +175,34 @@ function RunDetail({ t, record, nodeTypes, busy, onAction, onAnswer }: RunsViewP
   )
 }
 
-function QuestionForm({ item, busy, t, onSubmit }: {
+/** Render one pending request: the built-in form for `questions`, otherwise the raw payload. */
+function PendingRequestCard({ item, busy, t, onSubmit }: {
   readonly item: PendingRequest
   readonly busy: boolean
   readonly t: Translate
-  readonly onSubmit: (answer: AskUserQuestionAnswer) => void
+  readonly onSubmit: (result: JsonValue) => void
+}) {
+  const questions = requestQuestions(item.request.request)
+  if (questions === undefined) {
+    return (
+      <div className={css.questionCard}>
+        <p className={css.questionSource}>{t('requests.title')} · {t('questions.from')} {item.nodeLabel}</p>
+        <strong>{t('requests.payload')}</strong>
+        <pre>{JSON.stringify(item.request.request, null, 2)}</pre>
+      </div>
+    )
+  }
+  return <QuestionForm item={item} questions={questions} busy={busy} t={t} onSubmit={onSubmit} />
+}
+
+function QuestionForm({ item, questions, busy, t, onSubmit }: {
+  readonly item: PendingRequest
+  readonly questions: readonly AskUserQuestionItem[]
+  readonly busy: boolean
+  readonly t: Translate
+  readonly onSubmit: (result: JsonValue) => void
 }) {
   const [draft, setDraft] = useState<AnswerDraft>({ selected: {}, custom: {} })
-  const questions = item.request.questions
   const toggle = (question: AskUserQuestionItem, label: string): void => {
     const current = draft.selected[question.id] ?? []
     const next = question.multiSelect === true
@@ -194,7 +215,8 @@ function QuestionForm({ item, busy, t, onSubmit }: {
       className={css.questionCard}
       onSubmit={(event) => {
         event.preventDefault()
-        onSubmit(buildAnswer(questions, draft))
+        // 答案是 JSON 对象；声明类型没有索引签名，断言只让它满足 JsonValue。
+        onSubmit(buildAnswer(questions, draft) as unknown as JsonValue)
       }}
     >
       <p className={css.questionSource}>{t('questions.title')} · {t('questions.from')} {item.nodeLabel}</p>

@@ -21,11 +21,11 @@ import { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.
 import { messageOf } from './shared/errors.ts'
 import { resolveExecutors } from './validation.ts'
 import {
-  TERMINAL_STATUSES, awaitingConfirmation, cancelRemaining, createRunState, nodeState, releasePauseWaiters, runInfo,
+  TERMINAL_STATUSES, cancelRemaining, createRunState, nodeState, releasePauseWaiters, runInfo,
   summaryOfRecord, toRunRecord, type RunState,
 } from './run-state.ts'
 import { RunExecutor, type RunHost, type RunOutcome } from './run-executor.ts'
-import { parseAnswer } from './human-input.ts'
+import { toJsonValue } from './shared/json.ts'
 
 /** 引擎部署配置。 */
 export interface DagEngineConfig {
@@ -274,9 +274,8 @@ export class DagEngineProvider extends DagEngine {
       }
       const interrupted: NodeId[] = []
       for (const { record: nodeRecord } of state.nodeStates.values()) {
-        if (nodeRecord.status !== 'running' && nodeRecord.status !== 'awaiting-input') continue
-        // 仍在等待执行前确认的节点尚未调用执行器，重新调用总是安全的，不受 recovery 策略约束。
-        if (!awaitingConfirmation(nodeRecord)) interrupted.push(nodeRecord.nodeId)
+        if (nodeRecord.status !== 'running') continue
+        interrupted.push(nodeRecord.nodeId)
         nodeRecord.status = 'pending'
         delete nodeRecord.outputs
         delete nodeRecord.error
@@ -332,28 +331,32 @@ export class DagEngineProvider extends DagEngine {
     }
   }
 
-  // ---- 人工输入 ----
+  // ---- 外部结果 ----
 
-  async answerInput(runId: RunId, nodeId: NodeId, requestId: string, answer: unknown): Promise<void> {
+  async signal(runId: RunId, nodeId: NodeId, requestId: string, result: unknown): Promise<void> {
     const state = this.liveState(runId)
     if (state === undefined) throw new Error(`运行 ${runId} 已结束`)
     const execState = state.nodeStates.get(nodeId)
     if (execState === undefined) throw new Error(`运行 ${runId} 没有节点 ${nodeId}`)
-    const request = execState.record.interactions?.find(item => item.id === requestId)
-    if (request === undefined) throw new Error(`节点 ${nodeId} 没有请求 ${requestId}`)
-    if (request.answer !== undefined) throw new Error(`请求 ${requestId} 已回答`)
-    const parsed = parseAnswer(request.questions, answer)
-    request.answer = parsed
-    request.answeredAt = Date.now()
+    const pending = execState.record.requests?.find(item => item.id === requestId)
+    if (pending === undefined) throw new Error(`节点 ${nodeId} 没有请求 ${requestId}`)
+    if (pending.result !== undefined) throw new Error(`请求 ${requestId} 已送达结果`)
+    const validate = this.registry.get(execState.node.type)?.validateSignal
+    const validated = toJsonValue(
+      validate === undefined ? result : validate(pending.request, result),
+      'result',
+    )
+    pending.result = validated
+    pending.resolvedAt = Date.now()
     try {
       await this.checkpoint(state)
     } catch (error: unknown) {
-      delete request.answer
-      delete request.answeredAt
+      delete pending.result
+      delete pending.resolvedAt
       throw error
     }
-    this.emitEvent('dag/input-answered', runInfo(state), nodeId, requestId)
-    state.inputWaiters.get(nodeId)?.get(requestId)?.(structuredClone(parsed))
+    this.emitEvent('dag/signal-received', runInfo(state), nodeId, requestId)
+    state.signalWaiters.get(nodeId)?.get(requestId)?.(structuredClone(validated))
   }
 
   // ---- 调度 ----

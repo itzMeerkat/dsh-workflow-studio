@@ -8,7 +8,7 @@ import type {
 } from '@deepseek-ai/dsh-user-questions/types'
 import { z } from 'zod'
 import type {
-  HumanInputRequest, NodeRunRecord, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
+  NodeRunRecord, NodeSignalRequest, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from '../shared/types.ts'
 import { workflowRunRecordSchema, workflowRunSummarySchema } from '../shared/workflow-schema.ts'
 
@@ -34,8 +34,8 @@ export function parseRunRecord(source: string): WorkflowRunRecord {
  * Whether a run still needs attention: it is unfinished, or it waits for an answer.
  * @param row - Run summary.
  */
-export function isActiveRun(row: Pick<WorkflowRunSummary, 'status' | 'awaitingInput'>): boolean {
-  return !isFinished(row.status) || row.awaitingInput > 0
+export function isActiveRun(row: Pick<WorkflowRunSummary, 'status' | 'pendingRequests'>): boolean {
+  return !isFinished(row.status) || row.pendingRequests > 0
 }
 
 /**
@@ -63,23 +63,29 @@ export function groupRuns(
   }
 }
 
-/** An unanswered request with the node that asked it. */
+/** A request still waiting for its result, with the node that declared it. */
 export interface PendingRequest {
   readonly nodeId: string
   readonly nodeLabel: string
-  readonly request: HumanInputRequest
+  readonly nodeType: string
+  readonly request: NodeSignalRequest
 }
 
 /**
- * List a run's unanswered human-input requests in node order. Finished runs have none.
+ * List a run's requests that have no result yet, in node order. Finished runs have none.
  * @param record - Run record.
  */
 export function pendingRequests(record: WorkflowRunRecord): PendingRequest[] {
   if (isFinished(record.status)) return []
-  const labels = new Map(record.definition.nodes.map(node => [node.id, node.label ?? node.id]))
-  return record.nodes.flatMap(node => (node.interactions ?? [])
-    .filter(request => request.answer === undefined)
-    .map(request => ({ nodeId: node.nodeId, nodeLabel: labels.get(node.nodeId) ?? node.nodeId, request })))
+  const nodes = new Map(record.definition.nodes.map(node => [node.id, node]))
+  return record.nodes.flatMap(node => (node.requests ?? [])
+    .filter(request => request.result === undefined)
+    .map(request => ({
+      nodeId: node.nodeId,
+      nodeLabel: nodes.get(node.nodeId)?.label ?? node.nodeId,
+      nodeType: nodes.get(node.nodeId)?.type ?? '',
+      request,
+    })))
 }
 
 /** Selected option labels and custom text for each question of one request. */

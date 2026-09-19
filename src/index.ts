@@ -42,8 +42,11 @@ export { DagEngineProvider } from './engine-provider.ts'
 export { topologicalSort } from './validation.ts'
 export type { DagEngineConfig } from './engine-provider.ts'
 export {
-  CONFIRM_REQUEST_ID, CONFIRM_QUESTION_ID, CONFIRM_APPROVE, CONFIRM_REJECT, answerComment, isApproved,
-} from './human-input.ts'
+  APPROVE_LABEL, QUESTIONS_KIND, REJECT_LABEL, answerComment, askUser, isApproved,
+  parseAnswer, questionsRequest, requestQuestions, validateQuestionsSignal,
+} from './shared/questions.ts'
+export type { QuestionsRequest } from './shared/questions.ts'
+export { toJsonValue, toJsonObject } from './shared/json.ts'
 export { CONDITION_PORT, NodeFailure, WorkflowNode } from './node.ts'
 export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
@@ -57,7 +60,7 @@ export type {
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
   NodeExecutionCompleted, NodeExecutionFailed, NodeExecutionSkipped, NodeControlDefinition,
   WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
-  NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, HumanInputRequest,
+  NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, NodeSignalRequest,
   NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, WorkflowStudioSnapshot,
 } from './shared/types.ts'
 export {

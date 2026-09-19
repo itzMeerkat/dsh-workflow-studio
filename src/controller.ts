@@ -142,17 +142,17 @@ export class WorkflowStudioController extends TypertRemoteService {
   }
 
   /**
-   * Answer a node's human-input request.
+   * Deliver the result a node is waiting for.
    * @param runId - Run ID.
-   * @param nodeId - Node that asked.
-   * @param requestId - Request ID from the node record's `interactions`.
-   * @param answer - `ask_user_question` answer encoded as JSON.
-   * @returns The run record after the answer is saved, encoded as JSON.
+   * @param nodeId - Node that declared the request.
+   * @param requestId - Request ID from the node record's `requests`.
+   * @param result - The result encoded as JSON; the node type decides its format.
+   * @returns The run record after the result is saved, encoded as JSON.
    */
   @Remote
-  async answer(runId: string, nodeId: string, requestId: string, answer: string): Promise<string> {
+  async signal(runId: string, nodeId: string, requestId: string, result: string): Promise<string> {
     try {
-      await this.engine.answerInput(RunId(runId), NodeId(nodeId), requestId, JSON.parse(answer) as unknown)
+      await this.engine.signal(RunId(runId), NodeId(nodeId), requestId, JSON.parse(result) as unknown)
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

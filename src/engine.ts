@@ -51,21 +51,21 @@ declare module '@deepseek-ai/cordis' {
      */
     'dag/resumed'(info: DagRunInfo): void
     /**
-     * 节点请求人工输入。
+     * 节点声明等待一个外部结果。
      * @mode emit
      * @param info - 工作流运行信息。
-     * @param node - 发起请求的节点。
+     * @param node - 声明请求的节点。
      * @param requestId - 节点内的请求 ID。
      */
-    'dag/input-requested'(info: DagRunInfo, node: NodeRunInfo, requestId: string): void
+    'dag/signal-requested'(info: DagRunInfo, node: NodeRunInfo, requestId: string): void
     /**
-     * 人工输入请求已回答且答案已写入运行记录。
+     * 外部结果已写入运行记录。
      * @mode emit
      * @param info - 工作流运行信息。
-     * @param nodeId - 发起请求的节点 ID。
-     * @param requestId - 已回答的请求 ID。
+     * @param nodeId - 声明请求的节点 ID。
+     * @param requestId - 已送达结果的请求 ID。
      */
-    'dag/input-answered'(info: DagRunInfo, nodeId: NodeId, requestId: string): void
+    'dag/signal-received'(info: DagRunInfo, nodeId: NodeId, requestId: string): void
     /**
      * 运行因 Host 停止而中断，需要人工恢复，或恢复时缺少节点类型。
      * @mode emit
@@ -160,15 +160,16 @@ export abstract class DagEngine extends Service {
   abstract cancelRun(runId: RunId, reason?: string): void
 
   /**
-   * 回答节点的人工输入请求。答案按请求中的问题校验后写入运行记录，再交给等待中的节点。
-   * 运行 interrupted 或 paused 时也可回答，节点被重新调用时会直接得到该答案。
+   * 送达节点等待的外部结果。结果先由节点类型的 `validateSignal` 校验并写入运行记录，
+   * 再交给等待中的节点；没有节点在等待时（例如 Host 重启后或运行 interrupted、paused），
+   * 结果保留在运行记录中，节点被重新调用时直接得到它。
    * @param runId - 运行 ID。
-   * @param nodeId - 发起请求的节点 ID。
+   * @param nodeId - 声明请求的节点 ID。
    * @param requestId - 请求 ID。
-   * @param answer - Harness `ask_user_question` 格式的答案。
-   * @returns 答案写入运行记录后兑现。
+   * @param result - 送达的结果。
+   * @returns 结果写入运行记录后兑现。
    */
-  abstract answerInput(runId: RunId, nodeId: NodeId, requestId: string, answer: unknown): Promise<void>
+  abstract signal(runId: RunId, nodeId: NodeId, requestId: string, result: unknown): Promise<void>
 
   /** 安全派发 Cordis 事件。 */
   protected emitEvent(name: string, ...args: unknown[]): void {
