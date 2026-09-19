@@ -104,7 +104,7 @@ export async function runWorkflow(ctx: Context, name: string) {
 }
 ```
 
-`run.result` settles with the final `WorkflowRunRecord` and does not reject. Control any run, including one restored after a Host restart, by ID with `pauseRun()`, `resumeRun()`, `cancelRun()`, and `answerInput()`, and read it with `getRun()` or `listRuns()`.
+`run.result` settles with the final `WorkflowRunRecord` and does not reject. Control any run, including one restored after a Host restart, by ID with `pauseRun()`, `resumeRun()`, `cancelRun()`, and `signal()`, and read it with `getRun()` or `listRuns()`.
 
 ## Modify safely
 
@@ -137,7 +137,7 @@ Check these causes in order:
 4. Cycle: inspect **Execution order** and remove the dependency cycle.
 5. Skipped node: inspect its connected condition and skipped upstream dependencies.
 6. Failed node: inspect the node record's `inputs`, `outputs`, and `error`.
-7. Run waiting on a person (a `requiresHumanInput` node or any node calling `askHuman`, such as `human-approval` from `dsh-workflow-demo-node`): answer it in the panel's **Runs** tab, or find the unanswered entry in the node record's `interactions` and call `answerInput()`.
+7. Run waiting for a result (any node calling `awaitSignal`, such as `human-approval` from `dsh-workflow-demo-node`): answer it in the panel's **Runs** tab, or find the entry without a `result` in the node record's `requests` and call `signal()`.
 8. Interrupted run: read its `error` for the reason, fix it (for example, load the missing node plugin), then call `resumeRun()` or `cancelRun()`.
 
 When package code changes, run `pnpm test` and `pnpm build` from `dsh-workflow-studio`.

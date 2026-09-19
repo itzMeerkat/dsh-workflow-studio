@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 摘要
 
-`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、供节点作者使用的 `WorkflowNode` 基类、三个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。每次运行都会写入独立记录的检查点，并在 Host 重启后继续，节点还可以向人提问，答案随运行保存。
+`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、供节点作者使用的 `WorkflowNode` 基类、三个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。每次运行都会写入独立记录的检查点，并在 Host 重启后继续，节点还可以等待运行之外的结果（例如人工回答），请求与结果随运行保存。
 
 ## 目录
 
@@ -99,9 +99,13 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 不应重复已完成工作的节点可以使用 `context.invocationKey`（同一运行中该节点每次调用都相同）和 `context.notepad`。`await context.notepad.save(value)` 会把 JSON 值保存到运行记录中，重启后再次被调用的节点可从 `context.notepad.value` 读取它。
 
-节点通过 `await context.askHuman(requestId, questions)` 向人提问，问题与答案采用 `@deepseek-ai/dsh-user-questions` 中 Harness `ask_user_question` 工具的格式：每个问题可以提供选项、允许多选并接受自定义文本。引擎把请求保存到节点的运行记录中，并将节点标记为 `awaiting-input`；`listRuns()` 以 `awaitingInput` 报告每个未结束运行中未回答请求的数量。`answerInput()` 或 `answer` Remote 按问题校验答案、保存答案，然后交给等待中的节点。运行处于 running、paused 或 interrupted 时都可以回答。重启后再次被调用的节点，对已回答的 `requestId` 立即得到保存的答案，对未回答的请求则继续等待原有请求。以 `dsh.` 开头的请求 ID 由引擎保留。
+节点通过 `await context.awaitSignal(requestId, request)` 等待运行之外的结果，无论它来自人、外部作业还是另一个系统。`request` 是任意 JSON 值，引擎不读取其内容：请求被保存到节点的运行记录中，节点保持 `running`；`listRuns()` 以 `pendingRequests` 报告每个未结束运行中尚未送达结果的请求数量。`signal()` 或 `signal` Remote 保存结果并交给等待中的节点；运行处于 running、paused 或 interrupted 时都可以送达，重启后再次被调用的节点立即得到已保存的结果，尚无结果时继续等待原有请求。送达结果本身不会恢复运行，paused 或 interrupted 的运行仍需显式恢复。`requestId` 在重新调用之间必须保持不变，节点靠它找回自己的请求。
 
-执行器或工作流定义标记了 `requiresHumanInput` 的节点，会在执行器运行前以保留请求 `dsh.confirm` 提出包含 `批准` 和 `拒绝` 选项的确认。`批准` 执行节点；`拒绝` 或自定义答案使节点失败，自定义文本会写入错误信息。被 condition 跳过的节点不会提问。Host 停止时仍在等待该确认的节点总会被重新执行，不受其 `recovery` 策略约束，因为它的执行器尚未运行。
+节点类型用可选的执行器成员 `validateSignal(request, result)` 校验结果格式。引擎在写入前调用它，因此格式错误在送达方一侧被拒绝，而不是使节点失败；未声明时接受任何 JSON 值。
+
+向人提问只是其中一种请求格式，不是引擎的概念。`askUser(context, requestId, questions)` 以 `questions` 类型发起请求，问题与答案采用 `@deepseek-ai/dsh-user-questions` 中 Harness `ask_user_question` 工具的格式：每个问题可以提供选项、允许多选并接受自定义文本。`validateQuestionsSignal` 是与之配套的 `validateSignal`，运行标签页把这类请求渲染为表单。需要自有请求格式和界面的节点插件，在 `workflowStudio.request` 插槽中为自己的 `kind` 注册组件；没有组件的 `kind` 显示为原始请求内容。
+
+要在某一步执行前要求人工批准，把等待批准的节点（例如 `dsh-workflow-demo-node` 的 `human-approval`）放在它前面。引擎自身没有确认步骤：仍带 `requiresHumanInput` 的定义在保存时被拒绝。
 
 ```json
 {
@@ -128,7 +132,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按照调度器拓扑阶段排列的节点图替代原始 JSON 视图。它对数据和 condition 依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。保留的 condition 边会从分支节点上标有 `true` 或 `false` 等名称的输出发出；同一阶段的节点并发运行。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
 
-**运行** 会保存工作流、启动运行而不等待其结束，并打开 **运行** 标签页。该标签页列出当前工作流或全部工作流的运行，并分为 **进行中**（未结束或等待回答）和 **历史**。选中运行后可以看到其状态、开始时间、耗时和错误；适用时的 **暂停**、**恢复** 和 **取消运行**；每个未回答人工输入请求的表单；按运行时工作流快照绘制并标出节点状态的执行顺序图；以及节点状态、调用次数、输出和错误的表格。工具栏显示进行中的运行数量和待回答的问题数量，点击任一数量会打开运行标签页。面板每两秒刷新一次运行状态；当选中的运行属于当前打开的工作流时，画布显示该运行的节点状态。
+**运行** 会保存工作流、启动运行而不等待其结束，并打开 **运行** 标签页。该标签页列出当前工作流或全部工作流的运行，并分为 **进行中**（未结束或等待结果）和 **历史**。选中运行后可以看到其状态、开始时间、耗时和错误；适用时的 **暂停**、**恢复** 和 **取消运行**；每个等待中的请求，由为其 `kind` 注册的组件渲染；按运行时工作流快照绘制并标出节点状态的执行顺序图；以及节点状态、调用次数、输出和错误的表格。工具栏显示进行中的运行数量和等待结果的请求数量，点击任一数量会打开运行标签页。面板每两秒刷新一次运行状态；当选中的运行属于当前打开的工作流时，画布显示该运行的节点状态。
 
 -----
 
@@ -142,7 +146,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 当上游输出对象包含选定 key 时，该输入端口存在。`preflight()` 返回的结果会在引擎检查输入之前结束节点；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
 
-`pauseRun()` 在拓扑层之间生效。`cancelRun()` 会中止运行，并结束所有暂停和所有等待中的 `askHuman()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `answer`。
+`pauseRun()` 在拓扑层之间生效。`cancelRun()` 会中止运行，并结束所有暂停和所有等待中的 `awaitSignal()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `signal`。
 
 `get()` 返回的定义、`getRun()` 返回的运行记录和最终结果都是独立快照。调用方修改这些值不会改变引擎内部状态。
 
@@ -150,14 +154,14 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 |---|---|
 | [`src/registry.ts`](src/registry.ts) | 节点执行器注册表 |
 | [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` 服务 API 和事件 |
-| [`src/engine-provider.ts`](src/engine-provider.ts) | 定义存储、运行控制、回答、运行记录写入和恢复 |
-| [`src/run-executor.ts`](src/run-executor.ts) | 按层级调度节点、暂停点、人工输入请求和节点结果 |
+| [`src/engine-provider.ts`](src/engine-provider.ts) | 定义存储、运行控制、结果送达、运行记录写入和恢复 |
+| [`src/run-executor.ts`](src/run-executor.ts) | 按层级调度节点、暂停点、等待中的请求和节点结果 |
 | [`src/validation.ts`](src/validation.ts) | 按注册表校验定义，以及拓扑顺序 |
 | [`src/run-state.ts`](src/run-state.ts) | 运行的内存状态与运行记录转换 |
 | [`src/persistence.ts`](src/persistence.ts) | 定义与运行的 per-record storage domain |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类、`NodeFailure` 和 condition 门控 |
-| [`src/json.ts`](src/json.ts) | 节点输出和 notepad 值的 JSON 检查 |
-| [`src/human-input.ts`](src/human-input.ts) | 问题与答案校验、审批辅助函数，以及 `dsh.confirm` 确认问题 |
+| [`src/shared/json.ts`](src/shared/json.ts) | 节点输出、notepad 值和信号负载的 JSON 检查 |
+| [`src/shared/questions.ts`](src/shared/questions.ts) | `questions` 请求格式：`askUser`、答案校验和审批辅助函数 |
 | [`src/tools.ts`](src/tools.ts) | 模型工具注册 |
 | [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行控制所用的 Host Remote |
 | [`src/shared/types.ts`](src/shared/types.ts) | Host 与浏览器共享的类型 |
@@ -168,7 +172,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/client/remote.ts`](src/client/remote.ts) | Remote 方法描述和 `callRemote` 错误处理函数 |
 | [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | 工作流选择、保存、运行和画布/执行顺序/运行视图 |
 | [`src/client/Menus.tsx`](src/client/Menus.tsx) | 工作流选择器和节点库菜单 |
-| [`src/client/use-runs.ts`](src/client/use-runs.ts) | 运行列表轮询、运行选择、运行控制和回答 |
+| [`src/client/use-runs.ts`](src/client/use-runs.ts) | 运行列表轮询、运行选择、运行控制和结果送达 |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | 只读执行依赖图和运行状态 |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布状态、节点编辑和连线 |
 | [`src/client/graph-model.ts`](src/client/graph-model.ts) | 定义与画布节点和边之间的转换，以及连线规则 |
@@ -176,7 +180,9 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/client/NodeInspector.tsx`](src/client/NodeInspector.tsx) | 所选节点的详情面板和运行结果 |
 | [`src/client/model.ts`](src/client/model.ts) | 快照解析、节点摆放和执行计划 |
 | [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | 运行标签页：运行列表、控制按钮、问题表单和节点状态 |
-| [`src/client/runs-model.ts`](src/client/runs-model.ts) | 运行记录解析、分组、待回答请求和答案构建 |
+| [`src/client/runs-model.ts`](src/client/runs-model.ts) | 运行记录解析、分组、等待中的请求和答案构建 |
+| [`src/client/slot-contract.ts`](src/client/slot-contract.ts) | 节点插件用自有请求界面填充的 `workflowStudio.request` 插槽 |
+| [`src/client/QuestionsRequestForm.tsx`](src/client/QuestionsRequestForm.tsx) | `questions` 请求的内置渲染组件 |
 
 </details>
 
@@ -214,7 +220,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 - 节点只在 Host 重启后被再次调用；运行中的 Host 不会重试失败的节点。
 - `start()` 不接受工作流级输入值。
 - `PortDefinition.type` 用于控制边的兼容性，但引擎不执行通用运行时值类型校验。
-- 人工输入请求可以在运行标签页、通过 `answer` Remote 或 `answerInput()` 回答；请求不会转发到 Harness 聊天 Session，问题表单会把所有问题（包括 `plan-review` 问题）渲染为通用选项列表。
+- 等待中的请求可以在运行标签页、通过 `signal` Remote 或 `signal()` 送达结果；请求不会转发到 Harness 聊天 Session，内置问题表单会把所有问题（包括 `plan-review` 问题）渲染为通用选项列表。
 - 执行器运行期间能否取消，取决于执行器是否观察 `context.signal`。
 - 可视化编辑器尚未提供撤销/重做、复制/粘贴、分组、自动布局或多节点批量配置。
 

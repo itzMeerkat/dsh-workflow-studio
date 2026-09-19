@@ -17,7 +17,7 @@ Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node
 - `controls`: optional browser controls backed by fields in `context.config`.
 - `conditional`: leave it `true` for a normal node. Set it to `false` only for a flow-control node that computes branch signals and must not be gated by one.
 - `variadicInputs`: declare the minimum instance input count and optional same-type output requirement.
-- `requiresHumanInput`: set it when every execution needs a person's approval first; the engine asks `批准`/`拒绝` before `run()`.
+- `validateSignal`: declare it when the node waits for a result with `awaitSignal` and that result has a required format.
 
 ## Implement a node
 
@@ -113,9 +113,15 @@ The engine guarantees at-least-once invocation: after a Host restart, a node tha
 
 Outputs and notepad values are stored as JSON. An output port set to `undefined` counts as not produced; other non-JSON values, such as `Date`, `Map`, class instances, or non-finite numbers, fail the node.
 
-## Asking a person
+## Waiting for a result from outside the run
 
-Call `await context.askHuman(requestId, questions)` with questions in the Harness `ask_user_question` format from `@deepseek-ai/dsh-user-questions/types`. Use a fixed `requestId` for each question the node asks: when the node is called again after a restart, the same ID returns the saved answer or keeps waiting on the existing request. Do not start IDs with `dsh.`. The call rejects when the run is cancelled; let that rejection propagate.
+Call `await context.awaitSignal(requestId, request)` to wait for a person, an external job, or another system. `request` is any JSON value; the engine saves it and never reads it, and the browser picks a renderer by its `kind` field. Use a fixed `requestId` for each request the node raises: when the node is called again after a restart, the same ID returns the saved result or keeps waiting on the existing request. The call rejects when the run is cancelled; let that rejection propagate.
+
+Declare `validateSignal(request, result)` to check the result format. The engine calls it before saving, so a bad result is rejected at the API rather than failing the node.
+
+To ask a person, use `askUser(context, requestId, questions)` with questions in the Harness `ask_user_question` format from `@deepseek-ai/dsh-user-questions/types`, and set `validateSignal = validateQuestionsSignal`. The Runs tab renders those requests as a form. For a request format of your own, register a component for its `kind` in the `workflowStudio.request` slot from your plugin's client bundle; a kind with no component is shown as raw JSON and can still be answered through the `signal` Remote.
+
+Start the external work only after the request is declared, and guard it with `context.invocationKey` or the notepad so a restart does not start it twice.
 
 ## Asynchronous work and cancellation
 

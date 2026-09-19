@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, three model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Each run is checkpointed to its own record and continues after a Host restart, and nodes can ask a person questions whose answers are saved with the run.
+`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, three model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Each run is checkpointed to its own record and continues after a Host restart, and a node can wait for a result from outside the run, such as a person's answer, with the request and its result saved with the run.
 
 ## Table of Contents
 
@@ -99,9 +99,13 @@ A run restored after a restart becomes `interrupted` instead of restarting when 
 
 A node that should not repeat completed work uses `context.invocationKey`, which stays the same for every call of that node in one run, and `context.notepad`. `await context.notepad.save(value)` stores a JSON value in the run record, and a node called again after a restart reads it from `context.notepad.value`.
 
-A node asks a person with `await context.askHuman(requestId, questions)`, using the question and answer format of the Harness `ask_user_question` tool from `@deepseek-ai/dsh-user-questions`: each question may offer options, allow several selections, and accept custom text. The engine saves the request in the node's run record and marks the node `awaiting-input`; `listRuns()` reports each unfinished run's number of unanswered requests as `awaitingInput`. `answerInput()` or the `answer` Remote checks the answer against the questions, saves it, and then passes it to the waiting node. Answers are accepted while the run is running, paused, or interrupted. A node called again after a restart gets the saved answer at once for an answered `requestId`, or waits on the existing request for an unanswered one. Request IDs starting with `dsh.` are reserved for the engine.
+A node waits for a result from outside the run with `await context.awaitSignal(requestId, request)`, whether that result comes from a person, an external job, or another system. The `request` is any JSON value and the engine never reads it: it saves the request in the node's run record and keeps the node `running`, and `listRuns()` reports each unfinished run's number of requests without a result as `pendingRequests`. `signal()` or the `signal` Remote saves the result and passes it to the waiting node; results are accepted while the run is running, paused, or interrupted, and a node called again after a restart gets a saved result at once, or waits on the existing request when none has arrived. A signal never resumes a run by itself, so a paused or interrupted run continues only when it is resumed. The `requestId` must stay the same across calls, because it is how a node finds its own request again.
 
-A node marked `requiresHumanInput`, by its executor or in the workflow definition, asks the reserved `dsh.confirm` request with the options `批准` and `拒绝` before its executor runs. `批准` runs the node; `拒绝` or a custom answer fails it, and the custom text becomes part of the error. A node skipped by its condition is not asked. A node still waiting for this confirmation when the Host stops is always restarted, whatever its `recovery` policy, because its executor has not run.
+A node type checks the result format with the optional `validateSignal(request, result)` executor member. The engine calls it before saving, so a malformed result is rejected at the API instead of failing the node; without it, any JSON value is accepted.
+
+Questions for a person are one request format, not an engine concern. `askUser(context, requestId, questions)` raises a request of kind `questions` using the format of the Harness `ask_user_question` tool from `@deepseek-ai/dsh-user-questions`, where each question may offer options, allow several selections, and accept custom text. `validateQuestionsSignal` is the matching `validateSignal`, and the Runs tab renders such requests as a form. A node plugin that wants its own request format and its own UI registers a component for its `kind` in the `workflowStudio.request` slot; a kind nobody renders is shown as its raw payload.
+
+To require approval before a step runs, put a node that waits for it, such as `human-approval` from `dsh-workflow-demo-node`, in front of that step. The engine has no approval of its own: a definition that still carries `requiresHumanInput` is rejected when saved.
 
 ```json
 {
@@ -128,7 +132,7 @@ An executor with `variadicInputs` lets each workflow node declare its own `input
 
 The sidebar's **Workflow Studio** panel opens the editor. The toolbar provides a searchable workflow picker, edits the current workflow name, and opens a searchable node menu whose rows identify their source plugins. Renaming and saving an existing workflow preserves its ID; a duplicate name is rejected. The React Flow canvas renders one handle per declared input and output, with inputs on the left and outputs on the right. Connection previews follow the pointer while dragging. Existing edge endpoints can be moved to another compatible port or dropped on empty canvas space to delete the edge. Selecting a node opens its details and the run result below the full-width canvas. The canvas also supports node placement, typed port-to-port connections, node creation and deletion, card controls, card output previews, JSON configuration editing, saved positions, and run-status overlays. The read-only execution-order view replaces the raw JSON view with a node graph arranged by the scheduler's topological stages. It applies transitive reduction to data and condition dependencies, removing a direct edge when another directed path already represents the same execution-order relation. A retained condition edge leaves its branch node through a labeled output such as `true` or `false`; nodes in one stage run concurrently. Save and run operations use the Host's `workflowStudio` Remote; parsing and graph validation remain Host-owned.
 
-**Run** saves the workflow, starts a run without waiting for it, and opens the **Runs** tab. The tab lists runs for the current workflow or for all workflows, split into **Active** (unfinished, or waiting for an answer) and **History**. Selecting a run shows its status, start time, duration, and error; **Pause**, **Resume**, and **Cancel run** where they apply; a form for each unanswered human-input request; the execution-order graph of the run's workflow snapshot with node statuses; and a table of node statuses, call counts, outputs, and errors. The toolbar shows how many runs are active and how many questions are waiting, and either count opens the Runs tab. The panel refreshes run statuses every two seconds, and the canvas shows node statuses from the selected run when it belongs to the open workflow.
+**Run** saves the workflow, starts a run without waiting for it, and opens the **Runs** tab. The tab lists runs for the current workflow or for all workflows, split into **Active** (unfinished, or waiting for a result) and **History**. Selecting a run shows its status, start time, duration, and error; **Pause**, **Resume**, and **Cancel run** where they apply; each waiting request, rendered by the component registered for its kind; the execution-order graph of the run's workflow snapshot with node statuses; and a table of node statuses, call counts, outputs, and errors. The toolbar shows how many runs are active and how many requests are waiting for a result, and either count opens the Runs tab. The panel refreshes run statuses every two seconds, and the canvas shows node statuses from the selected run when it belongs to the open workflow.
 
 -----
 
@@ -142,7 +146,7 @@ The sidebar's **Workflow Studio** panel opens the editor. The toolbar provides a
 
 An input port is present when the upstream output object has the selected key. A `preflight()` result settles the node before the engine checks inputs. A missing required input from a skipped dependency also propagates `skipped`; other partial required inputs fail. Missing optional inputs do not block execution.
 
-`pauseRun()` takes effect between levels. `cancelRun()` aborts the run and ends every pause and every pending `askHuman()` call. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work. The `workflowStudio` Remote exposes `start`, `listRuns`, `getRun`, `pause`, `resume`, `cancel`, and `answer` by run ID.
+`pauseRun()` takes effect between levels. `cancelRun()` aborts the run and ends every pause and every pending `awaitSignal()` call. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work. The `workflowStudio` Remote exposes `start`, `listRuns`, `getRun`, `pause`, `resume`, `cancel`, and `signal` by run ID.
 
 Definitions returned by `get()`, run records returned by `getRun()`, and final results are independent snapshots. Caller mutation cannot alter saved definitions or internal run state.
 
@@ -150,14 +154,14 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 |---|---|
 | [`src/registry.ts`](src/registry.ts) | Node executor registry |
 | [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` service API and events |
-| [`src/engine-provider.ts`](src/engine-provider.ts) | Definition storage, run control, answers, run-record writes, and recovery |
-| [`src/run-executor.ts`](src/run-executor.ts) | Level-by-level node scheduling, pause points, human input requests, and node results |
+| [`src/engine-provider.ts`](src/engine-provider.ts) | Definition storage, run control, signal delivery, run-record writes, and recovery |
+| [`src/run-executor.ts`](src/run-executor.ts) | Level-by-level node scheduling, pause points, waiting requests, and node results |
 | [`src/validation.ts`](src/validation.ts) | Definition validation against the registry and topological order |
 | [`src/run-state.ts`](src/run-state.ts) | In-memory run state and run-record conversion |
 | [`src/persistence.ts`](src/persistence.ts) | Per-record storage domains for definitions and runs |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` base class, `NodeFailure`, and the condition gate |
-| [`src/json.ts`](src/json.ts) | JSON checks for node outputs and notepad values |
-| [`src/human-input.ts`](src/human-input.ts) | Question and answer checks, approval helpers, and the `dsh.confirm` confirmation question |
+| [`src/shared/json.ts`](src/shared/json.ts) | JSON checks for node outputs, notepad values, and signal payloads |
+| [`src/shared/questions.ts`](src/shared/questions.ts) | The `questions` request format: `askUser`, answer checks, and approval helpers |
 | [`src/tools.ts`](src/tools.ts) | Model tool registration |
 | [`src/controller.ts`](src/controller.ts) | Host Remote for browser snapshots, saves, and run control |
 | [`src/shared/types.ts`](src/shared/types.ts) | Types shared by the Host and the browser |
@@ -168,7 +172,7 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/client/remote.ts`](src/client/remote.ts) | Remote method descriptors and the `callRemote` error helper |
 | [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | Workflow selection, save, run, and the canvas/execution/runs views |
 | [`src/client/Menus.tsx`](src/client/Menus.tsx) | Workflow picker and node library menus |
-| [`src/client/use-runs.ts`](src/client/use-runs.ts) | Run list polling, run selection, run controls, and answers |
+| [`src/client/use-runs.ts`](src/client/use-runs.ts) | Run list polling, run selection, run controls, and signal delivery |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | Read-only execution dependency graph and run status |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow canvas state, node edits, and connections |
 | [`src/client/graph-model.ts`](src/client/graph-model.ts) | Conversion between definitions and canvas nodes and edges, and connection rules |
@@ -176,7 +180,9 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/client/NodeInspector.tsx`](src/client/NodeInspector.tsx) | Details panel for the selected node and the run result |
 | [`src/client/model.ts`](src/client/model.ts) | Snapshot parsing, node placement, and the execution plan |
 | [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | Runs tab: run list, controls, question forms, and node states |
-| [`src/client/runs-model.ts`](src/client/runs-model.ts) | Run record parsing, grouping, pending requests, and answer building |
+| [`src/client/runs-model.ts`](src/client/runs-model.ts) | Run record parsing, grouping, waiting requests, and answer building |
+| [`src/client/slot-contract.ts`](src/client/slot-contract.ts) | The `workflowStudio.request` slot a node plugin fills with its own request UI |
+| [`src/client/QuestionsRequestForm.tsx`](src/client/QuestionsRequestForm.tsx) | Built-in renderer for `questions` requests |
 
 </details>
 
@@ -214,7 +220,7 @@ The three tool schemas increase every request that exposes the global tool set. 
 - Nodes are called again only after a Host restart; a failed node is not retried within a running Host.
 - `start()` accepts no workflow-level input values.
 - `PortDefinition.type` controls edge compatibility, but the engine does not perform general runtime value-type validation.
-- Human-input requests are answered in the Runs tab, through the `answer` Remote, or with `answerInput()`; they are not forwarded to Harness chat Sessions, and the question form renders every question as a generic option list, including `plan-review` questions.
+- Waiting requests are answered in the Runs tab, through the `signal` Remote, or with `signal()`; they are not forwarded to Harness chat Sessions, and the built-in question form renders every question as a generic option list, including `plan-review` questions.
 - Cancellation during executor work depends on the executor observing `context.signal`.
 - The visual editor does not yet provide undo/redo, copy/paste, groups, automatic layout, or multi-node configuration editing.
 
