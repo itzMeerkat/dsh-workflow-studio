@@ -258,7 +258,7 @@ describe('DagEngineProvider', () => {
     const result = await engine.start(id).result
 
     assert.equal(result.status, 'completed')
-    assert.equal(result.nodeRecords[0]?.status, 'completed')
+    assert.equal(result.nodes[0]?.status, 'completed')
   })
 
   it('保存和读取使用独立快照', async () => {
@@ -362,7 +362,7 @@ describe('DagEngineProvider', () => {
 
     assert.equal(result.status, 'failed')
     assert.match(result.error ?? '', /planned failure/)
-    assert.deepEqual(result.nodeRecords.map(record => record.status), ['failed', 'cancelled'])
+    assert.deepEqual(result.nodes.map(record => record.status), ['failed', 'cancelled'])
   })
 
   it('未选中的分支跳过下游节点', async () => {
@@ -384,7 +384,7 @@ describe('DagEngineProvider', () => {
     const result = await engine.start(id).result
 
     assert.equal(result.status, 'completed')
-    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
   })
 
   it('condition 为 false 时不调用执行器', async () => {
@@ -414,7 +414,7 @@ describe('DagEngineProvider', () => {
     const result = await engine.start(id).result
 
     assert.equal(result.status, 'completed')
-    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
   })
 
   it('condition 非布尔值时节点和工作流失败', async () => {
@@ -459,7 +459,7 @@ describe('DagEngineProvider', () => {
       edges: [{ id: EdgeId('gate'), source: NodeId('gate'), sourcePort: 'true', target: NodeId('probe') }],
     })
     const result = await engine.start(id).result
-    const probe = result.nodeRecords.find(record => record.nodeId === NodeId('probe'))
+    const probe = result.nodes.find(record => record.nodeId === NodeId('probe'))
     assert.equal(probe?.status, 'completed')
     assert.deepEqual(probe?.outputs?.output, {
       connected: ['input'],
@@ -480,7 +480,7 @@ describe('DagEngineProvider', () => {
     })
     const result = await engine.start(id).result
     assert.equal(result.status, 'completed')
-    assert.deepEqual(result.nodeRecords.map(record => record.status), ['skipped', 'skipped'])
+    assert.deepEqual(result.nodes.map(record => record.status), ['skipped', 'skipped'])
   })
 
   it('condition 为 false 时 HITL 节点直接跳过而不暂停', { timeout: 1000 }, async () => {
@@ -495,7 +495,7 @@ describe('DagEngineProvider', () => {
     })
     const result = await engine.start(id).result
     assert.equal(result.status, 'completed')
-    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('confirm'))?.status, 'skipped')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('confirm'))?.status, 'skipped')
   })
 
   it('实例覆盖输入端口时保留基类的 condition 端口', async () => {
@@ -513,7 +513,7 @@ describe('DagEngineProvider', () => {
       ],
     })
     const result = await engine.start(id).result
-    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
   })
 
   it('流程控制节点门控分支，可变输入节点合并选中结果', async () => {
@@ -577,10 +577,10 @@ describe('DagEngineProvider', () => {
     const result = await engine.start(id).result
 
     assert.equal(result.status, 'completed', JSON.stringify(result))
-    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('left'))?.status, 'completed')
-    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('right'))?.status, 'skipped')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('left'))?.status, 'completed')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('right'))?.status, 'skipped')
     assert.deepEqual(
-      result.nodeRecords.find(record => record.nodeId === NodeId('merge'))?.outputs,
+      result.nodes.find(record => record.nodeId === NodeId('merge'))?.outputs,
       { output: 'left' },
     )
   })
@@ -657,14 +657,14 @@ describe('DagEngineProvider', () => {
     ctx.on('dag/input-requested', (_info, _node, requestId) => { requested.resolve(requestId) })
     const run = engine.start(id)
     assert.equal(await requested.promise, 'dsh.confirm')
-    assert.equal(engine.getRun(run.runId)?.nodeRecords[0]?.status, 'awaiting-input')
+    assert.equal(engine.getRun(run.runId)?.nodes[0]?.status, 'awaiting-input')
     assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
 
     run.cancel('operator cancelled')
     const result = await run.result
 
     assert.equal(result.status, 'cancelled')
-    assert.equal(result.nodeRecords[0]?.status, 'cancelled')
+    assert.equal(result.nodes[0]?.status, 'cancelled')
   })
 
   it('requiresHumanInput 批准后执行，拒绝时节点失败', { timeout: 1000 }, async () => {
@@ -695,7 +695,7 @@ describe('DagEngineProvider', () => {
     const result = await run.result
 
     assert.equal(result.status, 'failed')
-    assert.deepEqual(result.nodeRecords.map(record => [record.nodeId, record.status, record.error]), [
+    assert.deepEqual(result.nodes.map(record => [record.nodeId, record.status, record.error]), [
       ['approval-a', 'completed', undefined],
       ['approval-b', 'failed', '人工拒绝执行: not now'],
     ])
@@ -706,12 +706,12 @@ describe('DagEngineProvider', () => {
     const id = await engine.save(linearWorkflow('result-snapshot'))
     const run = engine.start(id)
     const result = await run.result
-    result.nodeRecords[0]!.status = 'failed'
+    result.nodes[0]!.status = 'failed'
 
     const firstRead = engine.getRun(run.runId)
-    assert.equal(firstRead?.nodeRecords[0]?.status, 'completed')
-    firstRead!.nodeRecords[0]!.status = 'failed'
-    assert.equal(engine.getRun(run.runId)?.nodeRecords[0]?.status, 'completed')
+    assert.equal(firstRead?.nodes[0]?.status, 'completed')
+    firstRead!.nodes[0]!.status = 'failed'
+    assert.equal(engine.getRun(run.runId)?.nodes[0]?.status, 'completed')
   })
 
   it('未知工作流和运行 ID 返回明确结果', async () => {

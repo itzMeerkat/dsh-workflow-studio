@@ -106,7 +106,7 @@ describe('WorkflowStudioController', () => {
       nodeRecords: Array<{ nodeId: string; outputs?: Record<string, unknown> }>
     }
     assert.equal(result.status, 'completed')
-    assert.deepEqual(result.nodeRecords.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
+    assert.deepEqual(result.nodes.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
   })
 
   it('按 ID 更新定义时保留工作流身份并允许重命名', async () => {

@@ -8,7 +8,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   DagWorkflowDefinition, WorkflowId, RunId,
-  WorkflowResult, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
+  WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
   DagRunInfo, NodeRunInfo, WorkflowRunStatus, NodeId,
 } from './types.ts'
 
@@ -87,8 +87,8 @@ declare module '@deepseek-ai/cordis' {
 export interface DagRun {
   readonly runId: RunId
   readonly meta: { name: string; description?: string }
-  /** 永不 reject 的结果 promise。 */
-  readonly result: Promise<WorkflowResult>
+  /** 运行结束时以最终运行记录兑现，永不 reject。 */
+  readonly result: Promise<WorkflowRunRecord>
   pause(): void
   resume(): void
   cancel(reason?: string): void
@@ -133,18 +133,11 @@ export abstract class DagEngine extends Service {
   abstract start(workflowId: WorkflowId): DagRun
 
   /**
-   * 获取运行状态，包括已结束并仍保留在运行记录中的运行。
-   * @param runId - 运行 ID。
-   * @returns 运行结果快照，或 undefined。
-   */
-  abstract getRun(runId: RunId): WorkflowResult | undefined
-
-  /**
-   * 获取完整运行记录，包括定义快照和节点的人工输入请求。
+   * 获取运行记录，包括定义快照、节点状态和人工输入请求；已结束并仍保留的运行同样可查。
    * @param runId - 运行 ID。
    * @returns 运行记录快照，或 undefined。
    */
-  abstract getRunRecord(runId: RunId): WorkflowRunRecord | undefined
+  abstract getRun(runId: RunId): WorkflowRunRecord | undefined
 
   /**
    * 列出所有保留的运行，按启动时间从新到旧排列。

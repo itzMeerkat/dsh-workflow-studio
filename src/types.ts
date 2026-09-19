@@ -273,18 +273,6 @@ export interface WorkflowRunSummary {
   completedAt?: number
 }
 
-/** 工作流运行结果。 */
-export interface WorkflowResult {
-  runId: RunId
-  workflowId: WorkflowId
-  name: string
-  status: WorkflowRunStatus
-  error?: string
-  nodeRecords: NodeRunRecord[]
-  startedAt: number
-  completedAt?: number
-}
-
 /** 运行信息（事件负载用）。 */
 export interface DagRunInfo {
   runId: RunId
@@ -335,4 +323,30 @@ export interface WorkflowNodeExecutor {
    * @returns 节点执行结果。
    */
   execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult>
+}
+
+/** 节点目录中的一个节点类型。 */
+export interface NodeTypeSummary {
+  type: string
+  label: string
+  description: string
+  /** 注册该节点类型的 Cordis 插件名。 */
+  sourcePlugin: string
+  requiresHumanInput?: boolean
+  inputs: readonly PortDefinition[]
+  outputs: readonly PortDefinition[]
+  controls: readonly NodeControlDefinition[]
+  variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
+}
+
+/** 浏览器编辑器启动时读取的已保存工作流与节点目录。 */
+export interface WorkflowStudioSnapshot {
+  readonly workflows: ReadonlyArray<{
+    readonly id: WorkflowId
+    readonly name: string
+    readonly description?: string
+    /** 格式化的定义 JSON。 */
+    readonly definition: string
+  }>
+  readonly nodeTypes: readonly NodeTypeSummary[]
 }

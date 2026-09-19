@@ -45,15 +45,35 @@ export function confirmQuestions(node: DagNodeDefinition): AskUserQuestionItem[]
 }
 
 /**
+ * 答案是否批准：问题的唯一选择为 {@link CONFIRM_APPROVE} 且没有自定义文本。
+ * @param answer - 请求的答案。
+ * @param questionId - 批准/拒绝问题的 ID。
+ */
+export function isApproved(answer: AskUserQuestionAnswer, questionId: string): boolean {
+  const item = answer.answers.find(entry => entry.id === questionId)
+  return item?.selected[0] === CONFIRM_APPROVE && item.custom === undefined
+}
+
+/**
+ * 回答人为问题填写的非空自定义文本。
+ * @param answer - 请求的答案。
+ * @param questionId - 问题 ID。
+ * @returns 去除首尾空白的文本，或 undefined。
+ */
+export function answerComment(answer: AskUserQuestionAnswer, questionId: string): string | undefined {
+  const comment = answer.answers.find(entry => entry.id === questionId)?.custom?.trim()
+  return comment === '' ? undefined : comment
+}
+
+/**
  * 确认答案是否批准执行；拒绝时返回写入节点记录的失败原因。
  * @param answer - 确认请求的答案。
  * @returns 批准时为 undefined，否则为失败原因。
  */
 export function confirmRejection(answer: AskUserQuestionAnswer): string | undefined {
-  const item = answer.answers.find(entry => entry.id === CONFIRM_QUESTION_ID)
-  if (item?.selected[0] === CONFIRM_APPROVE && item.custom === undefined) return undefined
-  const comment = item?.custom?.trim()
-  return comment === undefined || comment === '' ? '人工拒绝执行' : `人工拒绝执行: ${comment}`
+  if (isApproved(answer, CONFIRM_QUESTION_ID)) return undefined
+  const comment = answerComment(answer, CONFIRM_QUESTION_ID)
+  return comment === undefined ? '人工拒绝执行' : `人工拒绝执行: ${comment}`
 }
 
 function nonEmptyString(value: unknown, path: string): string {

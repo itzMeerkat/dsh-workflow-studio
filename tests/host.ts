@@ -17,7 +17,7 @@ import {
 } from '@deepseek-ai/dsh-storage-domain'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider, type DagEngineConfig } from '../src/engine-provider.ts'
-import type { RunId, WorkflowNodeExecutor, WorkflowResult } from '../src/types.ts'
+import type { RunId, WorkflowNodeExecutor, WorkflowRunRecord } from '../src/types.ts'
 
 /** 一组测试共享的 Host 与临时目录；`cleanup()` 在 afterEach 中调用。 */
 export class TestHosts {
@@ -70,7 +70,7 @@ export class TestHosts {
  * @param ctx - 运行所在的 Host。
  * @param runId - 运行 ID。
  */
-export function runEnded(ctx: Context, runId: RunId): Promise<WorkflowResult> {
+export function runEnded(ctx: Context, runId: RunId): Promise<WorkflowRunRecord> {
   const current = ctx.dagEngine.getRun(runId)
   if (current !== undefined && ['completed', 'failed', 'cancelled'].includes(current.status)) {
     return Promise.resolve(current)

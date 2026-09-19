@@ -1,7 +1,7 @@
 /**
- * 工作流定义的共享 JSON schema。
+ * 工作流定义、运行记录与编辑器快照的共享 JSON schema。
  *
- * Host 用它校验持久化记录，浏览器用它解析 Remote 返回的定义。
+ * Host 用它校验持久化记录和 Remote 入参，浏览器用它解析 Remote 返回值。
  * @module dsh-workflow-studio
  */
 
@@ -10,10 +10,17 @@ import type {
   DagEdgeDefinition,
   DagNodeDefinition,
   DagWorkflowDefinition,
+  HumanInputRequest,
+  JsonObject,
+  JsonValue,
   NodeControlDefinition,
+  NodeRunRecord,
   PortDefinition,
+  WorkflowRunRecord,
+  WorkflowRunSummary,
+  WorkflowStudioSnapshot,
 } from './types.ts'
-import { EdgeId, NodeId } from './types.ts'
+import { EdgeId, NodeId, RunId, WorkflowId } from './types.ts'
 
 const nonEmptyString = z.string().refine(value => value.trim() !== '', {
   error: '必须为非空字符串',
@@ -116,3 +123,105 @@ export const workflowDefinitionSchema: z.ZodType<DagWorkflowDefinition> = z.obje
   ...(raw.inputs === undefined ? {} : { inputs: raw.inputs }),
   ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
 }))
+
+const runStatus = z.enum(['running', 'paused', 'interrupted', 'completed', 'failed', 'cancelled'])
+
+const jsonObject = z.record(z.string(), z.json()) as z.ZodType<JsonObject>
+
+// 问题和答案在提问与回答时由 human-input.ts 校验；此处只要求可读回的 JSON 结构。
+const humanInputRequestSchema = z.object({
+  id: z.string().min(1),
+  questions: z.array(z.json()) as unknown as z.ZodType<HumanInputRequest['questions']>,
+  answer: (z.json() as unknown as z.ZodType<NonNullable<HumanInputRequest['answer']>>).optional(),
+  askedAt: z.number(),
+  answeredAt: z.number().optional(),
+}).transform((raw): HumanInputRequest => ({
+  id: raw.id,
+  questions: raw.questions,
+  askedAt: raw.askedAt,
+  ...(raw.answer === undefined ? {} : { answer: raw.answer }),
+  ...(raw.answeredAt === undefined ? {} : { answeredAt: raw.answeredAt }),
+}))
+
+const nodeRunRecordSchema = z.object({
+  nodeId: z.string().min(1).transform(NodeId),
+  runId: z.string().min(1).transform(RunId),
+  status: z.enum(['pending', 'running', 'awaiting-input', 'completed', 'skipped', 'failed', 'cancelled']),
+  attempts: z.number().int().nonnegative(),
+  inputs: jsonObject.optional(),
+  outputs: jsonObject.optional(),
+  error: z.string().optional(),
+  notepad: (z.json() as z.ZodType<JsonValue>).optional(),
+  interactions: z.array(humanInputRequestSchema).optional(),
+  startedAt: z.number(),
+  completedAt: z.number().optional(),
+}).transform((raw): NodeRunRecord => ({
+  nodeId: raw.nodeId,
+  runId: raw.runId,
+  status: raw.status,
+  attempts: raw.attempts,
+  startedAt: raw.startedAt,
+  ...(raw.inputs === undefined ? {} : { inputs: raw.inputs }),
+  ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
+  ...(raw.error === undefined ? {} : { error: raw.error }),
+  ...(raw.notepad === undefined ? {} : { notepad: raw.notepad }),
+  ...(raw.interactions === undefined ? {} : { interactions: raw.interactions }),
+  ...(raw.completedAt === undefined ? {} : { completedAt: raw.completedAt }),
+}))
+
+/** 一条运行记录的持久化 schema。 */
+export const workflowRunRecordSchema: z.ZodType<WorkflowRunRecord> = z.object({
+  runId: z.string().min(1).transform(RunId),
+  workflowId: z.string().min(1).transform(WorkflowId),
+  definition: workflowDefinitionSchema,
+  status: runStatus,
+  error: z.string().optional(),
+  startedAt: z.number(),
+  updatedAt: z.number(),
+  completedAt: z.number().optional(),
+  nodes: z.array(nodeRunRecordSchema),
+}).transform((raw): WorkflowRunRecord => ({
+  runId: raw.runId,
+  workflowId: raw.workflowId,
+  definition: raw.definition,
+  status: raw.status,
+  startedAt: raw.startedAt,
+  updatedAt: raw.updatedAt,
+  nodes: raw.nodes,
+  ...(raw.error === undefined ? {} : { error: raw.error }),
+  ...(raw.completedAt === undefined ? {} : { completedAt: raw.completedAt }),
+}))
+
+/** 运行列表中一行的 Remote JSON schema。 */
+export const workflowRunSummarySchema = z.object({
+  runId: z.string().min(1).transform(RunId),
+  workflowId: z.string().min(1).transform(WorkflowId),
+  name: z.string(),
+  status: runStatus,
+  awaitingInput: z.number().int().nonnegative(),
+  error: z.string().optional(),
+  startedAt: z.number(),
+  updatedAt: z.number(),
+  completedAt: z.number().optional(),
+}) as unknown as z.ZodType<WorkflowRunSummary>
+
+/** 编辑器快照的 Remote JSON schema。 */
+export const workflowStudioSnapshotSchema = z.object({
+  workflows: z.array(z.object({
+    id: z.string().min(1).transform(WorkflowId),
+    name: z.string(),
+    description: z.string().optional(),
+    definition: z.string(),
+  })),
+  nodeTypes: z.array(z.object({
+    type: z.string(),
+    label: z.string(),
+    description: z.string(),
+    sourcePlugin: z.string(),
+    requiresHumanInput: z.boolean().optional(),
+    inputs: z.array(workflowPortSchema),
+    outputs: z.array(workflowPortSchema),
+    controls: z.array(nodeControlSchema),
+    variadicInputs: z.object({ min: z.number(), outputType: z.literal('same').optional() }).optional(),
+  })),
+}) as unknown as z.ZodType<WorkflowStudioSnapshot>

@@ -7,36 +7,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
-import { NodeId, RunId, WorkflowId } from './types.ts'
-import { parseWorkflowDefinition } from './tools.ts'
+import { NodeId, RunId, WorkflowId, type WorkflowStudioSnapshot } from './types.ts'
+import { workflowDefinitionSchema } from './workflow-schema.ts'
+import { messageOf } from './errors.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     workflowStudioController: WorkflowStudioController
   }
-}
-
-/** Browser-safe catalog entry for one registered node type. */
-export interface WorkflowNodeCatalogEntry {
-  readonly type: string
-  readonly label: string
-  readonly description: string
-  readonly sourcePlugin: string
-  readonly inputs: readonly import('./types.ts').PortDefinition[]
-  readonly outputs: readonly import('./types.ts').PortDefinition[]
-  readonly controls: readonly import('./types.ts').NodeControlDefinition[]
-  readonly variadicInputs?: import('./types.ts').WorkflowNodeExecutor['variadicInputs']
-}
-
-/** Browser editor bootstrap payload encoded as JSON. */
-export interface WorkflowStudioSnapshot {
-  readonly workflows: ReadonlyArray<{
-    readonly id: string
-    readonly name: string
-    readonly description?: string
-    readonly definition: string
-  }>
-  readonly nodeTypes: readonly WorkflowNodeCatalogEntry[]
 }
 
 /** Host controller backing the `workflowStudio` Remote namespace. */
@@ -68,16 +46,7 @@ export class WorkflowStudioController extends TypertRemoteService {
           definition: JSON.stringify(definition, null, 2),
         }
       }),
-      nodeTypes: this.registry.listTypes().map(node => ({
-        type: node.type,
-        label: node.label,
-        description: node.description,
-        sourcePlugin: node.sourcePlugin,
-        inputs: node.inputs ?? [],
-        outputs: node.outputs ?? [],
-        controls: node.controls ?? [],
-        ...(node.variadicInputs === undefined ? {} : { variadicInputs: node.variadicInputs }),
-      })),
+      nodeTypes: this.registry.listTypes(),
     }
     return JSON.stringify(payload)
   }
@@ -90,7 +59,7 @@ export class WorkflowStudioController extends TypertRemoteService {
   @Remote
   async save(source: string): Promise<string> {
     try {
-      const definition = parseWorkflowDefinition(JSON.parse(source) as unknown)
+      const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
       return await this.engine.save(definition)
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
@@ -106,7 +75,7 @@ export class WorkflowStudioController extends TypertRemoteService {
   @Remote
   async update(workflowId: string, source: string): Promise<string> {
     try {
-      const definition = parseWorkflowDefinition(JSON.parse(source) as unknown)
+      const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
       return await this.engine.update(WorkflowId(workflowId), definition)
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
@@ -212,7 +181,7 @@ export class WorkflowStudioController extends TypertRemoteService {
   }
 
   private record(runId: string): string {
-    const record = this.engine.getRunRecord(RunId(runId))
+    const record = this.engine.getRun(RunId(runId))
     if (record === undefined) throw new RemoteError('gateway/bad-request', `运行 ${runId} 不存在`, {})
     return JSON.stringify(record)
   }
@@ -224,10 +193,6 @@ export class WorkflowStudioController extends TypertRemoteService {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 export default WorkflowStudioController

@@ -41,22 +41,24 @@ export { WorkflowNodeRegistry } from './registry.ts'
 export { DagEngineProvider, topologicalSort } from './engine-provider.ts'
 export type { DagEngineConfig } from './engine-provider.ts'
 export { workflowRunsDomainSpec } from './run-persistence.ts'
-export { CONFIRM_REQUEST_ID, CONFIRM_QUESTION_ID, CONFIRM_APPROVE, CONFIRM_REJECT } from './human-input.ts'
+export {
+  CONFIRM_REQUEST_ID, CONFIRM_QUESTION_ID, CONFIRM_APPROVE, CONFIRM_REJECT, answerComment, isApproved,
+} from './human-input.ts'
 export { CONDITION_PORT, NodeFailure, WorkflowNode } from './node.ts'
 export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
 export { WorkflowStudioController } from './controller.ts'
 export { workflowStudioDomainSpec } from './persistence.ts'
-export { workflowDefinitionSchema } from './workflow-schema.ts'
+export { workflowDefinitionSchema, workflowRunRecordSchema } from './workflow-schema.ts'
 export { DagEngine } from './engine.ts'
 export type { DagRun } from './engine.ts'
 export type {
   DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
   NodeExecutionCompleted, NodeExecutionFailed, NodeExecutionSkipped, NodeControlDefinition,
-  WorkflowResult, WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
+  WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
   NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, HumanInputRequest,
-  NodeRunRecord, NodeRunStatus, PortDefinition,
+  NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, WorkflowStudioSnapshot,
 } from './types.ts'
 export {
   WorkflowId, RunId, NodeId, EdgeId,

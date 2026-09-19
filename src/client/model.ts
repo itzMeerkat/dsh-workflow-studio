@@ -1,115 +1,21 @@
-/** Browser-side workflow DTOs used by the visual editor. */
+/** Browser-side workflow editing helpers used by the visual editor. */
 
-import { z } from 'zod'
-import { nodeControlSchema, workflowDefinitionSchema, workflowPortSchema } from '../workflow-schema.ts'
+import { topologicalLevels } from '../graph.ts'
+import { NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowStudioSnapshot } from '../types.ts'
+import { workflowDefinitionSchema, workflowStudioSnapshotSchema } from '../workflow-schema.ts'
 
-export interface EditorPort {
-  readonly name: string
-  readonly type: 'number' | 'string' | 'boolean' | 'any'
-  readonly description?: string
-  readonly required?: boolean
-  readonly role?: 'condition'
-  readonly display?: 'value' | 'json'
-}
+/** One saved workflow in the editor snapshot. */
+export type WorkflowRow = WorkflowStudioSnapshot['workflows'][number]
 
-export type EditorControl =
-  | {
-    readonly name: string
-    readonly label: string
-    readonly kind: 'number'
-    readonly defaultValue: number
-    readonly min?: number
-    readonly max?: number
-    readonly step?: number
-  }
-  | {
-    readonly name: string
-    readonly label: string
-    readonly kind: 'text'
-    readonly defaultValue: string
-    readonly placeholder?: string
-  }
-  | {
-    readonly name: string
-    readonly label: string
-    readonly kind: 'boolean'
-    readonly defaultValue: boolean
-  }
-  | {
-    readonly name: string
-    readonly label: string
-    readonly kind: 'select'
-    readonly defaultValue: string
-    readonly options: readonly { readonly label: string; readonly value: string }[]
-  }
-
-export interface EditorNode {
-  readonly id: string
-  readonly type: string
-  readonly label?: string
-  readonly config: Record<string, unknown>
-  readonly requiresHumanInput?: boolean
-  readonly recovery?: 'rerun' | 'hold'
-  readonly inputs?: readonly EditorPort[]
-  readonly outputs?: readonly EditorPort[]
-  readonly position?: { readonly x: number; readonly y: number }
-}
-
-export interface EditorEdge {
-  readonly id: string
-  readonly source: string
-  readonly sourcePort?: string
-  readonly target: string
-  readonly targetPort?: string
-}
-
-export interface EditorWorkflowDefinition {
-  readonly name: string
-  readonly description?: string
-  readonly nodes: readonly EditorNode[]
-  readonly edges: readonly EditorEdge[]
-}
-
-export interface NodeTypeRow {
-  readonly type: string
-  readonly label: string
-  readonly description: string
-  readonly sourcePlugin: string
-  readonly inputs: readonly EditorPort[]
-  readonly outputs: readonly EditorPort[]
-  readonly controls: readonly EditorControl[]
-  readonly variadicInputs?: {
-    readonly min: number
-    readonly outputType?: 'same'
-  }
-}
-
-export interface WorkflowRow {
-  readonly id: string
-  readonly name: string
-  readonly description?: string
-  readonly definition: string
-}
-
-export interface WorkflowStudioSnapshot {
-  readonly workflows: readonly WorkflowRow[]
-  readonly nodeTypes: readonly NodeTypeRow[]
-}
-
-export interface EditorNodeRunRecord {
-  readonly nodeId: string
-  readonly status: string
-  readonly outputs?: Readonly<Record<string, unknown>>
-}
-
+/** A scheduling dependency between two nodes, with the branch port when it gates the target. */
 export interface ExecutionDependency {
-  readonly source: EditorNode
-  readonly target: EditorNode
+  readonly source: DagNodeDefinition
+  readonly target: DagNodeDefinition
   readonly conditionSourcePort?: string
 }
 
 export interface ExecutionPlanNode {
-  readonly node: EditorNode
+  readonly node: DagNodeDefinition
   readonly dependencies: readonly ExecutionDependency[]
 }
 
@@ -124,39 +30,20 @@ export interface ExecutionPlan {
   readonly cyclicNodeIds: readonly string[]
 }
 
-const snapshotSchema = z.object({
-  workflows: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    description: z.string().optional(),
-    definition: z.string(),
-  })),
-  nodeTypes: z.array(z.object({
-    type: z.string(),
-    label: z.string(),
-    description: z.string(),
-    sourcePlugin: z.string(),
-    inputs: z.array(workflowPortSchema),
-    outputs: z.array(workflowPortSchema),
-    controls: z.array(nodeControlSchema),
-    variadicInputs: z.object({ min: z.number(), outputType: z.literal('same').optional() }).optional(),
-  })),
-}) as unknown as z.ZodType<WorkflowStudioSnapshot>
-
 /**
  * Parse the `snapshot` Remote result.
  * @param source - JSON snapshot.
  * @returns The workflows and node catalog.
  */
 export function parseSnapshot(source: string): WorkflowStudioSnapshot {
-  return snapshotSchema.parse(JSON.parse(source) as unknown)
+  return workflowStudioSnapshotSchema.parse(JSON.parse(source) as unknown)
 }
 
 /** Filter node types by user-visible metadata and source plugin. */
 export function filterNodeTypes(
-  nodeTypes: readonly NodeTypeRow[],
+  nodeTypes: readonly NodeTypeSummary[],
   query: string,
-): readonly NodeTypeRow[] {
+): readonly NodeTypeSummary[] {
   const needle = query.trim().toLocaleLowerCase()
   if (needle === '') return nodeTypes
   return nodeTypes.filter(node => [
@@ -193,10 +80,10 @@ export function nextWorkflowName(workflows: readonly Pick<WorkflowRow, 'name'>[]
  * @returns A new definition containing the positioned node.
  */
 export function appendEditorNode(
-  definition: EditorWorkflowDefinition,
-  nodeType: NodeTypeRow,
-): EditorWorkflowDefinition {
-  const id = nextEditorNodeId(nodeType.type, definition.nodes)
+  definition: DagWorkflowDefinition,
+  nodeType: NodeTypeSummary,
+): DagWorkflowDefinition {
+  const id = NodeId(nextEditorNodeId(nodeType.type, definition.nodes))
   return {
     ...definition,
     nodes: [
@@ -211,8 +98,8 @@ export function appendEditorNode(
         ...(nodeType.variadicInputs === undefined
           ? {}
           : {
-            inputs: nodeType.inputs,
-            outputs: nodeType.outputs,
+            inputs: [...nodeType.inputs],
+            outputs: [...nodeType.outputs],
           }),
       },
     ],
@@ -220,96 +107,47 @@ export function appendEditorNode(
 }
 
 /** Group nodes into the same topological stages used by the workflow scheduler. */
-export function createExecutionPlan(definition: EditorWorkflowDefinition): ExecutionPlan {
-  type PendingDependency = {
-    source: EditorNode
-    target: EditorNode
-    conditionSourcePort?: string
-  }
-
+export function createExecutionPlan(definition: DagWorkflowDefinition): ExecutionPlan {
+  const { levels, cyclic } = topologicalLevels(definition.nodes, definition.edges)
   const nodeById = new Map(definition.nodes.map(node => [node.id, node]))
-  const inDegree = new Map(definition.nodes.map(node => [node.id, 0]))
-  const outgoing = new Map(definition.nodes.map(node => [node.id, new Set<string>()]))
-  const incoming = new Map(definition.nodes.map(node => [node.id, [] as PendingDependency[]]))
-  const dependencies: PendingDependency[] = []
-
+  const incoming = new Map(definition.nodes.map(node => [node.id, [] as { -readonly [K in keyof ExecutionDependency]: ExecutionDependency[K] }[]]))
+  const dependencies: ExecutionDependency[] = []
   for (const edge of definition.edges) {
-    const source = nodeById.get(edge.source)
-    const target = nodeById.get(edge.target)
-    if (source === undefined) {
-      throw new Error(`Execution plan references unknown node ${edge.source}`)
-    }
-    if (target === undefined) {
-      throw new Error(`Execution plan references unknown node ${edge.target}`)
-    }
-    const sourceTargets = outgoing.get(source.id)!
-    const targetDependencies = incoming.get(target.id)!
-    const conditionSourcePort = edge.targetPort === 'condition'
-      ? edge.sourcePort
-      : undefined
-    const existing = targetDependencies.find(dependency => dependency.source.id === source.id)
+    const conditionSourcePort = edge.targetPort === 'condition' ? edge.sourcePort : undefined
+    const targetDependencies = incoming.get(edge.target)!
+    const existing = targetDependencies.find(dependency => dependency.source.id === edge.source)
     if (existing !== undefined) {
       if (existing.conditionSourcePort === undefined && conditionSourcePort !== undefined) {
         existing.conditionSourcePort = conditionSourcePort
       }
       continue
     }
-    const dependency: PendingDependency = {
-      source,
-      target,
+    const dependency = {
+      source: nodeById.get(edge.source)!,
+      target: nodeById.get(edge.target)!,
       ...(conditionSourcePort === undefined ? {} : { conditionSourcePort }),
     }
-    sourceTargets.add(target.id)
     targetDependencies.push(dependency)
     dependencies.push(dependency)
-    inDegree.set(edge.target, inDegree.get(edge.target)! + 1)
   }
-
-  const stages: ExecutionStage[] = []
-  let frontier = [...inDegree.entries()]
-    .filter(([, degree]) => degree === 0)
-    .map(([nodeId]) => nodeId)
-
-  while (frontier.length > 0) {
-    const nextFrontier: string[] = []
-    stages.push({
-      index: stages.length + 1,
-      nodes: frontier.map((nodeId) => {
-        return {
-          node: nodeById.get(nodeId)!,
-          dependencies: incoming.get(nodeId)!,
-        }
-      }),
-    })
-
-    for (const nodeId of frontier) {
-      for (const targetId of outgoing.get(nodeId)!) {
-        const nextDegree = inDegree.get(targetId)! - 1
-        inDegree.set(targetId, nextDegree)
-        if (nextDegree === 0) nextFrontier.push(targetId)
-      }
-    }
-    frontier = nextFrontier
-  }
-
-  const scheduled = new Set(stages.flatMap(stage => stage.nodes.map(item => item.node.id)))
   return {
-    stages,
+    stages: levels.map((nodes, index) => ({
+      index: index + 1,
+      nodes: nodes.map(node => ({ node, dependencies: incoming.get(node.id)! })),
+    })),
     dependencies,
-    cyclicNodeIds: definition.nodes
-      .filter(node => !scheduled.has(node.id))
-      .map(node => node.id),
+    cyclicNodeIds: cyclic.map(node => node.id),
   }
 }
 
-function nextEditorNodeId(type: string, nodes: readonly EditorNode[]): string {
-  const used = new Set(nodes.map(node => node.id))
+function nextEditorNodeId(type: string, nodes: readonly DagNodeDefinition[]): string {
+  const used = new Set<string>(nodes.map(node => node.id))
   let index = 1
   while (used.has(`${type}-${index}`)) index += 1
   return `${type}-${index}`
 }
 
-function nextEditorNodePosition(nodes: readonly EditorNode[]): { x: number; y: number } {
+function nextEditorNodePosition(nodes: readonly DagNodeDefinition[]): { x: number; y: number } {
   const occupiedPositions = nodes.map((node, index) => node.position ?? {
     x: 80 + (index % 4) * 240,
     y: 80 + Math.floor(index / 4) * 180,
@@ -371,11 +209,11 @@ function hasAlternatePath(
 }
 
 /** Parse a workflow with the same schema used by Host persistence. */
-export function parseEditorDefinition(source: string): EditorWorkflowDefinition {
+export function parseEditorDefinition(source: string): DagWorkflowDefinition {
   return workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
 }
 
 /** Encode one editor definition for the Host parser. */
-export function formatEditorDefinition(definition: EditorWorkflowDefinition): string {
+export function formatEditorDefinition(definition: DagWorkflowDefinition): string {
   return JSON.stringify(definition, null, 2)
 }

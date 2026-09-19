@@ -104,7 +104,7 @@ export async function runWorkflow(ctx: Context, name: string) {
 }
 ```
 
-`run.result` settles with a `WorkflowResult` and does not reject. A run restored after a Host restart has no handle; control it by ID with `pauseRun()`, `resumeRun()`, `cancelRun()`, and `answerInput()`, and read it with `getRun()` or `listRuns()`.
+`run.result` settles with the final `WorkflowRunRecord` and does not reject. A run restored after a Host restart has no handle; control it by ID with `pauseRun()`, `resumeRun()`, `cancelRun()`, and `answerInput()`, and read it with `getRun()` or `listRuns()`.
 
 ## Modify safely
 

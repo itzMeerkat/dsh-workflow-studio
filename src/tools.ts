@@ -7,18 +7,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { DagWorkflowDefinition } from './types.ts'
 import { RunId } from './types.ts'
 import { workflowDefinitionSchema } from './workflow-schema.ts'
-
-/**
- * Parse one untrusted JSON value into a workflow definition.
- * @param value - Decoded JSON value received from a tool or Remote caller.
- * @returns A detached definition ready for engine validation.
- */
-export function parseWorkflowDefinition(value: unknown): DagWorkflowDefinition {
-  return workflowDefinitionSchema.parse(value)
-}
 
 /**
  * 注册所有工作流模型工具。
@@ -64,7 +54,7 @@ export function registerWorkflowTools(ctx: Context): () => void {
       ],
     },
     async execute(args, _exec) {
-      const def = parseWorkflowDefinition({
+      const def = workflowDefinitionSchema.parse({
         name: args.name,
         nodes: args.nodes,
         edges: args.edges,
@@ -148,10 +138,10 @@ export function registerWorkflowTools(ctx: Context): () => void {
       if (result === undefined) throw new Error(`运行 ${args.runId} 不存在`)
       return {
         runId: result.runId,
-        name: result.name,
+        name: result.definition.name,
         status: result.status,
         ...(result.error === undefined ? {} : { error: result.error }),
-        nodes: result.nodeRecords.map(record => ({
+        nodes: result.nodes.map(record => ({
           nodeId: record.nodeId,
           status: record.status,
           attempts: record.attempts,

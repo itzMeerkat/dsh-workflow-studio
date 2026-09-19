@@ -116,7 +116,7 @@ describe('节点人工输入', () => {
     const runId = await saveAsker(engine)
     assert.equal((await requested).requestId, 'pick')
 
-    const waiting = engine.getRun(runId)!.nodeRecords[0]!
+    const waiting = engine.getRun(runId)!.nodes[0]!
     assert.equal(waiting.status, 'awaiting-input')
     assert.deepEqual(waiting.interactions?.map(item => [item.id, item.answer]), [['pick', undefined]])
     assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
@@ -130,8 +130,8 @@ describe('节点人工输入', () => {
     await assert.rejects(engine.answerInput(runId, NodeId('ask'), 'pick', ANSWER), /已回答/)
     const result = await done
     assert.equal(result.status, 'completed')
-    assert.deepEqual(result.nodeRecords[0]?.outputs, { answer: ANSWER })
-    assert.deepEqual(result.nodeRecords[0]?.interactions?.[0]?.answer, ANSWER)
+    assert.deepEqual(result.nodes[0]?.outputs, { answer: ANSWER })
+    assert.deepEqual(result.nodes[0]?.interactions?.[0]?.answer, ANSWER)
     assert.equal(engine.listRuns()[0]?.awaitingInput, 0)
     await assert.rejects(engine.answerInput(runId, NodeId('ask'), 'pick', ANSWER), /已回答|已结束/)
   })
@@ -158,8 +158,8 @@ describe('节点人工输入', () => {
 
     const calls = { asks: 0 }
     const second = await hosts.start(root, executors(calls))
-    await until(() => second.engine.getRun(runId)?.nodeRecords[0]?.status === 'awaiting-input' && calls.asks === 1)
-    const record = second.engine.getRun(runId)!.nodeRecords[0]!
+    await until(() => second.engine.getRun(runId)?.nodes[0]?.status === 'awaiting-input' && calls.asks === 1)
+    const record = second.engine.getRun(runId)!.nodes[0]!
     assert.equal(calls.asks, 1)
     assert.equal(record.interactions?.length, 1)
 
@@ -167,7 +167,7 @@ describe('节点人工输入', () => {
     await second.engine.answerInput(runId, NodeId('ask'), 'pick', ANSWER)
     const result = await done
     assert.equal(result.status, 'completed')
-    assert.equal(result.nodeRecords[0]?.attempts, 2)
+    assert.equal(result.nodes[0]?.attempts, 2)
   })
 
   it('重启前已回答的问题在重新调用时直接返回保存的答案', async () => {
@@ -182,8 +182,8 @@ describe('节点人工输入', () => {
     const second = await hosts.start(root, executors({ asks: 0 }))
     const result = await runEnded(second.ctx, runId)
     assert.equal(result.status, 'completed')
-    assert.deepEqual(result.nodeRecords[0]?.outputs, { answer: ANSWER })
-    assert.equal(result.nodeRecords[0]?.interactions?.length, 1)
+    assert.deepEqual(result.nodes[0]?.outputs, { answer: ANSWER })
+    assert.equal(result.nodes[0]?.interactions?.length, 1)
   })
 
   it('interrupted 运行也可回答，恢复后节点直接得到答案', async () => {
@@ -202,7 +202,7 @@ describe('节点人工输入', () => {
 
     const done = runEnded(second.ctx, runId)
     second.engine.resumeRun(runId)
-    assert.deepEqual((await done).nodeRecords[0]?.outputs, { answer: ANSWER })
+    assert.deepEqual((await done).nodes[0]?.outputs, { answer: ANSWER })
   })
 
   it('仅等待执行前确认的节点在重启后自动恢复，不受 recovery: hold 约束', async () => {

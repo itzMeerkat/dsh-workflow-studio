@@ -6,29 +6,12 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type {
-  NodeControlDefinition,
-  PortDefinition,
-  WorkflowNodeExecutor,
-} from './types.ts'
+import type { NodeTypeSummary, WorkflowNodeExecutor } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     workflowNodeRegistry: WorkflowNodeRegistry
   }
-}
-
-/** 节点类型列表查询结果摘要。 */
-export interface NodeTypeSummary {
-  type: string
-  label: string
-  description: string
-  sourcePlugin: string
-  requiresHumanInput?: boolean
-  inputs: readonly PortDefinition[]
-  outputs: readonly PortDefinition[]
-  controls: readonly NodeControlDefinition[]
-  variadicInputs?: WorkflowNodeExecutor['variadicInputs']
 }
 
 /**

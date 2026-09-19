@@ -28,12 +28,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
 import { RunsView, type RunAction, type RunsFilter } from './RunsView.tsx'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
-import type {
-  EditorWorkflowDefinition,
-  NodeTypeRow,
-  WorkflowRow,
-  WorkflowStudioSnapshot,
-} from './model.ts'
+import { messageOf } from '../errors.ts'
+import type { DagWorkflowDefinition, NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary, WorkflowStudioSnapshot } from '../types.ts'
+import type { WorkflowRow } from './model.ts'
 import {
   appendEditorNode,
   formatEditorDefinition,
@@ -49,8 +46,6 @@ import {
   parseRunRecord,
   parseRunSummaries,
   runRecordsByNode,
-  type RunRecordView,
-  type RunSummaryRow,
 } from './runs-model.ts'
 import css from './WorkflowStudioPanel.module.css'
 
@@ -61,7 +56,7 @@ const PANEL_ID = 'dsh-workflow-studio' as MainPanelId
 export const inject = ['slots', 'locale', 'remote']
 
 /** An empty workflow; Studio registers no nodes, so the template names none. */
-function createDefaultDefinition(name: string): EditorWorkflowDefinition {
+function createDefaultDefinition(name: string): DagWorkflowDefinition {
   return { name, nodes: [], edges: [] }
 }
 
@@ -80,15 +75,15 @@ interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
 export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
   const [snapshot, setSnapshot] = useState<WorkflowStudioSnapshot>({ workflows: [], nodeTypes: [] })
   const [selectedId, setSelectedId] = useState<string>()
-  const [definition, setDefinition] = useState<EditorWorkflowDefinition>(INITIAL_DEFINITION)
+  const [definition, setDefinition] = useState<DagWorkflowDefinition>(INITIAL_DEFINITION)
   const [revision, setRevision] = useState(0)
   const [view, setView] = useState<'canvas' | 'execution' | 'runs'>('canvas')
   const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'running'>('loading')
   const [notice, setNotice] = useState<string>()
-  const [runs, setRuns] = useState<readonly RunSummaryRow[]>([])
+  const [runs, setRuns] = useState<readonly WorkflowRunSummary[]>([])
   const [runsFilter, setRunsFilter] = useState<RunsFilter>('workflow')
   const [selectedRunId, setSelectedRunId] = useState<string>()
-  const [runRecord, setRunRecord] = useState<RunRecordView>()
+  const [runRecord, setRunRecord] = useState<WorkflowRunRecord>()
   const [runBusy, setRunBusy] = useState(false)
   const selectedRunRef = useRef<string | undefined>(undefined)
   selectedRunRef.current = selectedRunId
@@ -280,11 +275,11 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
     }
   }
 
-  const updateDefinition = (next: EditorWorkflowDefinition): void => {
+  const updateDefinition = (next: DagWorkflowDefinition): void => {
     setDefinition(next)
   }
 
-  const addNode = (nodeType: NodeTypeRow): void => {
+  const addNode = (nodeType: NodeTypeSummary): void => {
     updateDefinition(appendEditorNode(definition, nodeType))
     setRevision(value => value + 1)
     setNotice(undefined)
@@ -551,9 +546,9 @@ function NodeLibraryMenu({
   onSelect,
 }: {
   readonly disabled: boolean
-  readonly nodeTypes: readonly NodeTypeRow[]
+  readonly nodeTypes: readonly NodeTypeSummary[]
   readonly t: WorkflowStudioPanelProps['t']
-  readonly onSelect: (nodeType: NodeTypeRow) => void
+  readonly onSelect: (nodeType: NodeTypeSummary) => void
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -648,10 +643,6 @@ function usePickerLifecycle(
 
 function WorkflowStudioIcon() {
   return <IconBranchOutline16 size={16} />
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 const dictionaries = {

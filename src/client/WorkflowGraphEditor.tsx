@@ -35,15 +35,19 @@ import {
   useRef,
   useState,
 } from 'react'
-import type {
-  EditorControl,
-  EditorEdge,
-  EditorNode,
-  EditorNodeRunRecord,
-  EditorPort,
-  EditorWorkflowDefinition,
-  NodeTypeRow,
-} from './model.ts'
+import { messageOf } from '../errors.ts'
+import { portsAreCompatible, resolveInputPorts } from '../graph.ts'
+import {
+  EdgeId,
+  NodeId,
+  type DagEdgeDefinition,
+  type DagNodeDefinition,
+  type DagWorkflowDefinition,
+  type NodeControlDefinition,
+  type NodeRunRecord,
+  type NodeTypeSummary,
+  type PortDefinition,
+} from '../types.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 type GraphEditorKey =
@@ -64,21 +68,21 @@ type GraphEditorKey =
 type Translate = (key: GraphEditorKey) => string
 
 type WorkflowNodeData = {
-  definition: EditorNode
-  catalog?: NodeTypeRow
-  runRecord?: EditorNodeRunRecord
+  definition: DagNodeDefinition
+  catalog?: NodeTypeSummary
+  runRecord?: NodeRunRecord
 } & Record<string, unknown>
 
 type WorkflowFlowNode = Node<WorkflowNodeData, 'workflow'>
 
 interface WorkflowGraphEditorProps {
-  readonly definition: EditorWorkflowDefinition
+  readonly definition: DagWorkflowDefinition
   readonly revision: number
-  readonly nodeTypes: readonly NodeTypeRow[]
-  readonly runRecords: ReadonlyMap<string, EditorNodeRunRecord>
+  readonly nodeTypes: readonly NodeTypeSummary[]
+  readonly runRecords: ReadonlyMap<string, NodeRunRecord>
   readonly runResult?: string
   readonly t: Translate
-  readonly onChange: (definition: EditorWorkflowDefinition) => void
+  readonly onChange: (definition: DagWorkflowDefinition) => void
   readonly onError: (message: string | undefined) => void
 }
 
@@ -208,7 +212,7 @@ export function WorkflowGraphEditor({
     })
   }
 
-  const updateSelected = (patch: Partial<EditorNode>): void => {
+  const updateSelected = (patch: Partial<DagNodeDefinition>): void => {
     if (selectedNodeId === undefined) return
     setNodes((current) => {
       const next = current.map(node => node.id === selectedNodeId
@@ -407,7 +411,7 @@ function PortRow({
   port,
   side,
 }: {
-  readonly port: EditorPort
+  readonly port: PortDefinition
   readonly side: 'input' | 'output'
 }) {
   const isInput = side === 'input'
@@ -439,7 +443,7 @@ function NodeControl({
   value,
   onChange,
 }: {
-  readonly control: EditorControl
+  readonly control: NodeControlDefinition
   readonly value: unknown
   readonly onChange: (value: unknown) => void
 }) {
@@ -498,9 +502,9 @@ function NodeControl({
 }
 
 function flowNodes(
-  definition: EditorWorkflowDefinition,
-  catalog: ReadonlyMap<string, NodeTypeRow>,
-  runRecords: ReadonlyMap<string, EditorNodeRunRecord>,
+  definition: DagWorkflowDefinition,
+  catalog: ReadonlyMap<string, NodeTypeSummary>,
+  runRecords: ReadonlyMap<string, NodeRunRecord>,
 ): WorkflowFlowNode[] {
   return definition.nodes.map((node, index) => {
     const nodeType = catalog.get(node.type)
@@ -521,7 +525,7 @@ function flowNodes(
   })
 }
 
-function flowEdges(definition: EditorWorkflowDefinition): Edge[] {
+function flowEdges(definition: DagWorkflowDefinition): Edge[] {
   return definition.edges.map(edge => ({
     id: edge.id,
     source: edge.source,
@@ -533,10 +537,10 @@ function flowEdges(definition: EditorWorkflowDefinition): Edge[] {
 }
 
 function emitDefinition(
-  previous: EditorWorkflowDefinition,
+  previous: DagWorkflowDefinition,
   nodes: readonly WorkflowFlowNode[],
   edges: readonly Edge[],
-  emit: (definition: EditorWorkflowDefinition) => void,
+  emit: (definition: DagWorkflowDefinition) => void,
 ): void {
   emit({
     ...previous,
@@ -548,11 +552,11 @@ function emitDefinition(
   })
 }
 
-function edgeDefinition(edge: Edge): EditorEdge {
+function edgeDefinition(edge: Edge): DagEdgeDefinition {
   return {
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
+    id: EdgeId(edge.id),
+    source: NodeId(edge.source),
+    target: NodeId(edge.target),
     ...(edge.sourceHandle === undefined || edge.sourceHandle === null
       ? {}
       : { sourcePort: edge.sourceHandle }),
@@ -562,28 +566,20 @@ function edgeDefinition(edge: Edge): EditorEdge {
   }
 }
 
-function resolvedInputPorts(data: WorkflowNodeData): readonly EditorPort[] {
-  const catalogInputs = data.catalog?.inputs ?? []
-  const instanceInputs = data.definition.inputs
-    ?? catalogInputs.filter(port => port.role !== 'condition')
-  const condition = catalogInputs.find(port => port.role === 'condition')
-  return condition === undefined ? instanceInputs : [...instanceInputs, condition]
+function resolvedInputPorts(data: WorkflowNodeData): readonly PortDefinition[] {
+  return resolveInputPorts(data.definition.inputs, data.catalog?.inputs ?? [])
 }
 
-function resolvedOutputPorts(data: WorkflowNodeData): readonly EditorPort[] {
+function resolvedOutputPorts(data: WorkflowNodeData): readonly PortDefinition[] {
   return data.definition.outputs ?? data.catalog?.outputs ?? []
 }
 
-function inputPorts(node: WorkflowFlowNode | undefined): readonly EditorPort[] {
+function inputPorts(node: WorkflowFlowNode | undefined): readonly PortDefinition[] {
   return node === undefined ? [] : resolvedInputPorts(node.data)
 }
 
-function outputPorts(node: WorkflowFlowNode | undefined): readonly EditorPort[] {
+function outputPorts(node: WorkflowFlowNode | undefined): readonly PortDefinition[] {
   return node === undefined ? [] : resolvedOutputPorts(node.data)
-}
-
-function portsAreCompatible(source: EditorPort, target: EditorPort): boolean {
-  return source.type === 'any' || target.type === 'any' || source.type === target.type
 }
 
 function connectionError(
@@ -614,7 +610,7 @@ function connectionError(
   return undefined
 }
 
-function controlValue(value: unknown, control: Extract<EditorControl, { kind: 'number' | 'text' }>): string | number {
+function controlValue(value: unknown, control: Extract<NodeControlDefinition, { kind: 'number' | 'text' }>): string | number {
   if (control.kind === 'number') return typeof value === 'number' ? value : control.defaultValue
   return typeof value === 'string' ? value : control.defaultValue
 }
@@ -632,12 +628,8 @@ function useNodeCardContext(): NodeCardContextValue {
 
 function withRunRecord(
   data: WorkflowNodeData,
-  runRecord: EditorNodeRunRecord | undefined,
+  runRecord: NodeRunRecord | undefined,
 ): WorkflowNodeData {
   const { runRecord: _previous, ...rest } = data
   return runRecord === undefined ? rest : { ...rest, runRecord }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

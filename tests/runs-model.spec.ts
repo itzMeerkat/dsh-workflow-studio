@@ -13,11 +13,11 @@ import {
   pendingRequests,
   runActions,
   runRecordsByNode,
-  type RunSummaryRow,
 } from '../src/client/runs-model.ts'
+import { RunId, WorkflowId, type WorkflowRunSummary } from '../src/types.ts'
 
-function row(runId: string, status: RunSummaryRow['status'], workflowId = 'w1', awaitingInput = 0): RunSummaryRow {
-  return { runId, workflowId, name: 'flow', status, awaitingInput, startedAt: 1, updatedAt: 1 }
+function row(runId: string, status: WorkflowRunSummary['status'], workflowId = 'w1', awaitingInput = 0): WorkflowRunSummary {
+  return { runId: RunId(runId), workflowId: WorkflowId(workflowId), name: 'flow', status, awaitingInput, startedAt: 1, updatedAt: 1 }
 }
 
 const QUESTIONS = [
@@ -89,6 +89,6 @@ describe('runs model', () => {
     assert.deepEqual(runActions('interrupted'), { pause: false, resume: true, cancel: true })
     assert.deepEqual(runActions('completed'), { pause: false, resume: false, cancel: false })
     const overlay = runRecordsByNode(parseRunRecord(recordSource('running', [])))
-    assert.deepEqual(overlay.get('out'), { nodeId: 'out', status: 'completed', outputs: { output: 3 } })
+    assert.deepEqual(overlay.get('out'), { nodeId: 'out', runId: 'r1', status: 'completed', attempts: 1, startedAt: 1, outputs: { output: 3 } })
   })
 })

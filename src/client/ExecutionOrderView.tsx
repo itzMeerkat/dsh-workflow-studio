@@ -11,14 +11,8 @@ import {
 } from '@xyflow/react'
 import type { Edge, Node, NodeProps } from '@xyflow/react'
 import { useMemo } from 'react'
-import type {
-  EditorNode,
-  EditorNodeRunRecord,
-  EditorWorkflowDefinition,
-  ExecutionDependency,
-  ExecutionPlan,
-  NodeTypeRow,
-} from './model.ts'
+import type { DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../types.ts'
+import type { ExecutionDependency, ExecutionPlan } from './model.ts'
 import {
   createExecutionPlan,
   reduceExecutionDependencies,
@@ -35,9 +29,9 @@ type ExecutionOrderKey =
 type Translate = (key: ExecutionOrderKey) => string
 
 type ExecutionNodeData = {
-  definition: EditorNode
-  catalog?: NodeTypeRow
-  runRecord?: EditorNodeRunRecord
+  definition: DagNodeDefinition
+  catalog?: NodeTypeSummary
+  runRecord?: NodeRunRecord
   stage: number
   stageLabel: string
   branchPorts: readonly string[]
@@ -47,9 +41,9 @@ type ExecutionFlowNode = Node<ExecutionNodeData, 'execution'>
 const executionNodeTypes = { execution: ExecutionNodeCard }
 
 interface ExecutionOrderViewProps {
-  readonly definition: EditorWorkflowDefinition
-  readonly nodeTypes: readonly NodeTypeRow[]
-  readonly runRecords: ReadonlyMap<string, EditorNodeRunRecord>
+  readonly definition: DagWorkflowDefinition
+  readonly nodeTypes: readonly NodeTypeSummary[]
+  readonly runRecords: ReadonlyMap<string, NodeRunRecord>
   readonly t: Translate
 }
 
@@ -173,8 +167,8 @@ function ExecutionNodeCard({ data }: NodeProps<ExecutionFlowNode>) {
 function executionNodes(
   plan: ExecutionPlan,
   dependencies: readonly ExecutionDependency[],
-  catalog: ReadonlyMap<string, NodeTypeRow>,
-  runRecords: ReadonlyMap<string, EditorNodeRunRecord>,
+  catalog: ReadonlyMap<string, NodeTypeSummary>,
+  runRecords: ReadonlyMap<string, NodeRunRecord>,
   stageLabel: string,
 ): ExecutionFlowNode[] {
   const branchPorts = new Map<string, Set<string>>()

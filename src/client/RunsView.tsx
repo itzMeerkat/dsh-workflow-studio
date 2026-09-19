@@ -6,7 +6,7 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { useState } from 'react'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
-import type { NodeTypeRow } from './model.ts'
+import type { NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary } from '../types.ts'
 import {
   buildAnswer,
   groupRuns,
@@ -16,8 +16,6 @@ import {
   runRecordsByNode,
   type AnswerDraft,
   type PendingRequest,
-  type RunRecordView,
-  type RunSummaryRow,
 } from './runs-model.ts'
 import css from './WorkflowStudioPanel.module.css'
 import type { WorkflowStudioKey } from './index.tsx'
@@ -32,12 +30,12 @@ export type RunAction = 'pause' | 'resume' | 'cancel'
 
 interface RunsViewProps {
   readonly t: Translate
-  readonly runs: readonly RunSummaryRow[]
+  readonly runs: readonly WorkflowRunSummary[]
   readonly filter: RunsFilter
   readonly currentWorkflowId: string | undefined
   readonly selectedRunId: string | undefined
-  readonly record: RunRecordView | undefined
-  readonly nodeTypes: readonly NodeTypeRow[]
+  readonly record: WorkflowRunRecord | undefined
+  readonly nodeTypes: readonly NodeTypeSummary[]
   readonly busy: boolean
   readonly onFilter: (filter: RunsFilter) => void
   readonly onSelect: (runId: string) => void
@@ -80,7 +78,7 @@ export function RunsView(props: RunsViewProps) {
 
 function RunGroup({ title, rows, selectedRunId, showName, t, onSelect }: {
   readonly title: string
-  readonly rows: readonly RunSummaryRow[]
+  readonly rows: readonly WorkflowRunSummary[]
   readonly selectedRunId: string | undefined
   readonly showName: boolean
   readonly t: Translate
@@ -109,7 +107,7 @@ function RunGroup({ title, rows, selectedRunId, showName, t, onSelect }: {
   )
 }
 
-function RunDetail({ t, record, nodeTypes, busy, onAction, onAnswer }: RunsViewProps & { readonly record: RunRecordView }) {
+function RunDetail({ t, record, nodeTypes, busy, onAction, onAnswer }: RunsViewProps & { readonly record: WorkflowRunRecord }) {
   const actions = runActions(record.status)
   const pending = pendingRequests(record)
   const labels = new Map(record.definition.nodes.map(node => [node.id, node.label ?? node.id]))

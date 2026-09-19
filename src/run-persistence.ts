@@ -7,77 +7,9 @@
  * @module dsh-workflow-studio
  */
 
-import { z } from 'zod'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
-import { NodeId, RunId, WorkflowId } from './types.ts'
-import type { HumanInputRequest, JsonObject, JsonValue, NodeRunRecord, WorkflowRunRecord } from './types.ts'
-import { workflowDefinitionSchema } from './workflow-schema.ts'
-
-const jsonObject = z.record(z.string(), z.json()) as z.ZodType<JsonObject>
-
-// 问题和答案在提问与回答时由 human-input.ts 校验；此处只要求可读回的 JSON 结构。
-const humanInputRequestSchema = z.object({
-  id: z.string().min(1),
-  questions: z.array(z.json()) as unknown as z.ZodType<HumanInputRequest['questions']>,
-  answer: (z.json() as unknown as z.ZodType<NonNullable<HumanInputRequest['answer']>>).optional(),
-  askedAt: z.number(),
-  answeredAt: z.number().optional(),
-}).transform((raw): HumanInputRequest => ({
-  id: raw.id,
-  questions: raw.questions,
-  askedAt: raw.askedAt,
-  ...(raw.answer === undefined ? {} : { answer: raw.answer }),
-  ...(raw.answeredAt === undefined ? {} : { answeredAt: raw.answeredAt }),
-}))
-
-const nodeRunRecordSchema = z.object({
-  nodeId: z.string().min(1).transform(NodeId),
-  runId: z.string().min(1).transform(RunId),
-  status: z.enum(['pending', 'running', 'awaiting-input', 'completed', 'skipped', 'failed', 'cancelled']),
-  attempts: z.number().int().nonnegative(),
-  inputs: jsonObject.optional(),
-  outputs: jsonObject.optional(),
-  error: z.string().optional(),
-  notepad: (z.json() as z.ZodType<JsonValue>).optional(),
-  interactions: z.array(humanInputRequestSchema).optional(),
-  startedAt: z.number(),
-  completedAt: z.number().optional(),
-}).transform((raw): NodeRunRecord => ({
-  nodeId: raw.nodeId,
-  runId: raw.runId,
-  status: raw.status,
-  attempts: raw.attempts,
-  startedAt: raw.startedAt,
-  ...(raw.inputs === undefined ? {} : { inputs: raw.inputs }),
-  ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
-  ...(raw.error === undefined ? {} : { error: raw.error }),
-  ...(raw.notepad === undefined ? {} : { notepad: raw.notepad }),
-  ...(raw.interactions === undefined ? {} : { interactions: raw.interactions }),
-  ...(raw.completedAt === undefined ? {} : { completedAt: raw.completedAt }),
-}))
-
-/** 一条运行记录的持久化 schema。 */
-export const workflowRunRecordSchema: z.ZodType<WorkflowRunRecord> = z.object({
-  runId: z.string().min(1).transform(RunId),
-  workflowId: z.string().min(1).transform(WorkflowId),
-  definition: workflowDefinitionSchema,
-  status: z.enum(['running', 'paused', 'interrupted', 'completed', 'failed', 'cancelled']),
-  error: z.string().optional(),
-  startedAt: z.number(),
-  updatedAt: z.number(),
-  completedAt: z.number().optional(),
-  nodes: z.array(nodeRunRecordSchema),
-}).transform((raw): WorkflowRunRecord => ({
-  runId: raw.runId,
-  workflowId: raw.workflowId,
-  definition: raw.definition,
-  status: raw.status,
-  startedAt: raw.startedAt,
-  updatedAt: raw.updatedAt,
-  nodes: raw.nodes,
-  ...(raw.error === undefined ? {} : { error: raw.error }),
-  ...(raw.completedAt === undefined ? {} : { completedAt: raw.completedAt }),
-}))
+import type { RunId, WorkflowRunRecord } from './types.ts'
+import { workflowRunRecordSchema } from './workflow-schema.ts'
 
 /** 运行记录 Domain。每个运行独立持久化，一次检查点只重写该运行的文件。 */
 export const workflowRunsDomainSpec = defineDomain({

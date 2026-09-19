@@ -15,7 +15,7 @@ import {
   parseEditorDefinition,
   reduceExecutionDependencies,
 } from '../src/client/model.ts'
-import type { NodeTypeRow } from '../src/client/model.ts'
+import type { NodeTypeSummary } from '../src/types.ts'
 
 describe('workflow editor model', () => {
   it('round-trips node positions and explicit ports', () => {
@@ -68,7 +68,7 @@ describe('workflow editor model', () => {
   })
 
   it('filters node types by metadata and source plugin', () => {
-    const nodes: NodeTypeRow[] = [
+    const nodes: NodeTypeSummary[] = [
       {
         type: 'send-email',
         label: 'Send email',
@@ -110,7 +110,7 @@ describe('workflow editor model', () => {
   })
 
   it('appends one positioned node per explicit catalog selection', () => {
-    const nodeType: NodeTypeRow = {
+    const nodeType: NodeTypeSummary = {
       type: 'worker',
       label: 'Worker',
       description: 'Runs work',

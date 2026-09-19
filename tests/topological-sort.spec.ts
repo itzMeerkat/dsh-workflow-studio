@@ -31,7 +31,7 @@ describe('topologicalSort', () => {
   it('应该对线性 DAG 正确排序', () => {
     const wf = makeWorkflow([['a', 'b'], ['b', 'c']])
     const levels = topologicalSort(wf)
-    const order = levels.flatMap(l => l.nodes.map(n => n.id))
+    const order = levels.flatMap(l => l.map(n => n.id))
     // a 必须在 b 之前，b 必须在 c 之前
     assert.ok(order.indexOf(NodeId('a')) < order.indexOf(NodeId('b')))
     assert.ok(order.indexOf(NodeId('b')) < order.indexOf(NodeId('c')))
@@ -41,9 +41,9 @@ describe('topologicalSort', () => {
     const wf = makeWorkflow([['a', 'b'], ['a', 'c']])
     const levels = topologicalSort(wf)
     assert.equal(levels.length, 2)
-    assert.equal(levels[0]!.nodes.length, 1) // a
-    assert.equal(levels[0]!.nodes[0]!.id, NodeId('a'))
-    assert.equal(levels[1]!.nodes.length, 2) // b, c 同级
+    assert.equal(levels[0]!.length, 1) // a
+    assert.equal(levels[0]![0]!.id, NodeId('a'))
+    assert.equal(levels[1]!.length, 2) // b, c 同级
   })
 
   it('应该检测环并抛出', () => {
@@ -67,6 +67,6 @@ describe('topologicalSort', () => {
     }
     const levels = topologicalSort(wf)
     assert.equal(levels.length, 1)
-    assert.equal(levels[0]!.nodes.length, 1)
+    assert.equal(levels[0]!.length, 1)
   })
 })

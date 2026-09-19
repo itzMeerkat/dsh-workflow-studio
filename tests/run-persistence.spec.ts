@@ -145,7 +145,7 @@ describe('运行持久化与恢复', () => {
     assert.equal(done.status, 'completed')
     assert.equal(calls.source, 0)
     assert.equal(calls.step, 1)
-    const step = done.nodeRecords.find(record => record.nodeId === NodeId('step'))
+    const step = done.nodes.find(record => record.nodeId === NodeId('step'))
     assert.equal(step?.attempts, 2)
     assert.deepEqual(step?.outputs, { output: 7 })
     assert.deepEqual(calls.stepNotepads, [{ attempt: 1, key: `${runId}/step` }])
@@ -159,7 +159,7 @@ describe('运行持久化与恢复', () => {
     const interrupted = second.engine.getRun(runId)
     assert.equal(interrupted?.status, 'interrupted')
     assert.match(interrupted?.error ?? '', /autoRestart/)
-    assert.equal(interrupted?.nodeRecords.find(record => record.nodeId === NodeId('step'))?.status, 'pending')
+    assert.equal(interrupted?.nodes.find(record => record.nodeId === NodeId('step'))?.status, 'pending')
 
     const done = ended(second.ctx, runId)
     second.engine.resumeRun(runId)
@@ -234,7 +234,7 @@ describe('运行持久化与恢复', () => {
     second.engine.cancelRun(runId, 'no longer needed')
     const result = await done
     assert.equal(result.status, 'cancelled')
-    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('step'))?.status, 'cancelled')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('step'))?.status, 'cancelled')
     assert.equal(second.engine.listRuns()[0]?.status, 'cancelled')
   })
 
@@ -306,7 +306,7 @@ describe('运行持久化与恢复', () => {
     await writeFile(file, JSON.stringify(stored))
 
     const second = await host(root, freshCalls(), { block: false })
-    const run = second.engine.getRunRecord(runId)
+    const run = second.engine.getRun(runId)
     assert.equal(run?.status, 'failed')
     assert.match(run?.error ?? '', /无法恢复: .*ghost/)
     assert.equal(second.engine.listRuns()[0]?.status, 'failed')
@@ -371,7 +371,7 @@ describe('运行持久化与恢复', () => {
     engine.cancelRun(run.runId, 'stop')
     const result = await run.result
     assert.equal(result.status, 'cancelled')
-    assert.deepEqual([result.nodeRecords[0]?.status, result.nodeRecords[0]?.error], ['cancelled', 'stop'])
+    assert.deepEqual([result.nodes[0]?.status, result.nodes[0]?.error], ['cancelled', 'stop'])
   })
 
   it('答案写入失败时请求保持未回答，可再次回答', async () => {
@@ -397,6 +397,6 @@ describe('运行持久化与恢复', () => {
     assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
     failNext = false
     await engine.answerInput(run.runId, NodeId('n'), 'q', answer)
-    assert.deepEqual((await run.result).nodeRecords[0]?.outputs, { output: 'yes' })
+    assert.deepEqual((await run.result).nodes[0]?.outputs, { output: 'yes' })
   })
 })

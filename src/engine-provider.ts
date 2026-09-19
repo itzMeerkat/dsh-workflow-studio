@@ -13,9 +13,9 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import DagEngine from './engine.ts'
 import type { DagRun } from './engine.ts'
 import type {
-  DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
+  DagWorkflowDefinition, DagNodeDefinition,
   NodeId,
-  WorkflowResult, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
+  WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
   NodeExecutionContext, NodeExecutionResult,
   NodeRunRecord, NodeRunStatus, PortDefinition,
   WorkflowRunStatus, NodeRunInfo, DagRunInfo,
@@ -25,8 +25,9 @@ import { WorkflowId, RunId } from './types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import { workflowStudioDomainSpec } from './persistence.ts'
 import { workflowRunsDomainSpec } from './run-persistence.ts'
-import { workflowDefinitionSchema } from './workflow-schema.ts'
 import { toJsonOutputs, toJsonValue } from './json.ts'
+import { messageOf } from './errors.ts'
+import { portsAreCompatible, resolveInputPorts, topologicalLevels } from './graph.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { CONFIRM_REQUEST_ID, confirmQuestions, confirmRejection, parseAnswer, parseQuestions } from './human-input.ts'
 
@@ -54,8 +55,8 @@ interface RunState {
   abortController: AbortController
   pauseRequested: boolean
   pauseResolvers: Set<() => void>
-  resultPromise: Promise<WorkflowResult>
-  resultResolve: (result: WorkflowResult) => void
+  resultPromise: Promise<WorkflowRunRecord>
+  resultResolve: (result: WorkflowRunRecord) => void
   /** 本运行的检查点写入按顺序排队。 */
   writeTail: Promise<void>
   /** 等待答案的节点请求，键为 `${nodeId}\u0000${requestId}`。 */
@@ -64,14 +65,10 @@ interface RunState {
 
 const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-// ---- 拓扑排序 ----
-
-interface TopoLevel {
-  nodes: DagNodeDefinition[]
+/** 一次调度结束时的运行状态与原因。 */
+interface RunOutcome {
+  status: WorkflowRunStatus
+  error?: string
 }
 
 interface ResolvedNodePorts {
@@ -79,81 +76,18 @@ interface ResolvedNodePorts {
   outputs: readonly PortDefinition[]
 }
 
-function portsAreCompatible(source: PortDefinition, target: PortDefinition): boolean {
-  return source.type === 'any' || target.type === 'any' || source.type === target.type
-}
-
-/** 使用 Kahn 算法计算拓扑序。返回分层执行计划。*/
-export function topologicalSort(definition: DagWorkflowDefinition): TopoLevel[] {
-  const { nodes, edges } = definition
-  const inDegree = new Map<NodeId, number>()
-  const outEdges = new Map<NodeId, DagEdgeDefinition[]>()
-
-  for (const node of nodes) {
-    inDegree.set(node.id, 0)
-    outEdges.set(node.id, [])
-  }
-
-  for (const edge of edges) {
-    const outgoing = outEdges.get(edge.source)
-    if (outgoing === undefined) {
-      throw new Error(`边 ${edge.id} 引用不存在的源节点 ${edge.source}`)
-    }
-    const targetDegree = inDegree.get(edge.target)
-    if (targetDegree === undefined) {
-      throw new Error(`边 ${edge.id} 引用不存在的目标节点 ${edge.target}`)
-    }
-    outgoing.push(edge)
-    inDegree.set(edge.target, targetDegree + 1)
-  }
-
-  const nodeMap = new Map<NodeId, DagNodeDefinition>(
-    nodes.map(n => [n.id, n]),
-  )
-
-  const levels: TopoLevel[] = []
-  let frontier: NodeId[] = [...inDegree.entries()]
-    .filter(([, d]) => d === 0)
-    .map(([id]) => id)
-
-  while (frontier.length > 0) {
-    const levelNodes: DagNodeDefinition[] = []
-    const nextFrontier: NodeId[] = []
-
-    for (const nodeId of frontier) {
-      const nodeDef = nodeMap.get(nodeId)!
-      levelNodes.push(nodeDef)
-
-      for (const edge of outEdges.get(nodeId)!) {
-        const target = edge.target
-        const newDegree = inDegree.get(target)! - 1
-        inDegree.set(target, newDegree)
-        if (newDegree === 0) nextFrontier.push(target)
-      }
-    }
-
-    levels.push({ nodes: levelNodes })
-    frontier = nextFrontier
-  }
-
-  const sortedCount = levels.reduce((sum, l) => sum + l.nodes.length, 0)
-  if (sortedCount !== nodes.length) {
-    throw new Error(`工作流包含环：共 ${nodes.length} 个节点，仅 ${sortedCount} 个可排序`)
-  }
-
+/**
+ * 按拓扑层级返回节点，同一层级的节点可并行执行。
+ * @param definition - 工作流定义。
+ * @returns 按执行顺序排列的层级。
+ * @throws 工作流包含环或边引用不存在的节点时。
+ */
+export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefinition[][] {
+  const { levels, cyclic } = topologicalLevels(definition.nodes, definition.edges)
+  if (cyclic.length > 0) throw new Error(`工作流包含环：${cyclic.map(node => node.id).join(', ')}`)
   return levels
 }
 
-// ---- 引擎实现 ----
-
-/**
- * 默认 DAG 引擎实现。
- * - 工作流定义通过 storage-domain 持久化
- * - 拓扑排序使用 Kahn 算法
- * - 同级节点并行执行
- * - 支持暂停/恢复
- * - HITL 通过暂停等待实现
- */
 /** 引擎部署配置。 */
 export interface DagEngineConfig {
   /** Host 重启后是否自动重新执行被中断的运行；为 false 时这些运行进入 interrupted。 */
@@ -230,7 +164,7 @@ export class DagEngineProvider extends DagEngine {
 
       const executor = this.registry.get(node.type)
       if (executor === undefined) throw new Error(`未知节点类型: ${node.type}`)
-      const inputs = this.resolveInputPorts(node, executor)
+      const inputs = resolveInputPorts(node.inputs, executor.inputs ?? [])
       const outputs = node.outputs ?? executor.outputs ?? []
       this.validatePorts(node.id, '输入', inputs)
       this.validatePorts(node.id, '输出', outputs)
@@ -292,17 +226,6 @@ export class DagEngineProvider extends DagEngine {
     }
   }
 
-  private resolveInputPorts(
-    node: DagNodeDefinition,
-    executor: WorkflowNodeExecutor,
-  ): readonly PortDefinition[] {
-    const declared = executor.inputs ?? []
-    if (node.inputs === undefined) return declared
-    // 带 role 的端口属于执行器；实例覆盖输入端口时保留执行器声明的这些端口。
-    const instanceNames = new Set(node.inputs.map(port => port.name))
-    return [...node.inputs, ...declared.filter(port => port.role !== undefined && !instanceNames.has(port.name))]
-  }
-
   private validateVariadicInputs(
     node: DagNodeDefinition,
     executor: WorkflowNodeExecutor,
@@ -325,7 +248,7 @@ export class DagEngineProvider extends DagEngine {
   }
 
   async save(definition: DagWorkflowDefinition): Promise<WorkflowId> {
-    const snapshot = workflowDefinitionSchema.parse(definition)
+    const snapshot = structuredClone(definition)
     this.validateDefinition(snapshot)
 
     return this.enqueueMutation(async () => {
@@ -337,7 +260,7 @@ export class DagEngineProvider extends DagEngine {
   }
 
   async update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId> {
-    const snapshot = workflowDefinitionSchema.parse(definition)
+    const snapshot = structuredClone(definition)
     this.validateDefinition(snapshot)
     return this.enqueueMutation(async () => {
       if (this.workflows.get(id) === undefined) {
@@ -392,14 +315,7 @@ export class DagEngineProvider extends DagEngine {
     return this.handle(state)
   }
 
-  getRun(runId: RunId): WorkflowResult | undefined {
-    const state = this.runs.get(runId)
-    if (state !== undefined) return this.snapshot(state)
-    const record = this.runStore.get(runId)
-    return record === undefined ? undefined : resultOfRecord(record)
-  }
-
-  getRunRecord(runId: RunId): WorkflowRunRecord | undefined {
+  getRun(runId: RunId): WorkflowRunRecord | undefined {
     const state = this.runs.get(runId)
     if (state !== undefined) return this.toRecord(state)
     const record = this.runStore.get(runId)
@@ -450,7 +366,7 @@ export class DagEngineProvider extends DagEngine {
       return
     }
     this.cancelRemaining(state, message)
-    void this.finishRun(state, this.workflowResult(state, 'cancelled', message))
+    void this.finishRun(state, { status: 'cancelled', error: message })
   }
 
   /**
@@ -484,7 +400,7 @@ export class DagEngineProvider extends DagEngine {
   // ---- 持久化与恢复 ----
 
   private createState(record: WorkflowRunRecord): RunState {
-    const { promise: resultPromise, resolve: resultResolve } = Promise.withResolvers<WorkflowResult>()
+    const { promise: resultPromise, resolve: resultResolve } = Promise.withResolvers<WorkflowRunRecord>()
     const nodes = new Map(record.definition.nodes.map(node => [node.id, node]))
     const nodeStates = new Map<NodeId, NodeExecState>()
     for (const nodeRecord of record.nodes) {
@@ -731,52 +647,49 @@ export class DagEngineProvider extends DagEngine {
     state.abortController = new AbortController()
     this.checkpoint(state)
       .then(() => this.executeWorkflow(state))
-      .catch((error: unknown) => this.workflowResult(state, 'failed', messageOf(error)))
-      .then(result => this.finishRun(state, result))
+      .catch((error: unknown): RunOutcome => ({ status: 'failed', error: messageOf(error) }))
+      .then(outcome => this.finishRun(state, outcome))
       .catch((error: unknown) => {
         this.ctx.logger.error(`dag: 运行 ${state.runId} 结束处理失败: ${messageOf(error)}`)
       })
   }
 
   /**
-   * 写入运行的最终状态并兑现结果。引擎关闭时运行记录保持停止前的状态，下次启动时恢复；
+   * 写入运行的最终状态并以运行记录兑现结果。引擎关闭时运行记录保持停止前的状态，下次启动时恢复；
    * 最终状态写入失败时运行留在内存中，使查询仍返回其最终状态。
    */
-  private async finishRun(state: RunState, result: WorkflowResult): Promise<void> {
+  private async finishRun(state: RunState, outcome: RunOutcome): Promise<void> {
     state.active = false
+    state.status = outcome.status
+    state.completedAt = Date.now()
+    if (outcome.error !== undefined) state.error = outcome.error
     if (this.closing) {
-      state.resultResolve(structuredClone(result))
+      state.resultResolve(this.toRecord(state))
       return
     }
-    state.status = result.status
-    state.completedAt = result.completedAt ?? Date.now()
-    if (result.error !== undefined) state.error = result.error
-    this.emitEvent('dag/end', this.runInfo(state), {
-      status: result.status,
-      ...(result.error === undefined ? {} : { error: result.error }),
-    })
+    this.emitEvent('dag/end', this.runInfo(state), { ...outcome })
     try {
       await this.checkpoint(state)
     } catch (error: unknown) {
       this.ctx.logger.error(`dag: 运行 ${state.runId} 最终状态写入失败: ${messageOf(error)}`)
-      state.resultResolve(structuredClone(result))
+      state.resultResolve(this.toRecord(state))
       return
     }
     this.runs.delete(state.runId)
     try {
       await this.enqueueMutation(() => this.pruneRuns())
     } finally {
-      state.resultResolve(structuredClone(result))
+      state.resultResolve(this.toRecord(state))
     }
   }
 
-  private async executeWorkflow(state: RunState): Promise<WorkflowResult> {
+  private async executeWorkflow(state: RunState): Promise<RunOutcome> {
     const levels = topologicalSort(state.definition)
     const signal = state.abortController.signal
 
     try {
       for (const level of levels) {
-        const pending = level.nodes.filter(node => this.nodeState(state, node.id).record.status === 'pending')
+        const pending = level.filter(node => this.nodeState(state, node.id).record.status === 'pending')
         if (pending.length === 0) continue
         if (signal.aborted) {
           this.cancelRemaining(state, signal.reason)
@@ -798,20 +711,17 @@ export class DagEngineProvider extends DagEngine {
         if (failed.length > 0) {
           const error = failed.map(record => `${record.nodeId}: ${record.error ?? '节点执行失败'}`).join('; ')
           this.cancelRemaining(state, error)
-          return this.workflowResult(state, 'failed', error)
+          return { status: 'failed', error }
         }
       }
 
-      if (signal.aborted) this.cancelRemaining(state, signal.reason)
-      return this.workflowResult(
-        state,
-        signal.aborted ? 'cancelled' : 'completed',
-        signal.aborted && signal.reason !== undefined ? String(signal.reason) : undefined,
-      )
+      if (!signal.aborted) return { status: 'completed' }
+      this.cancelRemaining(state, signal.reason)
+      return signal.reason === undefined ? { status: 'cancelled' } : { status: 'cancelled', error: String(signal.reason) }
     } catch (error: unknown) {
       const message = messageOf(error)
       this.cancelRemaining(state, message)
-      return this.workflowResult(state, 'failed', message)
+      return { status: 'failed', error: message }
     }
   }
 
@@ -848,7 +758,7 @@ export class DagEngineProvider extends DagEngine {
     signal: AbortSignal,
   ): Promise<void> {
     const definition = state.definition
-    const inputPorts = this.resolveInputPorts(node, executor)
+    const inputPorts = resolveInputPorts(node.inputs, executor.inputs ?? [])
     const businessInputPorts = inputPorts.filter(port => port.role === undefined)
     const suppliedInputs = businessInputPorts.filter(port => Object.hasOwn(inputs, port.name))
     const requiredInputPorts = inputPorts.filter(port => port.required !== false)
@@ -1064,23 +974,6 @@ export class DagEngineProvider extends DagEngine {
     this.emitEvent('dag/node-end', this.runInfo(state), { ...nodeInfo, status: 'failed' })
   }
 
-  private snapshot(state: RunState): WorkflowResult {
-    return resultOfRecord(this.toRecord(state))
-  }
-
-  private workflowResult(state: RunState, status: WorkflowRunStatus, error?: string): WorkflowResult {
-    return {
-      runId: state.runId,
-      workflowId: state.workflowId,
-      name: state.definition.name,
-      status,
-      nodeRecords: structuredClone([...state.nodeStates.values()].map(item => item.record)),
-      startedAt: state.startedAt,
-      completedAt: Date.now(),
-      ...(error === undefined ? {} : { error }),
-    }
-  }
-
   private runInfo(state: RunState): DagRunInfo {
     return {
       runId: state.runId,
@@ -1105,19 +998,6 @@ function workflowSummary(
     id,
     name: definition.name,
     ...(definition.description === undefined ? {} : { description: definition.description }),
-  }
-}
-
-function resultOfRecord(record: WorkflowRunRecord): WorkflowResult {
-  return {
-    runId: record.runId,
-    workflowId: record.workflowId,
-    name: record.definition.name,
-    status: record.status,
-    nodeRecords: structuredClone(record.nodes),
-    startedAt: record.startedAt,
-    ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
-    ...(record.error === undefined ? {} : { error: record.error }),
   }
 }
 
