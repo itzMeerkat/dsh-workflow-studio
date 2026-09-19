@@ -76,3 +76,18 @@ export function resolveInputPorts(
   const names = new Set(instance.map(port => port.name))
   return [...instance, ...declared.filter(port => port.role !== undefined && !names.has(port.name))]
 }
+
+/**
+ * 检查端口名不重复。
+ * @param owner - 错误信息中的端口所有者。
+ * @param kind - 错误信息中的端口方向。
+ * @param ports - 待检查的端口。
+ * @throws 存在同名端口时。
+ */
+export function assertUniquePortNames(owner: string, kind: string, ports: readonly PortDefinition[]): void {
+  const names = new Set<string>()
+  for (const port of ports) {
+    if (names.has(port.name)) throw new Error(`${owner} 的${kind}端口 ${port.name} 重复`)
+    names.add(port.name)
+  }
+}

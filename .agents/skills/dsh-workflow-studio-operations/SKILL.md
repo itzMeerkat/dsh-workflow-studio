@@ -89,7 +89,7 @@ export async function renameWorkflow(ctx: Context, currentName: string, nextName
 }
 ```
 
-Start and observe a run through its owning handle:
+Start a run and wait for its final record:
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
@@ -104,7 +104,7 @@ export async function runWorkflow(ctx: Context, name: string) {
 }
 ```
 
-`run.result` settles with the final `WorkflowRunRecord` and does not reject. A run restored after a Host restart has no handle; control it by ID with `pauseRun()`, `resumeRun()`, `cancelRun()`, and `answerInput()`, and read it with `getRun()` or `listRuns()`.
+`run.result` settles with the final `WorkflowRunRecord` and does not reject. Control any run, including one restored after a Host restart, by ID with `pauseRun()`, `resumeRun()`, `cancelRun()`, and `answerInput()`, and read it with `getRun()` or `listRuns()`.
 
 ## Modify safely
 

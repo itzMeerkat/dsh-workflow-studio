@@ -1,7 +1,5 @@
 /**
- * 模型面工作流管理工具。
- *
- * 通过 `ctx.tools` 注册 create_workflow / run_workflow 两个工具。
+ * 模型面工作流管理工具：create_workflow、run_workflow 和 get_workflow_run。
  * @module dsh-workflow-studio
  */
 
@@ -11,16 +9,13 @@ import { RunId } from './types.ts'
 import { workflowDefinitionSchema } from './workflow-schema.ts'
 
 /**
- * 注册所有工作流模型工具。
+ * 注册所有工作流模型工具；每个工具随 `ctx` 卸载。
  * @param ctx - Cordis context，需已加载 dagEngine 服务。
- * @returns 同时卸载两个工具的 disposer。
  */
-export function registerWorkflowTools(ctx: Context): () => void {
+export function registerWorkflowTools(ctx: Context): void {
   const engine = ctx.dagEngine
-  const disposers: Array<() => void> = []
 
-  try {
-    disposers.push(ctx.tools.register(defineTool({
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'create_workflow',
     description: '创建或更新一个 DAG 工作流定义。接受完整的 JSON 节点/边定义，验证后持久化。同名定义会覆盖更新。',
     parameters: {
@@ -67,9 +62,9 @@ export function registerWorkflowTools(ctx: Context): () => void {
         nodeCount: args.nodes.length,
       }
     },
-    })))
+  })), 'workflow-tools:create_workflow')
 
-    disposers.push(ctx.tools.register(defineTool({
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'run_workflow',
     description: '按名称启动一个已定义的工作流执行，返回运行 ID；用 get_workflow_run 查询进度和结果。',
     parameters: {
@@ -96,8 +91,9 @@ export function registerWorkflowTools(ctx: Context): () => void {
       const run = engine.start(summary.id)
       return { runId: run.runId, status: 'running' }
     },
-    })))
-    disposers.push(ctx.tools.register(defineTool({
+  })), 'workflow-tools:run_workflow')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'get_workflow_run',
     description: '按运行 ID 查询工作流运行的状态和每个节点的状态。',
     parameters: {
@@ -133,7 +129,6 @@ export function registerWorkflowTools(ctx: Context): () => void {
       ],
     },
     async execute(args, _exec) {
-      if (typeof args.runId !== 'string' || args.runId === '') throw new Error('runId 必须为非空字符串')
       const result = engine.getRun(RunId(args.runId))
       if (result === undefined) throw new Error(`运行 ${args.runId} 不存在`)
       return {
@@ -149,13 +144,5 @@ export function registerWorkflowTools(ctx: Context): () => void {
         })),
       }
     },
-    })))
-  } catch (error: unknown) {
-    for (const dispose of [...disposers].reverse()) dispose()
-    throw error
-  }
-
-  return () => {
-    for (const dispose of [...disposers].reverse()) dispose()
-  }
+  })), 'workflow-tools:get_workflow_run')
 }

@@ -23,7 +23,7 @@ import { WorkflowNode } from '../src/node.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
-import { apply as applyPlugin, inject as pluginInject } from '../src/index.ts'
+import { Config as PluginConfig, apply as applyPlugin, inject as pluginInject } from '../src/index.ts'
 import { EdgeId, NodeId, RunId, WorkflowId } from '../src/types.ts'
 import type { DagWorkflowDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/types.ts'
 
@@ -208,7 +208,7 @@ describe('DagEngineProvider', () => {
     })
     const ready = Promise.withResolvers<void>()
     ctx.inject(['workflowStudioController'], () => { ready.resolve() })
-    const plugin = ctx.plugin({ inject: pluginInject, apply: applyPlugin })
+    const plugin = ctx.plugin({ inject: pluginInject, Config: PluginConfig, apply: applyPlugin }, {} as PluginConfig)
     await plugin
     await ready.promise
 
@@ -587,7 +587,7 @@ describe('DagEngineProvider', () => {
 
   it('可变输入节点拒绝不同类型、过少输入和不同型输出', async () => {
     const { engine } = await setup()
-    const base = {
+    const base: DagWorkflowDefinition = {
       name: 'invalid-coalesce',
       nodes: [{
         id: NodeId('merge'),
@@ -660,7 +660,7 @@ describe('DagEngineProvider', () => {
     assert.equal(engine.getRun(run.runId)?.nodes[0]?.status, 'awaiting-input')
     assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
 
-    run.cancel('operator cancelled')
+    engine.cancelRun(run.runId, 'operator cancelled')
     const result = await run.result
 
     assert.equal(result.status, 'cancelled')

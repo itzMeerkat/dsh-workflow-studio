@@ -4,7 +4,9 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { Context } from '@deepseek-ai/cordis'
 import { CONDITION_PORT, NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
+import { WorkflowNodeRegistry } from '../src/registry.ts'
 import type { NodeExecutionContext } from '../src/types.ts'
 import { RunId } from '../src/types.ts'
 
@@ -15,6 +17,8 @@ function context(overrides: Partial<NodeExecutionContext> = {}): NodeExecutionCo
     inputs: {},
     connected: new Set(),
     invocationKey: 'run/node',
+    notepad: { value: undefined, save: async () => {} },
+    askHuman: async () => { throw new Error('unused') },
     signal: new AbortController().signal,
     log: () => {},
     ...overrides,
@@ -70,8 +74,11 @@ describe('WorkflowNode 端口', () => {
     assert.deepEqual(new FlowNode().inputs.map(port => port.name), ['value'])
   })
 
-  it('条件节点声明 condition 业务输入时抛出', () => {
-    assert.throws(() => new ReservedNode().inputs, /condition 由基类保留/)
+  it('条件节点声明 condition 业务输入时注册被拒绝', async () => {
+    const ctx = new Context()
+    await ctx.plugin(WorkflowNodeRegistry)
+    assert.throws(() => ctx.workflowNodeRegistry.register(new ReservedNode(), 'tests'), /输入端口 condition 重复/)
+    await ctx.fiber.dispose()
   })
 })
 
@@ -104,23 +111,23 @@ describe('WorkflowNode condition 门控', () => {
 })
 
 describe('WorkflowNode execute', () => {
-  it('同步 run 同步返回 completed，且 run 看不到 condition', () => {
+  it('同步 run 返回 completed，且 run 看不到 condition', async () => {
     const node = new ProbeNode()
-    const result = node.execute(context({ inputs: { value: 3, condition: true } }))
+    const result = await node.execute(context({ inputs: { value: 3, condition: true } }))
     assert.deepEqual(result, { status: 'completed', outputs: { output: 3 } })
     assert.deepEqual(node.seen, { value: 3 })
   })
 
-  it('conditional 为 false 的节点收到完整输入', () => {
+  it('conditional 为 false 的节点收到完整输入', async () => {
     const node = new FlowNode()
-    node.execute(context({ inputs: { value: 3, condition: true } }))
+    await node.execute(context({ inputs: { value: 3, condition: true } }))
     assert.deepEqual(node.seen, { value: 3, condition: true })
   })
 
   it('NodeFailure 转换为带诊断输出的失败结果', async () => {
     const node = new ProbeNode()
     assert.deepEqual(
-      node.execute(context({ config: { mode: 'fail' } })),
+      await node.execute(context({ config: { mode: 'fail' } })),
       { status: 'failed', error: 'planned', outputs: { partial: 1 } },
     )
     assert.deepEqual(
@@ -136,7 +143,7 @@ describe('WorkflowNode execute', () => {
     )
   })
 
-  it('非 NodeFailure 错误原样抛出', () => {
-    assert.throws(() => new ProbeNode().execute(context({ config: { mode: 'crash' } })), /unexpected/)
+  it('非 NodeFailure 错误原样抛出', async () => {
+    await assert.rejects(new ProbeNode().execute(context({ config: { mode: 'crash' } })), /unexpected/)
   })
 })

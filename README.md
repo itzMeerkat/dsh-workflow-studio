@@ -142,7 +142,7 @@ The sidebar's **Workflow Studio** panel opens the editor. The toolbar provides a
 
 An input port is present when the upstream output object has the selected key. A `preflight()` result settles the node before the engine checks inputs. A missing required input from a skipped dependency also propagates `skipped`; other partial required inputs fail. Missing optional inputs do not block execution.
 
-`pause()` takes effect between levels. `cancel()` aborts the run and ends every pause and every pending `askHuman()` call. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work. The `workflowStudio` Remote exposes `start`, `listRuns`, `getRun`, `pause`, `resume`, `cancel`, and `answer` by run ID; `run` starts a run and waits for it to settle.
+`pauseRun()` takes effect between levels. `cancelRun()` aborts the run and ends every pause and every pending `askHuman()` call. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work. The `workflowStudio` Remote exposes `start`, `listRuns`, `getRun`, `pause`, `resume`, `cancel`, and `answer` by run ID.
 
 Definitions returned by `get()`, run records returned by `getRun()`, and final results are independent snapshots. Caller mutation cannot alter saved definitions or internal run state.
 
@@ -212,6 +212,6 @@ The three tool schemas increase every request that exposes the global tool set. 
 <details>
 <summary>Working context for maintainers</summary>
 
-Run `pnpm test` for the focused Node test suite and `pnpm build` for bundling plus declaration generation. New node registrations must name their source plugins, remain owned by a Cordis effect or returned disposer, and accurately declare every port used by workflow edges.
+Run `pnpm test` for the focused Node test suite, `pnpm typecheck` to check source and test types, and `pnpm build` for bundling plus declaration generation. New node registrations must name their source plugins, remain owned by a Cordis effect or returned disposer, and accurately declare every port used by workflow edges.
 
 </details>

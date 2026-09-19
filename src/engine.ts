@@ -83,16 +83,11 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** 运行的持有者 handle。 */
+/** {@link DagEngine.start} 返回的运行 handle；运行由引擎按 ID 控制。 */
 export interface DagRun {
   readonly runId: RunId
-  readonly meta: { name: string; description?: string }
   /** 运行结束时以最终运行记录兑现，永不 reject。 */
   readonly result: Promise<WorkflowRunRecord>
-  pause(): void
-  resume(): void
-  cancel(reason?: string): void
-  dispose(): Promise<void>
 }
 
 /**

@@ -33,7 +33,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.inject(['dagEngine', 'workflowNodeRegistry'], (scope) => {
     scope.plugin(WorkflowStudioController)
-    return registerWorkflowTools(scope)
+    registerWorkflowTools(scope)
   })
 }
 

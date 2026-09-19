@@ -55,7 +55,6 @@ type GraphEditorKey =
   | 'action.delete'
   | 'inspector.title'
   | 'inspector.close'
-  | 'inspector.empty'
   | 'inspector.label'
   | 'inspector.config'
   | 'result.title'

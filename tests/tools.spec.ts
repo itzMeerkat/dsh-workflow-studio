@@ -17,7 +17,9 @@ interface CallableTool {
 function setup() {
   const definitions = new Map<string, ToolDefinition>()
   let saved: DagWorkflowDefinition | undefined
+  const disposers: Array<() => void> = []
   const ctx = {
+    effect(register: () => () => void) { disposers.push(register()) },
     dagEngine: {
       async save(definition: DagWorkflowDefinition) {
         saved = definition
@@ -34,7 +36,8 @@ function setup() {
       },
     },
   } as unknown as Context
-  const dispose = registerWorkflowTools(ctx)
+  registerWorkflowTools(ctx)
+  const dispose = (): void => { for (const dispose of disposers.splice(0).reverse()) dispose() }
   return { definitions, dispose, saved: () => saved }
 }
 
@@ -68,7 +71,7 @@ describe('workflow tools', () => {
     assert.equal(fixture.saved()?.nodes[0]?.requiresHumanInput, true)
   })
 
-  it('run_workflow 对未知名称抛错且 disposer 卸载两个工具', async () => {
+  it('run_workflow 对未知名称抛错，卸载 context 时移除全部工具', async () => {
     const fixture = setup()
     const run = fixture.definitions.get('run_workflow') as unknown as CallableTool
 

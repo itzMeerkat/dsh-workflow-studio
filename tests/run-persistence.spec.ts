@@ -256,7 +256,7 @@ describe('运行持久化与恢复', () => {
 
   it('非 JSON 输出使节点失败；notepad 拒绝非 JSON 值', async () => {
     const root = await newRoot()
-    const { engine } = await host(root, freshCalls(), { block: false })
+    const { ctx, engine } = await host(root, freshCalls(), { block: false })
     const workflowId = await engine.save({
       name: 'bad-output',
       nodes: [{ id: NodeId('bad'), type: 'bad-output', config: {} }],
@@ -278,7 +278,7 @@ describe('运行持久化与恢复', () => {
         return { status: 'completed', outputs: {} }
       },
     }
-    engine.ctx.workflowNodeRegistry.register(probe, 'run-persistence-tests')
+    ctx.workflowNodeRegistry.register(probe, 'run-persistence-tests')
     await engine.start(await engine.save({
       name: 'probe',
       nodes: [{ id: NodeId('probe'), type: 'notepad-probe', config: {} }],
@@ -333,7 +333,7 @@ describe('运行持久化与恢复', () => {
     const { ctx, engine } = await host(root, freshCalls(), { block: false })
     const started = Promise.withResolvers<void>()
     const saveAfterStop = Promise.withResolvers<unknown>()
-    engine.ctx.workflowNodeRegistry.register({
+    ctx.workflowNodeRegistry.register({
       type: 'late-save',
       label: 'Late save',
       description: 'Saves its notepad after the run is aborted',
@@ -352,9 +352,9 @@ describe('运行持久化与恢复', () => {
 
   it('取消时节点抛出的错误记为 cancelled', async () => {
     const root = await newRoot()
-    const { engine } = await host(root, freshCalls(), { block: false })
+    const { ctx, engine } = await host(root, freshCalls(), { block: false })
     const started = Promise.withResolvers<void>()
-    engine.ctx.workflowNodeRegistry.register({
+    ctx.workflowNodeRegistry.register({
       type: 'throw-on-abort',
       label: 'Throw on abort',
       description: 'Rejects with the abort reason',
@@ -377,7 +377,7 @@ describe('运行持久化与恢复', () => {
   it('答案写入失败时请求保持未回答，可再次回答', async () => {
     const root = await newRoot()
     const { ctx, engine } = await host(root, freshCalls(), { block: false })
-    engine.ctx.workflowNodeRegistry.register({
+    ctx.workflowNodeRegistry.register({
       type: 'ask',
       label: 'Ask',
       description: 'Asks one question and outputs the answer',

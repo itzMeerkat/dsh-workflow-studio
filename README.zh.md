@@ -142,7 +142,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 当上游输出对象包含选定 key 时，该输入端口存在。`preflight()` 返回的结果会在引擎检查输入之前结束节点；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
 
-`pause()` 在拓扑层之间生效。`cancel()` 会中止运行，并结束所有暂停和所有等待中的 `askHuman()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `answer`；`run` 启动运行并等待其结束。
+`pauseRun()` 在拓扑层之间生效。`cancelRun()` 会中止运行，并结束所有暂停和所有等待中的 `askHuman()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `answer`。
 
 `get()` 返回的定义、`getRun()` 返回的运行记录和最终结果都是独立快照。调用方修改这些值不会改变引擎内部状态。
 
@@ -212,6 +212,6 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 <details>
 <summary>维护者工作上下文</summary>
 
-在本目录运行 `pnpm test` 执行针对性 Node 测试，运行 `pnpm build` 完成打包和声明生成。新的节点注册必须声明来源插件，由 Cordis effect 或返回的 disposer 管理，并准确声明工作流边使用的全部端口。
+在本目录运行 `pnpm test` 执行针对性 Node 测试，运行 `pnpm typecheck` 检查源码和测试的类型，运行 `pnpm build` 完成打包和声明生成。新的节点注册必须声明来源插件，由 Cordis effect 或返回的 disposer 管理，并准确声明工作流边使用的全部端口。
 
 </details>

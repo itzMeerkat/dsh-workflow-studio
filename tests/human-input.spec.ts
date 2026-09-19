@@ -22,7 +22,7 @@ describe('问题与答案校验', () => {
     assert.throws(() => parseQuestions('dsh.mine', QUESTIONS), /不得以 "dsh\." 开头/)
     assert.deepEqual(parseQuestions('dsh.confirm', QUESTIONS, true), QUESTIONS)
     assert.throws(() => parseQuestions('q', []), /questions 必须为非空数组/)
-    assert.throws(() => parseQuestions('q', [QUESTIONS[0], QUESTIONS[0]]), /问题 ID "color" 重复/)
+    assert.throws(() => parseQuestions('q', [QUESTIONS[0]!, QUESTIONS[0]!]), /问题 ID "color" 重复/)
     assert.throws(
       () => parseQuestions('q', [{ id: 'x', question: 'X', options: [{ label: 'a' }, { label: 'a' }] }]),
       /选项 "a" 重复/,

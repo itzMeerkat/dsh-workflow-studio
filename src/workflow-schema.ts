@@ -11,8 +11,6 @@ import type {
   DagNodeDefinition,
   DagWorkflowDefinition,
   HumanInputRequest,
-  JsonObject,
-  JsonValue,
   NodeControlDefinition,
   NodeRunRecord,
   PortDefinition,
@@ -20,8 +18,9 @@ import type {
   WorkflowRunSummary,
   WorkflowStudioSnapshot,
 } from './types.ts'
-import { EdgeId, NodeId, RunId, WorkflowId } from './types.ts'
 
+// 每个 schema 断言为对应的声明类型：zod 输出省略缺失的可选键，但把它们类型化为 `T | undefined`，
+// 且不产生品牌 ID 类型；断言只恢复声明类型，不改变运行时值。
 const nonEmptyString = z.string().refine(value => value.trim() !== '', {
   error: '必须为非空字符串',
 })
@@ -35,14 +34,7 @@ export const workflowPortSchema = z.object({
   required: z.boolean().optional(),
   role: z.literal('condition').optional(),
   display: z.enum(['value', 'json']).optional(),
-}).transform((raw): PortDefinition => ({
-  name: raw.name,
-  type: raw.type,
-  ...(raw.description === undefined ? {} : { description: raw.description }),
-  ...(raw.required === undefined ? {} : { required: raw.required }),
-  ...(raw.role === undefined ? {} : { role: raw.role }),
-  ...(raw.display === undefined ? {} : { display: raw.display }),
-}))
+}) as unknown as z.ZodType<PortDefinition>
 
 const controlIdentity = { name: nonEmptyString, label: nonEmptyString }
 
@@ -68,7 +60,7 @@ export const nodeControlSchema = z.discriminatedUnion('kind', [
 
 /** 一个工作流节点的 JSON 表示。 */
 export const workflowNodeSchema = z.object({
-  id: nonEmptyString.transform(NodeId),
+  id: nonEmptyString,
   type: nonEmptyString,
   label: nonEmptyString.optional(),
   config: z.record(z.string(), z.json()).default({}),
@@ -80,99 +72,58 @@ export const workflowNodeSchema = z.object({
   }).optional(),
   outputs: z.array(workflowPortSchema).optional(),
   inputs: z.array(workflowPortSchema).optional(),
-}).transform((raw): DagNodeDefinition => ({
-  id: raw.id,
-  type: raw.type,
-  config: raw.config,
-  ...(raw.label === undefined ? {} : { label: raw.label }),
-  ...(raw.requiresHumanInput === undefined ? {} : { requiresHumanInput: raw.requiresHumanInput }),
-  ...(raw.recovery === undefined ? {} : { recovery: raw.recovery }),
-  ...(raw.position === undefined ? {} : { position: raw.position }),
-  ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
-  ...(raw.inputs === undefined ? {} : { inputs: raw.inputs }),
-}))
+}) as unknown as z.ZodType<DagNodeDefinition>
 
 /** 一条工作流边的 JSON 表示。 */
 export const workflowEdgeSchema = z.object({
-  id: nonEmptyString.transform(EdgeId),
-  source: nonEmptyString.transform(NodeId),
+  id: nonEmptyString,
+  source: nonEmptyString,
   sourcePort: nonEmptyString.optional(),
-  target: nonEmptyString.transform(NodeId),
+  target: nonEmptyString,
   targetPort: nonEmptyString.optional(),
-}).transform((raw): DagEdgeDefinition => ({
-  id: raw.id,
-  source: raw.source,
-  target: raw.target,
-  ...(raw.sourcePort === undefined ? {} : { sourcePort: raw.sourcePort }),
-  ...(raw.targetPort === undefined ? {} : { targetPort: raw.targetPort }),
-}))
+}) as unknown as z.ZodType<DagEdgeDefinition>
 
 /** 完整工作流定义的持久化和 Remote JSON schema。 */
-export const workflowDefinitionSchema: z.ZodType<DagWorkflowDefinition> = z.object({
+export const workflowDefinitionSchema = z.object({
   name: nonEmptyString,
   description: nonEmptyString.optional(),
   nodes: z.array(workflowNodeSchema),
   edges: z.array(workflowEdgeSchema),
   inputs: z.array(workflowPortSchema).optional(),
   outputs: z.array(workflowPortSchema).optional(),
-}).transform((raw): DagWorkflowDefinition => ({
-  name: raw.name,
-  nodes: raw.nodes,
-  edges: raw.edges,
-  ...(raw.description === undefined ? {} : { description: raw.description }),
-  ...(raw.inputs === undefined ? {} : { inputs: raw.inputs }),
-  ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
-}))
+}) as unknown as z.ZodType<DagWorkflowDefinition>
 
 const runStatus = z.enum(['running', 'paused', 'interrupted', 'completed', 'failed', 'cancelled'])
 
-const jsonObject = z.record(z.string(), z.json()) as z.ZodType<JsonObject>
+const jsonObject = z.record(z.string(), z.json())
 
 // 问题和答案在提问与回答时由 human-input.ts 校验；此处只要求可读回的 JSON 结构。
 const humanInputRequestSchema = z.object({
   id: z.string().min(1),
-  questions: z.array(z.json()) as unknown as z.ZodType<HumanInputRequest['questions']>,
-  answer: (z.json() as unknown as z.ZodType<NonNullable<HumanInputRequest['answer']>>).optional(),
+  questions: z.array(z.json()),
+  answer: z.json().optional(),
   askedAt: z.number(),
   answeredAt: z.number().optional(),
-}).transform((raw): HumanInputRequest => ({
-  id: raw.id,
-  questions: raw.questions,
-  askedAt: raw.askedAt,
-  ...(raw.answer === undefined ? {} : { answer: raw.answer }),
-  ...(raw.answeredAt === undefined ? {} : { answeredAt: raw.answeredAt }),
-}))
+}) as unknown as z.ZodType<HumanInputRequest>
 
 const nodeRunRecordSchema = z.object({
-  nodeId: z.string().min(1).transform(NodeId),
-  runId: z.string().min(1).transform(RunId),
+  nodeId: z.string().min(1),
+  runId: z.string().min(1),
   status: z.enum(['pending', 'running', 'awaiting-input', 'completed', 'skipped', 'failed', 'cancelled']),
   attempts: z.number().int().nonnegative(),
   inputs: jsonObject.optional(),
   outputs: jsonObject.optional(),
   error: z.string().optional(),
-  notepad: (z.json() as z.ZodType<JsonValue>).optional(),
+  notepad: z.json().optional(),
   interactions: z.array(humanInputRequestSchema).optional(),
   startedAt: z.number(),
   completedAt: z.number().optional(),
-}).transform((raw): NodeRunRecord => ({
-  nodeId: raw.nodeId,
-  runId: raw.runId,
-  status: raw.status,
-  attempts: raw.attempts,
-  startedAt: raw.startedAt,
-  ...(raw.inputs === undefined ? {} : { inputs: raw.inputs }),
-  ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
-  ...(raw.error === undefined ? {} : { error: raw.error }),
-  ...(raw.notepad === undefined ? {} : { notepad: raw.notepad }),
-  ...(raw.interactions === undefined ? {} : { interactions: raw.interactions }),
-  ...(raw.completedAt === undefined ? {} : { completedAt: raw.completedAt }),
-}))
+}) as unknown as z.ZodType<NodeRunRecord>
 
 /** 一条运行记录的持久化 schema。 */
-export const workflowRunRecordSchema: z.ZodType<WorkflowRunRecord> = z.object({
-  runId: z.string().min(1).transform(RunId),
-  workflowId: z.string().min(1).transform(WorkflowId),
+export const workflowRunRecordSchema = z.object({
+  runId: z.string().min(1),
+  workflowId: z.string().min(1),
   definition: workflowDefinitionSchema,
   status: runStatus,
   error: z.string().optional(),
@@ -180,22 +131,12 @@ export const workflowRunRecordSchema: z.ZodType<WorkflowRunRecord> = z.object({
   updatedAt: z.number(),
   completedAt: z.number().optional(),
   nodes: z.array(nodeRunRecordSchema),
-}).transform((raw): WorkflowRunRecord => ({
-  runId: raw.runId,
-  workflowId: raw.workflowId,
-  definition: raw.definition,
-  status: raw.status,
-  startedAt: raw.startedAt,
-  updatedAt: raw.updatedAt,
-  nodes: raw.nodes,
-  ...(raw.error === undefined ? {} : { error: raw.error }),
-  ...(raw.completedAt === undefined ? {} : { completedAt: raw.completedAt }),
-}))
+}) as unknown as z.ZodType<WorkflowRunRecord>
 
 /** 运行列表中一行的 Remote JSON schema。 */
 export const workflowRunSummarySchema = z.object({
-  runId: z.string().min(1).transform(RunId),
-  workflowId: z.string().min(1).transform(WorkflowId),
+  runId: z.string().min(1),
+  workflowId: z.string().min(1),
   name: z.string(),
   status: runStatus,
   awaitingInput: z.number().int().nonnegative(),
@@ -208,7 +149,7 @@ export const workflowRunSummarySchema = z.object({
 /** 编辑器快照的 Remote JSON schema。 */
 export const workflowStudioSnapshotSchema = z.object({
   workflows: z.array(z.object({
-    id: z.string().min(1).transform(WorkflowId),
+    id: z.string().min(1),
     name: z.string(),
     description: z.string().optional(),
     definition: z.string(),

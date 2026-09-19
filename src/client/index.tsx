@@ -62,13 +62,11 @@ function createDefaultDefinition(name: string): DagWorkflowDefinition {
 
 const INITIAL_DEFINITION = createDefaultDefinition('workflow-1')
 
-type WorkflowStudioRemote = WorkflowStudioRemoteNamespace
-
 /** How often the panel refreshes run statuses while it is mounted. */
 const RUNS_REFRESH_MS = 2000
 
 interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
-  remote: WorkflowStudioRemote
+  remote: WorkflowStudioRemoteNamespace
 }
 
 /** Main workflow authoring surface. */
@@ -275,12 +273,8 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
     }
   }
 
-  const updateDefinition = (next: DagWorkflowDefinition): void => {
-    setDefinition(next)
-  }
-
   const addNode = (nodeType: NodeTypeSummary): void => {
-    updateDefinition(appendEditorNode(definition, nodeType))
+    setDefinition(appendEditorNode(definition, nodeType))
     setRevision(value => value + 1)
     setNotice(undefined)
   }
@@ -355,7 +349,7 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
                   value={definition.name}
                   readOnly={view !== 'canvas'}
                   onChange={(event) => {
-                    updateDefinition({ ...definition, name: event.currentTarget.value })
+                    setDefinition({ ...definition, name: event.currentTarget.value })
                   }}
                 />
               </label>
@@ -423,7 +417,7 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
                 nodeTypes={snapshot.nodeTypes}
                 runRecords={runRecords}
                 t={t}
-                onChange={updateDefinition}
+                onChange={setDefinition}
                 onError={setNotice}
                 {...(runResult === undefined ? {} : { runResult })}
               />
@@ -677,7 +671,6 @@ const dictionaries = {
     'execution.cycle': '以下节点位于循环依赖中',
     'inspector.title': '节点设置',
     'inspector.close': '关闭节点设置',
-    'inspector.empty': '选择节点后编辑名称和配置。',
     'inspector.label': '名称',
     'inspector.config': '配置 JSON',
     'result.title': '运行结果',
@@ -758,7 +751,6 @@ const dictionaries = {
     'execution.cycle': 'These nodes are in a dependency cycle',
     'inspector.title': 'Node settings',
     'inspector.close': 'Close node settings',
-    'inspector.empty': 'Select a node to edit its name and configuration.',
     'inspector.label': 'Label',
     'inspector.config': 'Configuration JSON',
     'result.title': 'Run result',
@@ -831,7 +823,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     key: PANEL_ID,
     locale: NS,
     inject: () => {
-      const remote = ctx.get('remote.workflowStudio') as WorkflowStudioRemote | undefined
+      const remote = ctx.get('remote.workflowStudio') as WorkflowStudioRemoteNamespace | undefined
       if (remote === undefined) throw new Error('workflowStudio Remote is not mounted')
       return { remote }
     },

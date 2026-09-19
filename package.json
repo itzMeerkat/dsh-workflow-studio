@@ -47,7 +47,8 @@
   "scripts": {
     "build": "tsdown && tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "prepare": "pnpm build",
-    "test": "node --import tsx/esm --test tests/**/*.spec.ts"
+    "test": "node --import tsx/esm --test tests/**/*.spec.ts",
+    "typecheck": "tsc -p tsconfig.test.json"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"

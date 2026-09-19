@@ -18,6 +18,8 @@ import {
   inject as storageDomainInject, name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
 import { registerFixtureNodes } from './fixture-nodes.ts'
+import { runEnded } from './host.ts'
+import { RunId } from '../src/types.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
@@ -101,10 +103,8 @@ describe('WorkflowStudioController', () => {
     ) as { nodes: Array<{ id: string; position?: { x: number; y: number } }> }
     assert.deepEqual(savedDefinition.nodes.find(node => node.id === 'left')?.position, { x: 24, y: 48 })
 
-    const result = JSON.parse(await controller.run(workflowId)) as {
-      status: string
-      nodeRecords: Array<{ nodeId: string; outputs?: Record<string, unknown> }>
-    }
+    const runId = RunId(controller.start(workflowId))
+    const result = await runEnded(contexts.at(-1)!, runId)
     assert.equal(result.status, 'completed')
     assert.deepEqual(result.nodes.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
   })

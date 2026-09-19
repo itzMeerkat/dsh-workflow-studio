@@ -27,7 +27,7 @@ import { workflowStudioDomainSpec } from './persistence.ts'
 import { workflowRunsDomainSpec } from './run-persistence.ts'
 import { toJsonOutputs, toJsonValue } from './json.ts'
 import { messageOf } from './errors.ts'
-import { portsAreCompatible, resolveInputPorts, topologicalLevels } from './graph.ts'
+import { assertUniquePortNames, portsAreCompatible, resolveInputPorts, topologicalLevels } from './graph.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { CONFIRM_REQUEST_ID, confirmQuestions, confirmRejection, parseAnswer, parseQuestions } from './human-input.ts'
 
@@ -59,8 +59,8 @@ interface RunState {
   resultResolve: (result: WorkflowRunRecord) => void
   /** 本运行的检查点写入按顺序排队。 */
   writeTail: Promise<void>
-  /** 等待答案的节点请求，键为 `${nodeId}\u0000${requestId}`。 */
-  inputWaiters: Map<string, (answer: AskUserQuestionAnswer) => void>
+  /** 等待答案的节点请求，按节点 ID 和请求 ID 索引。 */
+  inputWaiters: Map<NodeId, Map<string, (answer: AskUserQuestionAnswer) => void>>
 }
 
 const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
@@ -102,7 +102,7 @@ export interface DagEngineConfig {
  * 默认 DAG 引擎实现。
  * - 工作流定义和运行记录通过 storage-domain 持久化
  * - 拓扑排序使用 Kahn 算法，同级节点并行执行
- * - 支持暂停/恢复/取消，HITL 通过暂停等待实现
+ * - 支持暂停/恢复/取消，节点通过 askHuman 等待人工输入
  * - Host 启动时恢复未结束的运行
  */
 export class DagEngineProvider extends DagEngine {
@@ -156,8 +156,13 @@ export class DagEngineProvider extends DagEngine {
     })
   }
 
-  /** 保存前验证所有可由当前注册表确定的不变量。 */
-  private validateDefinition(definition: DagWorkflowDefinition): void {
+  /**
+   * 按当前注册表验证定义，并解析每个节点的执行器。
+   * @returns 节点 ID 到执行器的映射。
+   * @throws 定义违反任一可由注册表确定的不变量时。
+   */
+  private resolveExecutors(definition: DagWorkflowDefinition): Map<NodeId, WorkflowNodeExecutor> {
+    const executors = new Map<NodeId, WorkflowNodeExecutor>()
     const nodePorts = new Map<NodeId, ResolvedNodePorts>()
     for (const node of definition.nodes) {
       if (nodePorts.has(node.id)) throw new Error(`节点 ID "${node.id}" 重复`)
@@ -166,9 +171,10 @@ export class DagEngineProvider extends DagEngine {
       if (executor === undefined) throw new Error(`未知节点类型: ${node.type}`)
       const inputs = resolveInputPorts(node.inputs, executor.inputs ?? [])
       const outputs = node.outputs ?? executor.outputs ?? []
-      this.validatePorts(node.id, '输入', inputs)
-      this.validatePorts(node.id, '输出', outputs)
+      assertUniquePortNames(`节点 ${node.id}`, '输入', inputs)
+      assertUniquePortNames(`节点 ${node.id}`, '输出', outputs)
       this.validateVariadicInputs(node, executor, inputs, outputs)
+      executors.set(node.id, executor)
       nodePorts.set(node.id, { inputs, outputs })
     }
 
@@ -216,14 +222,7 @@ export class DagEngineProvider extends DagEngine {
     }
 
     topologicalSort(definition)
-  }
-
-  private validatePorts(nodeId: NodeId, kind: string, ports: readonly PortDefinition[]): void {
-    const names = new Set<string>()
-    for (const port of ports) {
-      if (names.has(port.name)) throw new Error(`节点 ${nodeId} 的${kind}端口 ${port.name} 重复`)
-      names.add(port.name)
-    }
+    return executors
   }
 
   private validateVariadicInputs(
@@ -249,7 +248,7 @@ export class DagEngineProvider extends DagEngine {
 
   async save(definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
-    this.validateDefinition(snapshot)
+    this.resolveExecutors(snapshot)
 
     return this.enqueueMutation(async () => {
       const existing = this.findByName(snapshot.name)
@@ -261,7 +260,7 @@ export class DagEngineProvider extends DagEngine {
 
   async update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
-    this.validateDefinition(snapshot)
+    this.resolveExecutors(snapshot)
     return this.enqueueMutation(async () => {
       if (this.workflows.get(id) === undefined) {
         throw new Error(`工作流 "${id}" 不存在`)
@@ -312,7 +311,7 @@ export class DagEngineProvider extends DagEngine {
     this.runs.set(runId, state)
     this.emitEvent('dag/start', this.runInfo(state))
     this.launch(state)
-    return this.handle(state)
+    return { runId, result: state.resultPromise }
   }
 
   getRun(runId: RunId): WorkflowRunRecord | undefined {
@@ -378,23 +377,6 @@ export class DagEngineProvider extends DagEngine {
     if (state !== undefined) return TERMINAL_STATUSES.has(state.status) ? undefined : state
     if (this.runStore.get(runId) !== undefined) return undefined
     throw new Error(`运行 ${runId} 不存在`)
-  }
-
-  private handle(state: RunState): DagRun {
-    const meta: { name: string; description?: string } = { name: state.definition.name }
-    if (state.definition.description !== undefined) meta.description = state.definition.description
-    return {
-      runId: state.runId,
-      meta,
-      result: state.resultPromise,
-      pause: () => { this.pauseRun(state.runId) },
-      resume: () => { this.resumeRun(state.runId) },
-      cancel: (reason?: string) => { this.cancelRun(state.runId, reason) },
-      dispose: async () => {
-        this.cancelRun(state.runId, 'dispose')
-        await state.resultPromise
-      },
-    }
   }
 
   // ---- 持久化与恢复 ----
@@ -541,18 +523,6 @@ export class DagEngineProvider extends DagEngine {
     }
   }
 
-  /** 按当前注册表验证定义并解析每个节点的执行器。 */
-  private resolveExecutors(definition: DagWorkflowDefinition): Map<NodeId, WorkflowNodeExecutor> {
-    this.validateDefinition(definition)
-    const executors = new Map<NodeId, WorkflowNodeExecutor>()
-    for (const node of definition.nodes) {
-      const executor = this.registry.get(node.type)
-      if (executor === undefined) throw new Error(`节点类型 ${node.type} 未注册`)
-      executors.set(node.id, executor)
-    }
-    return executors
-  }
-
   // ---- 暂停/恢复 ----
 
   private releasePauseWaiters(state: RunState): void {
@@ -598,7 +568,7 @@ export class DagEngineProvider extends DagEngine {
       throw error
     }
     this.emitEvent('dag/input-answered', this.runInfo(state), nodeId, requestId)
-    state.inputWaiters.get(inputKey(nodeId, requestId))?.(structuredClone(parsed))
+    state.inputWaiters.get(nodeId)?.get(requestId)?.(structuredClone(parsed))
   }
 
   /**
@@ -624,17 +594,18 @@ export class DagEngineProvider extends DagEngine {
       request = { id: requestId, questions: parsed, askedAt: Date.now() }
       record.interactions.push(request)
     }
-    const key = inputKey(record.nodeId, requestId)
+    const waiters = state.inputWaiters.get(record.nodeId) ?? new Map<string, (answer: AskUserQuestionAnswer) => void>()
+    state.inputWaiters.set(record.nodeId, waiters)
     const { promise, resolve } = Promise.withResolvers<AskUserQuestionAnswer>()
-    state.inputWaiters.set(key, resolve)
+    waiters.set(requestId, resolve)
     record.status = 'awaiting-input'
     try {
       await this.checkpoint(state)
       this.emitEvent('dag/input-requested', this.runInfo(state), { ...nodeInfo, status: 'awaiting-input' }, requestId)
       return await abortable(promise, signal)
     } finally {
-      state.inputWaiters.delete(key)
-      if (record.status === 'awaiting-input' && !hasWaiter(state, record.nodeId)) record.status = 'running'
+      waiters.delete(requestId)
+      if (record.status === 'awaiting-input' && waiters.size === 0) record.status = 'running'
     }
   }
 
@@ -1017,16 +988,6 @@ function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
     ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
     ...(record.error === undefined ? {} : { error: record.error }),
   }
-}
-
-function inputKey(nodeId: NodeId, requestId: string): string {
-  return `${nodeId}\u0000${requestId}`
-}
-
-function hasWaiter(state: RunState, nodeId: NodeId): boolean {
-  const prefix = `${nodeId}\u0000`
-  for (const key of state.inputWaiters.keys()) if (key.startsWith(prefix)) return true
-  return false
 }
 
 /** 节点仅在等待执行前确认、尚未调用执行器。 */

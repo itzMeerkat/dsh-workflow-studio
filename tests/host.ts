@@ -52,7 +52,8 @@ export class TestHosts {
     await ctx.plugin(WorkflowNodeRegistry)
     for (const executor of executors) ctx.workflowNodeRegistry.register(executor, 'engine-tests')
     if (config === undefined) await ctx.plugin(DagEngineProvider)
-    else await ctx.plugin(DagEngineProvider, config)
+    // The plugin Config schema fills the fields a test omits.
+    else await ctx.plugin(DagEngineProvider, config as DagEngineConfig)
     const engine = ctx.dagEngine as DagEngineProvider
     await engine.recovered
     return { ctx, engine }

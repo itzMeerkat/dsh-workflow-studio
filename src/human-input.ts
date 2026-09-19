@@ -11,6 +11,7 @@ import type {
   AskUserQuestionAnswerItem,
   AskUserQuestionItem,
 } from '@deepseek-ai/dsh-user-questions/types'
+import { z } from 'zod'
 import { toJsonValue } from './json.ts'
 import type { DagNodeDefinition } from './types.ts'
 
@@ -76,42 +77,53 @@ export function confirmRejection(answer: AskUserQuestionAnswer): string | undefi
   return comment === undefined ? '人工拒绝执行' : `人工拒绝执行: ${comment}`
 }
 
-function nonEmptyString(value: unknown, path: string): string {
-  if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${path} 必须为非空字符串`)
+function requireText(value: string, path: string): string {
+  if (value.trim() === '') throw new TypeError(`${path} 必须为非空字符串`)
   return value
 }
 
 /**
- * 校验节点提交的请求 ID 和问题，返回可持久化的问题副本。
+ * 校验节点提交的请求 ID 和问题，返回可持久化的问题副本。请求 ID、问题 ID、问题文本和选项标签
+ * 不得为空，问题 ID 和同一问题的选项标签不得重复。
  * @param requestId - 节点内唯一的请求 ID。
  * @param questions - 待提问的问题。
  * @param allowReserved - 是否允许引擎保留的请求 ID。
  * @returns 问题的 JSON 副本。
  */
-export function parseQuestions(requestId: unknown, questions: unknown, allowReserved = false): AskUserQuestionItem[] {
-  const id = nonEmptyString(requestId, 'requestId')
-  if (!allowReserved && id.startsWith(RESERVED_REQUEST_PREFIX)) {
+export function parseQuestions(
+  requestId: string,
+  questions: readonly AskUserQuestionItem[],
+  allowReserved = false,
+): AskUserQuestionItem[] {
+  requireText(requestId, 'requestId')
+  if (!allowReserved && requestId.startsWith(RESERVED_REQUEST_PREFIX)) {
     throw new TypeError(`requestId 不得以 "${RESERVED_REQUEST_PREFIX}" 开头`)
   }
-  if (!Array.isArray(questions) || questions.length === 0) throw new TypeError('questions 必须为非空数组')
+  if (questions.length === 0) throw new TypeError('questions 必须为非空数组')
   const ids = new Set<string>()
-  questions.forEach((question: unknown, index) => {
+  questions.forEach((question, index) => {
     const path = `questions[${index}]`
-    if (question === null || typeof question !== 'object') throw new TypeError(`${path} 必须为对象`)
-    const item = question as Partial<AskUserQuestionItem>
-    const questionId = nonEmptyString(item.id, `${path}.id`)
-    if (ids.has(questionId)) throw new TypeError(`问题 ID "${questionId}" 重复`)
-    ids.add(questionId)
-    nonEmptyString(item.question, `${path}.question`)
+    requireText(question.id, `${path}.id`)
+    if (ids.has(question.id)) throw new TypeError(`问题 ID "${question.id}" 重复`)
+    ids.add(question.id)
+    requireText(question.question, `${path}.question`)
     const labels = new Set<string>()
-    for (const option of item.options ?? []) {
-      const label = nonEmptyString(option.label, `${path}.options[].label`)
-      if (labels.has(label)) throw new TypeError(`问题 "${questionId}" 的选项 "${label}" 重复`)
-      labels.add(label)
+    for (const option of question.options ?? []) {
+      requireText(option.label, `${path}.options[].label`)
+      if (labels.has(option.label)) throw new TypeError(`问题 "${question.id}" 的选项 "${option.label}" 重复`)
+      labels.add(option.label)
     }
   })
   return toJsonValue(questions, 'questions') as unknown as AskUserQuestionItem[]
 }
+
+const answerSchema = z.object({
+  answers: z.array(z.object({
+    id: z.string().min(1),
+    selected: z.array(z.string()),
+    custom: z.string().optional(),
+  })),
+})
 
 /**
  * 按问题校验答案，返回可持久化的答案副本。每个问题恰好有一个答案项；所选标签必须是该问题的选项，
@@ -121,26 +133,12 @@ export function parseQuestions(requestId: unknown, questions: unknown, allowRese
  * @returns 答案的 JSON 副本，答案项按问题顺序排列。
  */
 export function parseAnswer(questions: readonly AskUserQuestionItem[], answer: unknown): AskUserQuestionAnswer {
-  if (answer === null || typeof answer !== 'object' || !Array.isArray((answer as AskUserQuestionAnswer).answers)) {
-    throw new TypeError('答案必须为 { answers: [...] }')
-  }
+  const parsed = answerSchema.safeParse(answer)
+  if (!parsed.success) throw new TypeError(`答案必须为 { answers: [{ id, selected, custom? }] }: ${parsed.error.message}`)
   const byId = new Map<string, AskUserQuestionAnswerItem>()
-  for (const raw of (answer as AskUserQuestionAnswer).answers as unknown[]) {
-    if (raw === null || typeof raw !== 'object') throw new TypeError('答案项必须为对象')
-    const item = raw as Partial<AskUserQuestionAnswerItem>
-    const id = nonEmptyString(item.id, '答案项 id')
-    if (byId.has(id)) throw new TypeError(`问题 "${id}" 有多个答案项`)
-    if (!Array.isArray(item.selected) || item.selected.some(label => typeof label !== 'string')) {
-      throw new TypeError(`问题 "${id}" 的 selected 必须为字符串数组`)
-    }
-    if (item.custom !== undefined && typeof item.custom !== 'string') {
-      throw new TypeError(`问题 "${id}" 的 custom 必须为字符串`)
-    }
-    byId.set(id, {
-      id,
-      selected: [...item.selected],
-      ...(item.custom === undefined ? {} : { custom: item.custom }),
-    })
+  for (const item of parsed.data.answers as AskUserQuestionAnswerItem[]) {
+    if (byId.has(item.id)) throw new TypeError(`问题 "${item.id}" 有多个答案项`)
+    byId.set(item.id, item)
   }
   const answers = questions.map((question) => {
     const item = byId.get(question.id)

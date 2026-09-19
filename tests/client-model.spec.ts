@@ -15,7 +15,8 @@ import {
   parseEditorDefinition,
   reduceExecutionDependencies,
 } from '../src/client/model.ts'
-import type { NodeTypeSummary } from '../src/types.ts'
+import { WorkflowId, type NodeTypeSummary } from '../src/types.ts'
+import { workflowDefinitionSchema } from '../src/workflow-schema.ts'
 
 describe('workflow editor model', () => {
   it('round-trips node positions and explicit ports', () => {
@@ -96,8 +97,8 @@ describe('workflow editor model', () => {
 
   it('filters workflows by name', () => {
     const workflows = [
-      { id: 'first', name: 'Deploy Release', definition: '{}' },
-      { id: 'second', name: 'Review Changes', definition: '{}' },
+      { id: WorkflowId('first'), name: 'Deploy Release', definition: '{}' },
+      { id: WorkflowId('second'), name: 'Review Changes', definition: '{}' },
     ]
 
     assert.deepEqual(filterWorkflows(workflows, 'release').map(row => row.id), ['first'])
@@ -141,7 +142,7 @@ describe('workflow editor model', () => {
   })
 
   it('groups nodes into scheduler-compatible parallel stages', () => {
-    const plan = createExecutionPlan({
+    const plan = createExecutionPlan(workflowDefinitionSchema.parse({
       name: 'branch',
       nodes: [
         { id: 'left', type: 'input', config: {} },
@@ -176,7 +177,7 @@ describe('workflow editor model', () => {
           targetPort: 'condition',
         },
       ],
-    })
+    }))
 
     assert.deepEqual(
       plan.stages.map(stage => stage.nodes.map(item => item.node.id)),
@@ -214,7 +215,7 @@ describe('workflow editor model', () => {
   })
 
   it('reports nodes that cannot be assigned to an execution stage', () => {
-    const plan = createExecutionPlan({
+    const plan = createExecutionPlan(workflowDefinitionSchema.parse({
       name: 'cycle',
       nodes: [
         { id: 'a', type: 'input', config: {} },
@@ -224,7 +225,7 @@ describe('workflow editor model', () => {
         { id: 'a-b', source: 'a', target: 'b' },
         { id: 'b-a', source: 'b', target: 'a' },
       ],
-    })
+    }))
 
     assert.deepEqual(plan.stages, [])
     assert.deepEqual(plan.cyclicNodeIds, ['a', 'b'])

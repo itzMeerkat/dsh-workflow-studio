@@ -34,18 +34,11 @@ export class WorkflowStudioController extends TypertRemoteService {
   @Remote
   snapshot(): string {
     const payload: WorkflowStudioSnapshot = {
-      workflows: this.engine.list().map((summary) => {
-        const definition = this.engine.get(summary.id)
-        if (definition === undefined) {
-          throw new Error(`工作流 ${summary.id} 在列表读取期间消失`)
-        }
-        return {
-          id: summary.id,
-          name: summary.name,
-          ...(summary.description === undefined ? {} : { description: summary.description }),
-          definition: JSON.stringify(definition, null, 2),
-        }
-      }),
+      // list() 与 get() 同步读取同一张表，列出的 ID 一定存在。
+      workflows: this.engine.list().map(summary => ({
+        ...summary,
+        definition: JSON.stringify(this.engine.get(summary.id)!, null, 2),
+      })),
       nodeTypes: this.registry.listTypes(),
     }
     return JSON.stringify(payload)
@@ -77,20 +70,6 @@ export class WorkflowStudioController extends TypertRemoteService {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
       return await this.engine.update(WorkflowId(workflowId), definition)
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
-  }
-
-  /**
-   * Run one saved workflow to settlement.
-   * @param workflowId - ID returned by {@link save}.
-   * @returns The final run result encoded as JSON.
-   */
-  @Remote
-  async run(workflowId: string): Promise<string> {
-    try {
-      return JSON.stringify(await this.engine.start(WorkflowId(workflowId)).result)
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

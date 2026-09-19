@@ -49,10 +49,6 @@ function toFailure(error: unknown): NodeExecutionResult {
     : { status: 'failed', error: error.message, outputs: error.outputs }
 }
 
-function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
-  return typeof (value as { then?: unknown } | null)?.then === 'function'
-}
-
 /**
  * 节点作者的抽象基类。
  *
@@ -66,7 +62,7 @@ implements WorkflowNodeExecutor {
   abstract readonly type: string
   abstract readonly label: string
   abstract readonly description: string
-  /** 业务输入与输出端口；不得声明名为 condition 的输入。 */
+  /** 业务输入与输出端口；条件节点声明名为 condition 的输入时，注册表因端口重名拒绝注册。 */
   protected abstract readonly ports: WorkflowNodePorts
   declare readonly controls?: readonly NodeControlDefinition[]
   declare readonly variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
@@ -82,12 +78,7 @@ implements WorkflowNodeExecutor {
   protected abstract run(context: NodeExecutionContext): Outputs | Promise<Outputs>
 
   get inputs(): PortDefinition[] {
-    const inputs = [...this.ports.inputs]
-    if (!this.conditional) return inputs
-    if (inputs.some(port => port.name === CONDITION_PORT.name)) {
-      throw new Error(`节点类型 "${this.type}" 的输入端口 condition 由基类保留`)
-    }
-    return [...inputs, CONDITION_PORT]
+    return this.conditional ? [...this.ports.inputs, CONDITION_PORT] : [...this.ports.inputs]
   }
 
   get outputs(): PortDefinition[] {
@@ -103,22 +94,14 @@ implements WorkflowNodeExecutor {
     return { status: 'failed', error: 'condition 输入必须为布尔值' }
   }
 
-  execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult> {
+  async execute(context: NodeExecutionContext): Promise<NodeExecutionResult> {
     const inputs = this.conditional
       ? Object.fromEntries(Object.entries(context.inputs).filter(([name]) => name !== CONDITION_PORT.name))
       : context.inputs
-    let outputs: Outputs | Promise<Outputs>
     try {
-      outputs = this.run({ ...context, inputs })
+      return { status: 'completed', outputs: await this.run({ ...context, inputs }) }
     } catch (error: unknown) {
       return toFailure(error)
     }
-    if (isPromiseLike(outputs)) {
-      return Promise.resolve(outputs).then(
-        (value): NodeExecutionResult => ({ status: 'completed', outputs: value }),
-        toFailure,
-      )
-    }
-    return { status: 'completed', outputs }
   }
 }
