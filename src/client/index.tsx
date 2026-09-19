@@ -19,16 +19,16 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions/types'
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { z } from 'zod'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
+import { RunsView, type RunAction, type RunsFilter } from './RunsView.tsx'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
 import type {
-  EditorNodeRunRecord,
   EditorWorkflowDefinition,
   NodeTypeRow,
   WorkflowRow,
@@ -42,7 +42,15 @@ import {
   nextWorkflowName,
   parseEditorDefinition,
 } from './model.ts'
-import workflowStudioRemote from './remote.ts'
+import workflowStudioRemote, { type WorkflowStudioRemoteNamespace } from './remote.ts'
+import {
+  isActiveRun,
+  parseRunRecord,
+  parseRunSummaries,
+  runRecordsByNode,
+  type RunRecordView,
+  type RunSummaryRow,
+} from './runs-model.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 const NS = 'workflowStudio'
@@ -71,12 +79,10 @@ function createDefaultDefinition(name: string): EditorWorkflowDefinition {
 
 const INITIAL_DEFINITION = createDefaultDefinition('workflow-1')
 
-interface WorkflowStudioRemote {
-  snapshot(): Promise<RemoteResult<string>>
-  save(source: string): Promise<RemoteResult<string>>
-  update(workflowId: string, source: string): Promise<RemoteResult<string>>
-  run(workflowId: string): Promise<RemoteResult<string>>
-}
+type WorkflowStudioRemote = WorkflowStudioRemoteNamespace
+
+/** How often the panel refreshes run statuses while it is mounted. */
+const RUNS_REFRESH_MS = 2000
 
 interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
   remote: WorkflowStudioRemote
@@ -88,11 +94,16 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
   const [selectedId, setSelectedId] = useState<string>()
   const [definition, setDefinition] = useState<EditorWorkflowDefinition>(INITIAL_DEFINITION)
   const [revision, setRevision] = useState(0)
-  const [view, setView] = useState<'canvas' | 'execution'>('canvas')
+  const [view, setView] = useState<'canvas' | 'execution' | 'runs'>('canvas')
   const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'running'>('loading')
   const [notice, setNotice] = useState<string>()
-  const [runResult, setRunResult] = useState<string>()
-  const [runRecords, setRunRecords] = useState<ReadonlyMap<string, EditorNodeRunRecord>>(new Map())
+  const [runs, setRuns] = useState<readonly RunSummaryRow[]>([])
+  const [runsFilter, setRunsFilter] = useState<RunsFilter>('workflow')
+  const [selectedRunId, setSelectedRunId] = useState<string>()
+  const [runRecord, setRunRecord] = useState<RunRecordView>()
+  const [runBusy, setRunBusy] = useState(false)
+  const selectedRunRef = useRef<string | undefined>(undefined)
+  selectedRunRef.current = selectedRunId
 
   const adoptSource = (nextSource: string): void => {
     const nextDefinition = parseEditorDefinition(nextSource)
@@ -136,13 +147,67 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
     void load()
   }, [])
 
+  /** Read the run list and the selected run; failures surface as a notice. */
+  const refreshRuns = async (): Promise<void> => {
+    try {
+      const list = await remote.listRuns()
+      if (list.ok) setRuns(parseRunSummaries(list.value))
+      const runId = selectedRunRef.current
+      if (runId === undefined) return
+      const detail = await remote.getRun(runId)
+      if (detail.ok && selectedRunRef.current === runId) setRunRecord(parseRunRecord(detail.value))
+    } catch (error: unknown) {
+      setNotice(messageOf(error))
+    }
+  }
+
+  useEffect(() => {
+    void refreshRuns()
+    const timer = setInterval(() => { void refreshRuns() }, RUNS_REFRESH_MS)
+    return () => { clearInterval(timer) }
+  }, [])
+
+  const selectRun = (runId: string): void => {
+    selectedRunRef.current = runId
+    setSelectedRunId(runId)
+    setRunRecord(undefined)
+    void refreshRuns()
+  }
+
+  /** Apply a run control or answer and show the record it returns. */
+  const controlRun = async (call: () => Promise<RemoteResult<string>>): Promise<void> => {
+    setRunBusy(true)
+    setNotice(undefined)
+    try {
+      const response = await call()
+      if (!response.ok) {
+        setNotice(response.error.message)
+        return
+      }
+      setRunRecord(parseRunRecord(response.value))
+      await refreshRuns()
+    } catch (error: unknown) {
+      setNotice(messageOf(error))
+    } finally {
+      setRunBusy(false)
+    }
+  }
+
+  const onRunAction = (action: RunAction): void => {
+    const runId = selectedRunRef.current
+    if (runId !== undefined) void controlRun(() => remote[action](runId))
+  }
+
+  const onAnswer = (nodeId: string, requestId: string, answer: AskUserQuestionAnswer): void => {
+    const runId = selectedRunRef.current
+    if (runId !== undefined) void controlRun(() => remote.answer(runId, nodeId, requestId, JSON.stringify(answer)))
+  }
+
   const select = (workflow: WorkflowRow): void => {
     try {
       adoptSource(workflow.definition)
       setSelectedId(workflow.id)
       setNotice(undefined)
-      setRunResult(undefined)
-      setRunRecords(new Map())
     } catch (error: unknown) {
       setNotice(messageOf(error))
     }
@@ -153,8 +218,6 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
     setSelectedId(undefined)
     setDefinition(nextDefinition)
     setRevision(value => value + 1)
-    setRunResult(undefined)
-    setRunRecords(new Map())
     setNotice(undefined)
   }
 
@@ -180,7 +243,6 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
   const save = async (): Promise<void> => {
     setPhase('saving')
     setNotice(undefined)
-    setRunResult(undefined)
     const workflowId = await persist()
     if (workflowId !== undefined) {
       await load(workflowId)
@@ -190,25 +252,24 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
     }
   }
 
+  /** Save, start a run without waiting for it, and open it in the Runs view. */
   const run = async (): Promise<void> => {
     setPhase('running')
     setNotice(undefined)
-    setRunResult(undefined)
-    setRunRecords(new Map())
     const workflowId = await persist()
     if (workflowId === undefined) {
       setPhase('ready')
       return
     }
     try {
-      const response = await remote.run(workflowId)
+      const response = await remote.start(workflowId)
       if (!response.ok) {
         setNotice(response.error.message)
         return
       }
-      const formatted = JSON.stringify(JSON.parse(response.value), null, 2)
-      setRunResult(formatted)
-      setRunRecords(recordsFromResult(response.value))
+      setRunsFilter('workflow')
+      setView('runs')
+      selectRun(response.value)
     } catch (error: unknown) {
       setNotice(messageOf(error))
     } finally {
@@ -227,6 +288,11 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
   }
 
   const busy = phase !== 'ready'
+  const overlay = runRecord !== undefined && runRecord.workflowId === selectedId ? runRecord : undefined
+  const runRecords = overlay === undefined ? new Map() : runRecordsByNode(overlay)
+  const runResult = overlay === undefined ? undefined : JSON.stringify(overlay.nodes, null, 2)
+  const activeRuns = runs.filter(row => isActiveRun(row)).length
+  const awaitingInput = runs.reduce((count, row) => count + row.awaitingInput, 0)
   return (
     <main className={css.page}>
       <header className={css.header}>
@@ -234,6 +300,21 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
           <h1>{t('title')}</h1>
         </div>
         <div className={css.actions}>
+          {activeRuns > 0 && (
+            <button type="button" className={css.runBadge} onClick={() => { setRunsFilter('all'); setView('runs') }}>
+              {activeRuns} {t('runs.activeCount')}
+            </button>
+          )}
+          {awaitingInput > 0 && (
+            <button
+              type="button"
+              className={css.runBadge}
+              data-status="awaiting-input"
+              onClick={() => { setRunsFilter('all'); setView('runs') }}
+            >
+              {awaitingInput} {t('runs.awaitingCount')}
+            </button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -274,7 +355,7 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
                 <span>{t('workflows.name')}</span>
                 <input
                   value={definition.name}
-                  readOnly={view === 'execution'}
+                  readOnly={view !== 'canvas'}
                   onChange={(event) => {
                     updateDefinition({ ...definition, name: event.currentTarget.value })
                   }}
@@ -299,6 +380,15 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
                   <IconListPenOutline16 size={14} />
                   {t('view.execution')}
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={view === 'runs'}
+                  onClick={() => { setView('runs') }}
+                >
+                  <IconPlayOutline16 size={14} />
+                  {t('view.runs')}
+                </button>
               </div>
               {view === 'canvas' && (
                 <NodeLibraryMenu
@@ -312,8 +402,23 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
             <span>{phase === 'loading' ? t('status.loading') : t('status.ready')}</span>
           </div>
 
-          {view === 'canvas'
-            ? (
+          {view === 'runs' && (
+            <RunsView
+              t={t}
+              runs={runs}
+              filter={runsFilter}
+              currentWorkflowId={selectedId}
+              selectedRunId={selectedRunId}
+              record={runRecord}
+              nodeTypes={snapshot.nodeTypes}
+              busy={runBusy}
+              onFilter={setRunsFilter}
+              onSelect={selectRun}
+              onAction={onRunAction}
+              onAnswer={onAnswer}
+            />
+          )}
+          {view === 'canvas' && (
               <WorkflowGraphEditor
                 definition={definition}
                 revision={revision}
@@ -324,15 +429,15 @@ export function WorkflowStudioPanel({ t, remote }: WorkflowStudioPanelProps) {
                 onError={setNotice}
                 {...(runResult === undefined ? {} : { runResult })}
               />
-            )
-            : (
-              <ExecutionOrderView
-                definition={definition}
-                nodeTypes={snapshot.nodeTypes}
-                runRecords={runRecords}
-                t={t}
-              />
-            )}
+          )}
+          {view === 'execution' && (
+            <ExecutionOrderView
+              definition={definition}
+              nodeTypes={snapshot.nodeTypes}
+              runRecords={runRecords}
+              t={t}
+            />
+          )}
           {notice !== undefined && <p className={css.notice} role="alert">{notice}</p>}
         </section>
       </div>
@@ -542,26 +647,6 @@ function WorkflowStudioIcon() {
   return <IconBranchOutline16 size={16} />
 }
 
-const runResultSchema = z.object({
-  nodeRecords: z.array(z.object({
-    nodeId: z.string(),
-    status: z.string(),
-    outputs: z.record(z.string(), z.unknown()).optional(),
-  })),
-})
-
-function recordsFromResult(source: string): ReadonlyMap<string, EditorNodeRunRecord> {
-  const { nodeRecords } = runResultSchema.parse(JSON.parse(source) as unknown)
-  return new Map(nodeRecords.map(record => [
-    record.nodeId,
-    {
-      nodeId: record.nodeId,
-      status: record.status,
-      ...(record.outputs === undefined ? {} : { outputs: record.outputs }),
-    },
-  ]))
-}
-
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -610,6 +695,43 @@ const dictionaries = {
     'notice.incompatiblePorts': '输出类型与输入类型不兼容。',
     'notice.inputConnected': '每个输入端口只能连接一条边。',
     'notice.configObject': '节点配置必须是 JSON 对象。',
+    'view.runs': '运行',
+    'runs.filter': '运行范围',
+    'runs.filter.workflow': '当前工作流',
+    'runs.filter.all': '全部',
+    'runs.active': '进行中',
+    'runs.history': '历史',
+    'runs.empty': '还没有运行。',
+    'runs.select': '选择一个运行查看详情。',
+    'runs.started': '开始于',
+    'runs.duration': '耗时',
+    'runs.node': '节点',
+    'runs.status': '状态',
+    'runs.attempts': '调用次数',
+    'runs.detail': '输出与错误',
+    'runs.activeCount': '个运行进行中',
+    'runs.awaitingCount': '个问题待回答',
+    'action.pause': '暂停',
+    'action.resume': '恢复',
+    'action.cancel': '取消运行',
+    'runStatus.awaiting': '待回答',
+    'runStatus.running': '运行中',
+    'runStatus.paused': '已暂停',
+    'runStatus.interrupted': '已中断',
+    'runStatus.completed': '已完成',
+    'runStatus.failed': '失败',
+    'runStatus.cancelled': '已取消',
+    'nodeStatus.pending': '等待中',
+    'nodeStatus.running': '运行中',
+    'nodeStatus.awaiting-input': '待回答',
+    'nodeStatus.completed': '已完成',
+    'nodeStatus.skipped': '已跳过',
+    'nodeStatus.failed': '失败',
+    'nodeStatus.cancelled': '已取消',
+    'questions.title': '等待你的回答',
+    'questions.from': '来自节点',
+    'questions.other': '其他（自定义回答）',
+    'questions.submit': '提交回答',
   },
   en: {
     'tab.editor': 'Workflow Studio',
@@ -654,6 +776,43 @@ const dictionaries = {
     'notice.incompatiblePorts': 'The output and input port types are incompatible.',
     'notice.inputConnected': 'Each input port accepts only one edge.',
     'notice.configObject': 'Node configuration must be a JSON object.',
+    'view.runs': 'Runs',
+    'runs.filter': 'Run scope',
+    'runs.filter.workflow': 'This workflow',
+    'runs.filter.all': 'All',
+    'runs.active': 'Active',
+    'runs.history': 'History',
+    'runs.empty': 'No runs yet.',
+    'runs.select': 'Select a run to see its details.',
+    'runs.started': 'Started',
+    'runs.duration': 'Took',
+    'runs.node': 'Node',
+    'runs.status': 'Status',
+    'runs.attempts': 'Calls',
+    'runs.detail': 'Outputs and errors',
+    'runs.activeCount': 'active runs',
+    'runs.awaitingCount': 'questions waiting',
+    'action.pause': 'Pause',
+    'action.resume': 'Resume',
+    'action.cancel': 'Cancel run',
+    'runStatus.awaiting': 'Awaiting input',
+    'runStatus.running': 'Running',
+    'runStatus.paused': 'Paused',
+    'runStatus.interrupted': 'Interrupted',
+    'runStatus.completed': 'Completed',
+    'runStatus.failed': 'Failed',
+    'runStatus.cancelled': 'Cancelled',
+    'nodeStatus.pending': 'Pending',
+    'nodeStatus.running': 'Running',
+    'nodeStatus.awaiting-input': 'Awaiting input',
+    'nodeStatus.completed': 'Completed',
+    'nodeStatus.skipped': 'Skipped',
+    'nodeStatus.failed': 'Failed',
+    'nodeStatus.cancelled': 'Cancelled',
+    'questions.title': 'Waiting for your answer',
+    'questions.from': 'from node',
+    'questions.other': 'Other (custom answer)',
+    'questions.submit': 'Submit answer',
   },
 } as const
 

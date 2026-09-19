@@ -5,12 +5,22 @@
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
 
-interface WorkflowStudioRemoteNamespace {
+/** Client view of the `workflowStudio` Remote; every result is a string, JSON where noted on the Host method. */
+export interface WorkflowStudioRemoteNamespace {
   snapshot(): Promise<RemoteResult<string>>
   save(source: string): Promise<RemoteResult<string>>
   update(workflowId: string, source: string): Promise<RemoteResult<string>>
   run(workflowId: string): Promise<RemoteResult<string>>
+  start(workflowId: string): Promise<RemoteResult<string>>
+  listRuns(): Promise<RemoteResult<string>>
+  getRun(runId: string): Promise<RemoteResult<string>>
+  pause(runId: string): Promise<RemoteResult<string>>
+  resume(runId: string): Promise<RemoteResult<string>>
+  cancel(runId: string): Promise<RemoteResult<string>>
+  answer(runId: string, nodeId: string, requestId: string, answer: string): Promise<RemoteResult<string>>
 }
+
+type Method = keyof WorkflowStudioRemoteNamespace
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespaceMap {
@@ -22,6 +32,13 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'workflowStudio/save': WorkflowStudioRemoteNamespace['save']
     'workflowStudio/update': WorkflowStudioRemoteNamespace['update']
     'workflowStudio/run': WorkflowStudioRemoteNamespace['run']
+    'workflowStudio/start': WorkflowStudioRemoteNamespace['start']
+    'workflowStudio/listRuns': WorkflowStudioRemoteNamespace['listRuns']
+    'workflowStudio/getRun': WorkflowStudioRemoteNamespace['getRun']
+    'workflowStudio/pause': WorkflowStudioRemoteNamespace['pause']
+    'workflowStudio/resume': WorkflowStudioRemoteNamespace['resume']
+    'workflowStudio/cancel': WorkflowStudioRemoteNamespace['cancel']
+    'workflowStudio/answer': WorkflowStudioRemoteNamespace['answer']
   }
 }
 
@@ -32,65 +49,33 @@ const stringCodec = {
   create: () => z.string(),
 } as const
 
+/** Describe one direct method whose parameters and result are all strings. */
+function descriptor(method: Method, parameters: readonly string[]): TypertRemoteContribution['descriptors'][number] {
+  return {
+    id: `dsh-workflow-studio#workflowStudio/${method}`,
+    service: 'workflowStudioController',
+    namespace: 'workflowStudio',
+    method,
+    invocation: { kind: 'direct' },
+    parameters: parameters.map(name => ({ name, wire: name, source: 'json', codec: stringCodec })),
+    result: stringCodec,
+  }
+}
+
 const contribution: TypertRemoteContribution = {
   package: 'dsh-workflow-studio',
   descriptors: [
-    {
-      id: 'dsh-workflow-studio#workflowStudio/snapshot',
-      service: 'workflowStudioController',
-      namespace: 'workflowStudio',
-      method: 'snapshot',
-      invocation: { kind: 'direct' },
-      parameters: [],
-      result: stringCodec,
-    },
-    {
-      id: 'dsh-workflow-studio#workflowStudio/save',
-      service: 'workflowStudioController',
-      namespace: 'workflowStudio',
-      method: 'save',
-      invocation: { kind: 'direct' },
-      parameters: [{
-        name: 'source',
-        wire: 'source',
-        source: 'json',
-        codec: stringCodec,
-      }],
-      result: stringCodec,
-    },
-    {
-      id: 'dsh-workflow-studio#workflowStudio/update',
-      service: 'workflowStudioController',
-      namespace: 'workflowStudio',
-      method: 'update',
-      invocation: { kind: 'direct' },
-      parameters: [{
-        name: 'workflowId',
-        wire: 'workflowId',
-        source: 'json',
-        codec: stringCodec,
-      }, {
-        name: 'source',
-        wire: 'source',
-        source: 'json',
-        codec: stringCodec,
-      }],
-      result: stringCodec,
-    },
-    {
-      id: 'dsh-workflow-studio#workflowStudio/run',
-      service: 'workflowStudioController',
-      namespace: 'workflowStudio',
-      method: 'run',
-      invocation: { kind: 'direct' },
-      parameters: [{
-        name: 'workflowId',
-        wire: 'workflowId',
-        source: 'json',
-        codec: stringCodec,
-      }],
-      result: stringCodec,
-    },
+    descriptor('snapshot', []),
+    descriptor('save', ['source']),
+    descriptor('update', ['workflowId', 'source']),
+    descriptor('run', ['workflowId']),
+    descriptor('start', ['workflowId']),
+    descriptor('listRuns', []),
+    descriptor('getRun', ['runId']),
+    descriptor('pause', ['runId']),
+    descriptor('resume', ['runId']),
+    descriptor('cancel', ['runId']),
+    descriptor('answer', ['runId', 'nodeId', 'requestId', 'answer']),
   ],
 }
 

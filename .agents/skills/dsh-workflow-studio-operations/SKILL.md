@@ -24,7 +24,7 @@ Do not edit files under the storage root directly. The engine owns schema parsin
 3. Edit the name, add nodes from **Add node**, and connect explicit output and input handles.
 4. Select a node to edit its label and configuration. Use card controls when the node provides them.
 5. Use **Execution order** to inspect scheduler stages and condition branches. This view is read-only.
-6. Save before treating the definition as durable. Run saves the current definition before starting it.
+6. Save before treating the definition as durable. **Run** saves the current definition, starts a run, and opens the **Runs** tab, where you can follow its node states, pause, resume, or cancel it, and answer its questions.
 7. Inspect node status and outputs in the bottom details area.
 
 Preserve node IDs and edge IDs for unchanged graph elements. Stable IDs keep saved positions, run records, and visual references understandable.
@@ -137,7 +137,7 @@ Check these causes in order:
 4. Cycle: inspect **Execution order** and remove the dependency cycle.
 5. Skipped node: inspect its connected condition and skipped upstream dependencies.
 6. Failed node: inspect the node record's `inputs`, `outputs`, and `error`.
-7. Run waiting on a person: `listRuns()` shows `awaitingInput`; find the unanswered entry in the node record's `interactions` and answer it with `answerInput()`. The browser has no answer form yet.
+7. Run waiting on a person: answer it in the panel's **Runs** tab, or find the unanswered entry in the node record's `interactions` and call `answerInput()`.
 8. Interrupted run: read its `error` for the reason, fix it (for example, load the missing node plugin), then call `resumeRun()` or `cancelRun()`.
 
 When package code changes, run `pnpm test` and `pnpm build` from `dsh-workflow-studio`.

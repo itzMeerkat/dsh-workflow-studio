@@ -128,6 +128,8 @@ The demo `coalesce` node merges mutually exclusive data branches. A coalesce ins
 
 The sidebar's **Workflow Studio** panel opens the editor. The toolbar provides a searchable workflow picker, edits the current workflow name, and opens a searchable node menu whose rows identify their source plugins. Renaming and saving an existing workflow preserves its ID; a duplicate name is rejected. The React Flow canvas renders one handle per declared input and output, with inputs on the left and outputs on the right. Connection previews follow the pointer while dragging. Existing edge endpoints can be moved to another compatible port or dropped on empty canvas space to delete the edge. Selecting a node opens its details and the run result below the full-width canvas. The canvas also supports node placement, typed port-to-port connections, node creation and deletion, card controls, card output previews, JSON configuration editing, saved positions, and run-status overlays. The read-only execution-order view replaces the raw JSON view with a node graph arranged by the scheduler's topological stages. It applies transitive reduction to data and condition dependencies, removing a direct edge when another directed path already represents the same execution-order relation. A retained condition edge leaves its branch node through a labeled output such as `true` or `false`; nodes in one stage run concurrently. Save and run operations use the Host's `workflowStudio` Remote; parsing and graph validation remain Host-owned.
 
+**Run** saves the workflow, starts a run without waiting for it, and opens the **Runs** tab. The tab lists runs for the current workflow or for all workflows, split into **Active** (unfinished, or waiting for an answer) and **History**. Selecting a run shows its status, start time, duration, and error; **Pause**, **Resume**, and **Cancel run** where they apply; a form for each unanswered human-input request; the execution-order graph of the run's workflow snapshot with node statuses; and a table of node statuses, call counts, outputs, and errors. The toolbar shows how many runs are active and how many questions are waiting, and either count opens the Runs tab. The panel refreshes run statuses every two seconds, and the canvas shows node statuses from the selected run when it belongs to the open workflow.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -158,10 +160,12 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/human-input.ts`](src/human-input.ts) | Question and answer checks and the `dsh.confirm` confirmation question |
 | [`src/tools.ts`](src/tools.ts) | Model tool registration and JSON input parsing |
 | [`src/controller.ts`](src/controller.ts) | Host Remote for browser snapshots, saves, and run control |
-| [`src/client/index.tsx`](src/client/index.tsx) | Localized workflow picker, canvas/execution views, save, and run actions |
+| [`src/client/index.tsx`](src/client/index.tsx) | Localized workflow picker, canvas/execution/runs views, save, run, and run-status refresh |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | Read-only execution dependency graph and run status |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow canvas, custom nodes, connections, bottom details panel, and run state |
 | [`src/client/model.ts`](src/client/model.ts) | Browser-side JSON parsing and editor DTOs |
+| [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | Runs tab: run list, controls, question forms, and node states |
+| [`src/client/runs-model.ts`](src/client/runs-model.ts) | Run record parsing, grouping, pending requests, and answer building |
 
 </details>
 
@@ -199,7 +203,7 @@ The three tool schemas increase every request that exposes the global tool set. 
 - Nodes are called again only after a Host restart; a failed node is not retried within a running Host.
 - `start()` accepts no workflow-level input values.
 - `PortDefinition.type` controls edge compatibility, but the engine does not perform general runtime value-type validation.
-- The browser editor has no form for answering human-input requests yet; answers arrive only through the `answer` Remote or `answerInput()`. Requests are not forwarded to Harness chat Sessions.
+- Human-input requests are answered in the Runs tab, through the `answer` Remote, or with `answerInput()`; they are not forwarded to Harness chat Sessions, and the question form renders every question as a generic option list, including `plan-review` questions.
 - Cancellation during executor work depends on the executor observing `context.signal`.
 - The visual editor does not yet provide undo/redo, copy/paste, groups, automatic layout, or multi-node configuration editing.
 

@@ -16,6 +16,7 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/client/index.tsx` owns the `main` panel, workflow picker, and `sidebar.panellist` entry.
 - `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering.
 - `src/client/ExecutionOrderView.tsx` owns the read-only execution dependency graph.
+- `src/client/RunsView.tsx` owns the Runs tab; `src/client/runs-model.ts` owns run parsing, grouping, and answer building.
 - `.agents/skills/` owns reusable workflow-operation and custom-node development procedures.
 
 Do not describe Session persistence, retries, Skills, or approval-service integration as implemented until the corresponding source and tests exist.

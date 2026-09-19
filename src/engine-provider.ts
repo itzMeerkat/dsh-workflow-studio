@@ -396,6 +396,13 @@ export class DagEngineProvider extends DagEngine {
     return record === undefined ? undefined : resultOfRecord(record)
   }
 
+  getRunRecord(runId: RunId): WorkflowRunRecord | undefined {
+    const state = this.runs.get(runId)
+    if (state !== undefined) return this.toRecord(state)
+    const record = this.runStore.get(runId)
+    return record === undefined ? undefined : structuredClone(record)
+  }
+
   listRuns(): WorkflowRunSummary[] {
     const summaries = new Map<RunId, WorkflowRunSummary>()
     for (const [runId, record] of this.runStore.entries()) summaries.set(runId, summaryOfRecord(record))

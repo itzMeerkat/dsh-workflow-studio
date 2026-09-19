@@ -151,42 +151,46 @@ export class WorkflowStudioController extends TypertRemoteService {
   }
 
   /**
-   * Read one retained run with its node records.
+   * Read one retained run record with its definition snapshot and node records.
    * @param runId - Run ID returned by {@link start}.
-   * @returns The run result encoded as JSON.
+   * @returns The run record encoded as JSON.
    */
   @Remote
   getRun(runId: string): string {
-    const result = this.engine.getRun(RunId(runId))
-    if (result === undefined) throw new RemoteError('gateway/bad-request', `运行 ${runId} 不存在`, {})
-    return JSON.stringify(result)
+    return this.record(runId)
   }
 
   /**
    * Request a pause after the current level of a running run.
    * @param runId - Run ID.
+   * @returns The run record after the request, encoded as JSON.
    */
   @Remote
-  pause(runId: string): void {
+  pause(runId: string): string {
     this.control(() => { this.engine.pauseRun(RunId(runId)) })
+    return this.record(runId)
   }
 
   /**
    * Resume a paused or interrupted run.
    * @param runId - Run ID.
+   * @returns The run record after resuming, encoded as JSON.
    */
   @Remote
-  resume(runId: string): void {
+  resume(runId: string): string {
     this.control(() => { this.engine.resumeRun(RunId(runId)) })
+    return this.record(runId)
   }
 
   /**
    * Cancel an unfinished run.
    * @param runId - Run ID.
+   * @returns The run record after the request, encoded as JSON.
    */
   @Remote
-  cancel(runId: string): void {
+  cancel(runId: string): string {
     this.control(() => { this.engine.cancelRun(RunId(runId), '用户取消') })
+    return this.record(runId)
   }
 
   /**
@@ -195,14 +199,22 @@ export class WorkflowStudioController extends TypertRemoteService {
    * @param nodeId - Node that asked.
    * @param requestId - Request ID from the node record's `interactions`.
    * @param answer - `ask_user_question` answer encoded as JSON.
+   * @returns The run record after the answer is saved, encoded as JSON.
    */
   @Remote
-  async answer(runId: string, nodeId: string, requestId: string, answer: string): Promise<void> {
+  async answer(runId: string, nodeId: string, requestId: string, answer: string): Promise<string> {
     try {
       await this.engine.answerInput(RunId(runId), NodeId(nodeId), requestId, JSON.parse(answer) as unknown)
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
+    return this.record(runId)
+  }
+
+  private record(runId: string): string {
+    const record = this.engine.getRunRecord(RunId(runId))
+    if (record === undefined) throw new RemoteError('gateway/bad-request', `运行 ${runId} 不存在`, {})
+    return JSON.stringify(record)
   }
 
   private control(action: () => void): void {

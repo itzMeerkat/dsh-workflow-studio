@@ -128,6 +128,8 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按照调度器拓扑阶段排列的节点图替代原始 JSON 视图。它对数据和 condition 依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。保留的 condition 边会从分支节点上标有 `true` 或 `false` 等名称的输出发出；同一阶段的节点并发运行。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
 
+**运行** 会保存工作流、启动运行而不等待其结束，并打开 **运行** 标签页。该标签页列出当前工作流或全部工作流的运行，并分为 **进行中**（未结束或等待回答）和 **历史**。选中运行后可以看到其状态、开始时间、耗时和错误；适用时的 **暂停**、**恢复** 和 **取消运行**；每个未回答人工输入请求的表单；按运行时工作流快照绘制并标出节点状态的执行顺序图；以及节点状态、调用次数、输出和错误的表格。工具栏显示进行中的运行数量和待回答的问题数量，点击任一数量会打开运行标签页。面板每两秒刷新一次运行状态；当选中的运行属于当前打开的工作流时，画布显示该运行的节点状态。
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -158,10 +160,12 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/human-input.ts`](src/human-input.ts) | 问题与答案校验，以及 `dsh.confirm` 确认问题 |
 | [`src/tools.ts`](src/tools.ts) | 模型工具注册和 JSON 输入解析 |
 | [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行控制所用的 Host Remote |
-| [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序视图、保存和运行操作 |
+| [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序/运行视图、保存、运行和运行状态刷新 |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | 只读执行依赖图和运行状态 |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布、自定义节点、连线、底部详情面板和运行状态 |
 | [`src/client/model.ts`](src/client/model.ts) | 浏览器侧 JSON 解析和编辑器 DTO |
+| [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | 运行标签页：运行列表、控制按钮、问题表单和节点状态 |
+| [`src/client/runs-model.ts`](src/client/runs-model.ts) | 运行记录解析、分组、待回答请求和答案构建 |
 
 </details>
 
@@ -199,7 +203,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 - 节点只在 Host 重启后被再次调用；运行中的 Host 不会重试失败的节点。
 - `start()` 不接受工作流级输入值。
 - `PortDefinition.type` 用于控制边的兼容性，但引擎不执行通用运行时值类型校验。
-- 浏览器编辑器尚无回答人工输入请求的表单；答案只能通过 `answer` Remote 或 `answerInput()` 提交。请求不会转发到 Harness 聊天 Session。
+- 人工输入请求可以在运行标签页、通过 `answer` Remote 或 `answerInput()` 回答；请求不会转发到 Harness 聊天 Session，问题表单会把所有问题（包括 `plan-review` 问题）渲染为通用选项列表。
 - 执行器运行期间能否取消，取决于执行器是否观察 `context.signal`。
 - 可视化编辑器尚未提供撤销/重做、复制/粘贴、分组、自动布局或多节点批量配置。
 
