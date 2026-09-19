@@ -16,6 +16,10 @@
       "types": "./lib/types/demo/index.d.ts",
       "default": "./lib/demo.js"
     },
+    "./nodes": {
+      "types": "./lib/types/nodes/index.d.ts",
+      "default": "./lib/nodes.js"
+    },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"

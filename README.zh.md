@@ -76,7 +76,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 <a id="use-this-package"></a>
 ## 使用此包
 
-包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio` 插件和 `dsh-workflow-studio/demo` 插件插入 Harness profile。核心插件不注册任何节点；演示插件注册示例节点 `input`、`arithmetic`、`if`、`coalesce` 和 `output`，禁用其 `workflow-studio-demo` 行后只保留其他插件提供的节点。核心插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
+包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio`、`dsh-workflow-studio/nodes` 和 `dsh-workflow-studio/demo` 插件插入 Harness profile。核心插件不注册任何节点；nodes 插件注册 `human-approval` 节点；演示插件注册示例节点 `input`、`arithmetic`、`if`、`coalesce` 和 `output`，禁用其 `workflow-studio-demo` 行后只保留其他插件提供的节点。核心插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
 
 模型可以使用三个工具：
 
@@ -102,6 +102,8 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 节点通过 `await context.askHuman(requestId, questions)` 向人提问，问题与答案采用 `@deepseek-ai/dsh-user-questions` 中 Harness `ask_user_question` 工具的格式：每个问题可以提供选项、允许多选并接受自定义文本。引擎把请求保存到节点的运行记录中，并将节点标记为 `awaiting-input`；`listRuns()` 以 `awaitingInput` 报告每个未结束运行中未回答请求的数量。`answerInput()` 或 `answer` Remote 按问题校验答案、保存答案，然后交给等待中的节点。运行处于 running、paused 或 interrupted 时都可以回答。重启后再次被调用的节点，对已回答的 `requestId` 立即得到保存的答案，对未回答的请求则继续等待原有请求。以 `dsh.` 开头的请求 ID 由引擎保留。
 
 执行器或工作流定义标记了 `requiresHumanInput` 的节点，会在执行器运行前以保留请求 `dsh.confirm` 提出包含 `批准` 和 `拒绝` 选项的确认。`批准` 执行节点；`拒绝` 或自定义答案使节点失败，自定义文本会写入错误信息。被 condition 跳过的节点不会提问。Host 停止时仍在等待该确认的节点总会被重新执行，不受其 `recovery` 策略约束，因为它的执行器尚未运行。
+
+`dsh-workflow-studio/nodes` 插件注册 `human-approval` 节点（人工审批），它让工作流中的这一步暂停，直到有人做出决定。节点通过 `askHuman` 以 `批准` 和 `拒绝` 两个选项提出可配置的 `question`，并向审批人展示可选的 `input` 值。批准时输出 `approved: true`，并把 `input` 原样作为 `output` 输出。`拒绝` 或自定义文本回答表示拒绝：`onReject: 'fail'`（默认）时节点失败，文本写入错误信息；`onReject: 'branch'` 时输出 `rejected: true`，下游可以用 `condition` 处理拒绝分支。自定义文本回答也会作为 `comment` 输出。节点带有标准 condition 输入，未选中的分支不会提问。
 
 ```json
 {
@@ -154,6 +156,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/persistence.ts`](src/persistence.ts) | per-record storage-domain 声明 |
 | [`src/engine-provider.ts`](src/engine-provider.ts) | 校验、调度、暂停、恢复和取消 |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类、`NodeFailure` 和 condition 门控 |
+| [`src/nodes/`](src/nodes/) | `human-approval` 节点及 `dsh-workflow-studio/nodes` 插件入口 |
 | [`src/demo/`](src/demo/) | 演示节点 `input`、`arithmetic`、`if`、`coalesce`、`output` 及其插件入口 |
 | [`src/run-persistence.ts`](src/run-persistence.ts) | 运行记录 schema 和 storage-domain 声明 |
 | [`src/json.ts`](src/json.ts) | 节点输出和 notepad 值的 JSON 检查 |

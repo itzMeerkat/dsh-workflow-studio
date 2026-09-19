@@ -76,7 +76,7 @@ The profile loads the checkout's `lib/` directly. After editing the source, run 
 <a id="use-this-package"></a>
 ## Use this package
 
-The package's [`cordis.patch.yml`](cordis.patch.yml) inserts the `dsh-workflow-studio` plugin and the `dsh-workflow-studio/demo` plugin into a Harness profile. The core plugin registers no nodes; the demo plugin registers the example `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes, and disabling its `workflow-studio-demo` row leaves only nodes from other plugins. The core plugin requires `ctx.tools` and `ctx.storageDomain`, then provides `ctx.workflowNodeRegistry` and `ctx.dagEngine`. The base bundle supplies the JSON backend and routes domains to it.
+The package's [`cordis.patch.yml`](cordis.patch.yml) inserts the `dsh-workflow-studio`, `dsh-workflow-studio/nodes`, and `dsh-workflow-studio/demo` plugins into a Harness profile. The core plugin registers no nodes; the nodes plugin registers the `human-approval` node; the demo plugin registers the example `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes, and disabling its `workflow-studio-demo` row leaves only nodes from other plugins. The core plugin requires `ctx.tools` and `ctx.storageDomain`, then provides `ctx.workflowNodeRegistry` and `ctx.dagEngine`. The base bundle supplies the JSON backend and routes domains to it.
 
 The model receives three tools:
 
@@ -102,6 +102,8 @@ A node that should not repeat completed work uses `context.invocationKey`, which
 A node asks a person with `await context.askHuman(requestId, questions)`, using the question and answer format of the Harness `ask_user_question` tool from `@deepseek-ai/dsh-user-questions`: each question may offer options, allow several selections, and accept custom text. The engine saves the request in the node's run record and marks the node `awaiting-input`; `listRuns()` reports each unfinished run's number of unanswered requests as `awaitingInput`. `answerInput()` or the `answer` Remote checks the answer against the questions, saves it, and then passes it to the waiting node. Answers are accepted while the run is running, paused, or interrupted. A node called again after a restart gets the saved answer at once for an answered `requestId`, or waits on the existing request for an unanswered one. Request IDs starting with `dsh.` are reserved for the engine.
 
 A node marked `requiresHumanInput`, by its executor or in the workflow definition, asks the reserved `dsh.confirm` request with the options `批准` and `拒绝` before its executor runs. `批准` runs the node; `拒绝` or a custom answer fails it, and the custom text becomes part of the error. A node skipped by its condition is not asked. A node still waiting for this confirmation when the Host stops is always restarted, whatever its `recovery` policy, because its executor has not run.
+
+The `dsh-workflow-studio/nodes` plugin registers the `human-approval` node (人工审批), which pauses one step of a workflow until a person decides. It asks its configurable `question` through `askHuman` with the options `批准` and `拒绝`, and shows the optional `input` value to the approver. Approval outputs `approved: true` and passes `input` through as `output`. `拒绝`, or a custom text answer, rejects: with `onReject: 'fail'` (the default) the node fails and the text becomes part of the error; with `onReject: 'branch'` it outputs `rejected: true` so a downstream `condition` can route the rejection. A custom text answer is also output as `comment`. The node has the standard condition input, so an ungated branch never asks.
 
 ```json
 {
@@ -154,6 +156,7 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/persistence.ts`](src/persistence.ts) | Per-record storage-domain declaration |
 | [`src/engine-provider.ts`](src/engine-provider.ts) | Validation, scheduling, pause, resume, and cancellation |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` base class, `NodeFailure`, and the condition gate |
+| [`src/nodes/`](src/nodes/) | `human-approval` node and the `dsh-workflow-studio/nodes` plugin entry |
 | [`src/demo/`](src/demo/) | Demo `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes and their plugin entry |
 | [`src/run-persistence.ts`](src/run-persistence.ts) | Run record schema and storage-domain declaration |
 | [`src/json.ts`](src/json.ts) | JSON checks for node outputs and notepad values |

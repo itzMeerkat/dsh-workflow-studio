@@ -1,7 +1,10 @@
-# Add Workflow Studio to the official global panel composition. The demo row
-# registers the example nodes; disable it to run Studio with plugin nodes only.
+# Add Workflow Studio to the official global panel composition. The nodes row
+# registers Studio's general-purpose nodes; the demo row registers the example
+# nodes. Disable either row to leave its nodes out.
 - insert:
     - id: workflow-studio
       name: dsh-workflow-studio
+    - id: workflow-studio-nodes
+      name: dsh-workflow-studio/nodes
     - id: workflow-studio-demo
       name: dsh-workflow-studio/demo
