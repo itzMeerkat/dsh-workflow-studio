@@ -7,8 +7,8 @@ import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { registerWorkflowTools } from '../src/tools.ts'
-import { WorkflowId } from '../src/types.ts'
-import type { DagWorkflowDefinition } from '../src/types.ts'
+import { WorkflowId } from '../src/shared/types.ts'
+import type { DagWorkflowDefinition } from '../src/shared/types.ts'
 
 interface CallableTool {
   execute(args: Record<string, unknown>, execution: unknown): unknown

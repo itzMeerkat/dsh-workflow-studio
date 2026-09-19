@@ -19,7 +19,7 @@ import {
 } from '@deepseek-ai/dsh-storage-domain'
 import { registerFixtureNodes } from './fixture-nodes.ts'
 import { runEnded } from './host.ts'
-import { RunId } from '../src/types.ts'
+import { RunId } from '../src/shared/types.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'

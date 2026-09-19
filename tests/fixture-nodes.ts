@@ -4,7 +4,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
-import type { NodeControlDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/types.ts'
+import type { NodeControlDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/shared/types.ts'
 
 /** `value`：输出 `config.value`。 */
 export class ValueNode extends WorkflowNode<{ output: unknown }> {

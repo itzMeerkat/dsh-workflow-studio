@@ -5,7 +5,7 @@ description: "Create and register custom Workflow Studio node executors with por
 
 # Workflow Studio Custom Nodes
 
-Use this skill to add or change a Workflow Studio node. It is an implementation workflow, not a replacement for the current [executor types](../../../src/types.ts), [base class](../../../src/node.ts), [registry](../../../src/registry.ts), or package [README](../../../README.md).
+Use this skill to add or change a Workflow Studio node. It is an implementation workflow, not a replacement for the current [executor types](../../../src/shared/types.ts), [base class](../../../src/node.ts), [registry](../../../src/registry.ts), or package [README](../../../README.md).
 
 ## Define the node contract
 

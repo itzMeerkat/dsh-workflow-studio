@@ -17,7 +17,7 @@ import {
 } from '@deepseek-ai/dsh-storage-domain'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider, type DagEngineConfig } from '../src/engine-provider.ts'
-import type { RunId, WorkflowNodeExecutor, WorkflowRunRecord } from '../src/types.ts'
+import type { RunId, WorkflowNodeExecutor, WorkflowRunRecord } from '../src/shared/types.ts'
 
 /** 一组测试共享的 Host 与临时目录；`cleanup()` 在 afterEach 中调用。 */
 export class TestHosts {

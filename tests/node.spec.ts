@@ -7,8 +7,8 @@ import assert from 'node:assert/strict'
 import { Context } from '@deepseek-ai/cordis'
 import { CONDITION_PORT, NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
-import type { NodeExecutionContext } from '../src/types.ts'
-import { RunId } from '../src/types.ts'
+import type { NodeExecutionContext } from '../src/shared/types.ts'
+import { RunId } from '../src/shared/types.ts'
 
 function context(overrides: Partial<NodeExecutionContext> = {}): NodeExecutionContext {
   return {

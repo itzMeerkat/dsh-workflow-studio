@@ -14,7 +14,7 @@ import {
   runActions,
   runRecordsByNode,
 } from '../src/client/runs-model.ts'
-import { RunId, WorkflowId, type WorkflowRunSummary } from '../src/types.ts'
+import { RunId, WorkflowId, type WorkflowRunSummary } from '../src/shared/types.ts'
 
 function row(runId: string, status: WorkflowRunSummary['status'], workflowId = 'w1', awaitingInput = 0): WorkflowRunSummary {
   return { runId: RunId(runId), workflowId: WorkflowId(workflowId), name: 'flow', status, awaitingInput, startedAt: 1, updatedAt: 1 }

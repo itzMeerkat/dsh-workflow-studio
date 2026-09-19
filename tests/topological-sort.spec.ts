@@ -4,9 +4,9 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { topologicalSort } from '../src/engine-provider.ts'
-import type { DagWorkflowDefinition } from '../src/types.ts'
-import { NodeId, EdgeId } from '../src/types.ts'
+import { topologicalSort } from '../src/validation.ts'
+import type { DagWorkflowDefinition } from '../src/shared/types.ts'
+import { NodeId, EdgeId } from '../src/shared/types.ts'
 
 function makeWorkflow(edges: Array<[string, string]>): DagWorkflowDefinition {
   const nodeIds = [...new Set(edges.flat())]

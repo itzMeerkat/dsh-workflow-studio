@@ -13,79 +13,29 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import DagEngine from './engine.ts'
 import type { DagRun } from './engine.ts'
 import type {
-  DagWorkflowDefinition, DagNodeDefinition,
-  NodeId,
-  WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
-  NodeExecutionContext, NodeExecutionResult,
-  NodeRunRecord, NodeRunStatus, PortDefinition,
-  WorkflowRunStatus, NodeRunInfo, DagRunInfo,
+  DagWorkflowDefinition, DagNodeDefinition, NodeId,
+  WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord, WorkflowRunStatus,
+  NodeExecutionContext, NodeExecutionResult, NodeRunStatus, NodeRunInfo, DagRunInfo,
   WorkflowNodeExecutor,
-} from './types.ts'
-import { WorkflowId, RunId } from './types.ts'
+} from './shared/types.ts'
+import { WorkflowId, RunId } from './shared/types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
-import { workflowStudioDomainSpec } from './persistence.ts'
-import { workflowRunsDomainSpec } from './run-persistence.ts'
+import { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 import { toJsonOutputs, toJsonValue } from './json.ts'
-import { messageOf } from './errors.ts'
-import { assertUniquePortNames, portsAreCompatible, resolveInputPorts, topologicalLevels } from './graph.ts'
+import { messageOf } from './shared/errors.ts'
+import { resolveInputPorts } from './shared/graph.ts'
+import { resolveExecutors, topologicalSort } from './validation.ts'
+import {
+  TERMINAL_STATUSES, awaitingConfirmation, createRunState, summaryOfRecord, toRunRecord,
+  type NodeExecState, type RunState,
+} from './run-state.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { CONFIRM_REQUEST_ID, confirmQuestions, confirmRejection, parseAnswer, parseQuestions } from './human-input.ts'
-
-// ---- 内部状态 ----
-
-interface NodeExecState {
-  node: DagNodeDefinition
-  record: NodeRunRecord
-}
-
-interface RunState {
-  runId: RunId
-  workflowId: WorkflowId
-  definition: DagWorkflowDefinition
-  /** 执行中的节点执行器；运行未执行时为空。 */
-  executors: Map<NodeId, WorkflowNodeExecutor>
-  status: WorkflowRunStatus
-  nodeStates: Map<NodeId, NodeExecState>
-  startedAt: number
-  updatedAt: number
-  completedAt?: number
-  error?: string
-  /** 调度循环正在执行本运行；恢复后等待人工处理的运行为 false。 */
-  active: boolean
-  abortController: AbortController
-  pauseRequested: boolean
-  pauseResolvers: Set<() => void>
-  resultPromise: Promise<WorkflowRunRecord>
-  resultResolve: (result: WorkflowRunRecord) => void
-  /** 本运行的检查点写入按顺序排队。 */
-  writeTail: Promise<void>
-  /** 等待答案的节点请求，按节点 ID 和请求 ID 索引。 */
-  inputWaiters: Map<NodeId, Map<string, (answer: AskUserQuestionAnswer) => void>>
-}
-
-const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
 
 /** 一次调度结束时的运行状态与原因。 */
 interface RunOutcome {
   status: WorkflowRunStatus
   error?: string
-}
-
-interface ResolvedNodePorts {
-  inputs: readonly PortDefinition[]
-  outputs: readonly PortDefinition[]
-}
-
-/**
- * 按拓扑层级返回节点，同一层级的节点可并行执行。
- * @param definition - 工作流定义。
- * @returns 按执行顺序排列的层级。
- * @throws 工作流包含环或边引用不存在的节点时。
- */
-export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefinition[][] {
-  const { levels, cyclic } = topologicalLevels(definition.nodes, definition.edges)
-  if (cyclic.length > 0) throw new Error(`工作流包含环：${cyclic.map(node => node.id).join(', ')}`)
-  return levels
 }
 
 /** 引擎部署配置。 */
@@ -156,99 +106,9 @@ export class DagEngineProvider extends DagEngine {
     })
   }
 
-  /**
-   * 按当前注册表验证定义，并解析每个节点的执行器。
-   * @returns 节点 ID 到执行器的映射。
-   * @throws 定义违反任一可由注册表确定的不变量时。
-   */
-  private resolveExecutors(definition: DagWorkflowDefinition): Map<NodeId, WorkflowNodeExecutor> {
-    const executors = new Map<NodeId, WorkflowNodeExecutor>()
-    const nodePorts = new Map<NodeId, ResolvedNodePorts>()
-    for (const node of definition.nodes) {
-      if (nodePorts.has(node.id)) throw new Error(`节点 ID "${node.id}" 重复`)
-
-      const executor = this.registry.get(node.type)
-      if (executor === undefined) throw new Error(`未知节点类型: ${node.type}`)
-      const inputs = resolveInputPorts(node.inputs, executor.inputs ?? [])
-      const outputs = node.outputs ?? executor.outputs ?? []
-      assertUniquePortNames(`节点 ${node.id}`, '输入', inputs)
-      assertUniquePortNames(`节点 ${node.id}`, '输出', outputs)
-      this.validateVariadicInputs(node, executor, inputs, outputs)
-      executors.set(node.id, executor)
-      nodePorts.set(node.id, { inputs, outputs })
-    }
-
-    const edgeIds = new Set<string>()
-    const connectedInputs = new Set<string>()
-    for (const edge of definition.edges) {
-      if (edgeIds.has(edge.id)) throw new Error(`边 ID "${edge.id}" 重复`)
-      edgeIds.add(edge.id)
-
-      const source = nodePorts.get(edge.source)
-      if (source === undefined) throw new Error(`边 ${edge.id} 引用不存在的源节点 ${edge.source}`)
-      const target = nodePorts.get(edge.target)
-      if (target === undefined) throw new Error(`边 ${edge.id} 引用不存在的目标节点 ${edge.target}`)
-
-      const sourcePort = edge.sourcePort ?? 'output'
-      const targetPort = edge.targetPort ?? 'input'
-      const sourceDefinition = source.outputs.find(port => port.name === sourcePort)
-      if (sourceDefinition === undefined) {
-        throw new Error(`边 ${edge.id} 引用节点 ${edge.source} 不存在的输出端口 ${sourcePort}`)
-      }
-      const targetDefinition = target.inputs.find(port => port.name === targetPort)
-      if (targetDefinition === undefined) {
-        throw new Error(`边 ${edge.id} 引用节点 ${edge.target} 不存在的输入端口 ${targetPort}`)
-      }
-      if (!portsAreCompatible(sourceDefinition, targetDefinition)) {
-        throw new Error(
-          `边 ${edge.id} 的端口类型不兼容: ${edge.source}.${sourcePort}`
-          + ` (${sourceDefinition.type}) -> ${edge.target}.${targetPort} (${targetDefinition.type})`,
-        )
-      }
-
-      const inputKey = `${edge.target}\u0000${targetPort}`
-      if (connectedInputs.has(inputKey)) {
-        throw new Error(`节点 ${edge.target} 的输入端口 ${targetPort} 存在多条入边`)
-      }
-      connectedInputs.add(inputKey)
-    }
-
-    for (const [nodeId, ports] of nodePorts) {
-      for (const port of ports.inputs) {
-        if (port.required !== false && !connectedInputs.has(`${nodeId}\u0000${port.name}`)) {
-          throw new Error(`节点 ${nodeId} 的输入端口 ${port.name} 缺少入边`)
-        }
-      }
-    }
-
-    topologicalSort(definition)
-    return executors
-  }
-
-  private validateVariadicInputs(
-    node: DagNodeDefinition,
-    executor: WorkflowNodeExecutor,
-    inputs: readonly PortDefinition[],
-    outputs: readonly PortDefinition[],
-  ): void {
-    const constraint = executor.variadicInputs
-    if (constraint === undefined) return
-    if (inputs.length < constraint.min) {
-      throw new Error(`节点 ${node.id} 至少需要 ${constraint.min} 个输入端口`)
-    }
-    const inputType = inputs[0]?.type
-    if (inputs.some(port => port.type !== inputType)) {
-      throw new Error(`节点 ${node.id} 的所有输入端口必须使用相同类型`)
-    }
-    if (constraint.outputType === 'same'
-      && (outputs.length !== 1 || outputs[0]?.type !== inputType)) {
-      throw new Error(`节点 ${node.id} 的输出端口必须与输入端口使用相同类型`)
-    }
-  }
-
   async save(definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
-    this.resolveExecutors(snapshot)
+    resolveExecutors(this.registry, snapshot)
 
     return this.enqueueMutation(async () => {
       const existing = this.findByName(snapshot.name)
@@ -260,7 +120,7 @@ export class DagEngineProvider extends DagEngine {
 
   async update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
-    this.resolveExecutors(snapshot)
+    resolveExecutors(this.registry, snapshot)
     return this.enqueueMutation(async () => {
       if (this.workflows.get(id) === undefined) {
         throw new Error(`工作流 "${id}" 不存在`)
@@ -295,10 +155,10 @@ export class DagEngineProvider extends DagEngine {
     if (this.closing) throw new Error('工作流引擎正在关闭')
     const definition = this.get(workflowId)
     if (definition === undefined) throw new Error(`工作流 ${workflowId} 未找到`)
-    const executors = this.resolveExecutors(definition)
+    const executors = resolveExecutors(this.registry, definition)
     const runId = RunId(randomUUID())
     const now = Date.now()
-    const state = this.createState({
+    const state = createRunState({
       runId,
       workflowId,
       definition,
@@ -316,7 +176,7 @@ export class DagEngineProvider extends DagEngine {
 
   getRun(runId: RunId): WorkflowRunRecord | undefined {
     const state = this.runs.get(runId)
-    if (state !== undefined) return this.toRecord(state)
+    if (state !== undefined) return toRunRecord(state)
     const record = this.runStore.get(runId)
     return record === undefined ? undefined : structuredClone(record)
   }
@@ -324,7 +184,7 @@ export class DagEngineProvider extends DagEngine {
   listRuns(): WorkflowRunSummary[] {
     const summaries = new Map<RunId, WorkflowRunSummary>()
     for (const [runId, record] of this.runStore.entries()) summaries.set(runId, summaryOfRecord(record))
-    for (const state of this.runs.values()) summaries.set(state.runId, summaryOfRecord(this.toRecord(state)))
+    for (const state of this.runs.values()) summaries.set(state.runId, summaryOfRecord(toRunRecord(state)))
     return [...summaries.values()].sort((a, b) => b.startedAt - a.startedAt)
   }
 
@@ -348,7 +208,7 @@ export class DagEngineProvider extends DagEngine {
       return
     }
     // 未执行的 paused/interrupted 运行：按当前注册表重新解析执行器后继续调度。
-    state.executors = this.resolveExecutors(state.definition)
+    state.executors = resolveExecutors(this.registry, state.definition)
     state.status = 'running'
     delete state.error
     this.emitEvent('dag/resumed', this.runInfo(state))
@@ -381,51 +241,6 @@ export class DagEngineProvider extends DagEngine {
 
   // ---- 持久化与恢复 ----
 
-  private createState(record: WorkflowRunRecord): RunState {
-    const { promise: resultPromise, resolve: resultResolve } = Promise.withResolvers<WorkflowRunRecord>()
-    const nodes = new Map(record.definition.nodes.map(node => [node.id, node]))
-    const nodeStates = new Map<NodeId, NodeExecState>()
-    for (const nodeRecord of record.nodes) {
-      const node = nodes.get(nodeRecord.nodeId)
-      if (node === undefined) throw new Error(`运行 ${record.runId} 的记录包含定义中不存在的节点 ${nodeRecord.nodeId}`)
-      nodeStates.set(node.id, { node, record: structuredClone(nodeRecord) })
-    }
-    return {
-      runId: record.runId,
-      workflowId: record.workflowId,
-      definition: record.definition,
-      executors: new Map(),
-      status: record.status,
-      nodeStates,
-      startedAt: record.startedAt,
-      updatedAt: record.updatedAt,
-      ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
-      ...(record.error === undefined ? {} : { error: record.error }),
-      active: false,
-      abortController: new AbortController(),
-      pauseRequested: false,
-      pauseResolvers: new Set(),
-      resultPromise,
-      resultResolve,
-      writeTail: Promise.resolve(),
-      inputWaiters: new Map(),
-    }
-  }
-
-  private toRecord(state: RunState): WorkflowRunRecord {
-    return {
-      runId: state.runId,
-      workflowId: state.workflowId,
-      definition: structuredClone(state.definition),
-      status: state.status,
-      startedAt: state.startedAt,
-      updatedAt: state.updatedAt,
-      nodes: structuredClone([...state.nodeStates.values()].map(item => item.record)),
-      ...(state.completedAt === undefined ? {} : { completedAt: state.completedAt }),
-      ...(state.error === undefined ? {} : { error: state.error }),
-    }
-  }
-
   /**
    * 将运行的当前状态排队写入运行记录。引擎关闭后拒绝新的写入，使运行记录保持停止前的状态。
    * @returns 该次写入持久化后兑现；写入失败或引擎正在关闭时拒绝。
@@ -433,7 +248,7 @@ export class DagEngineProvider extends DagEngine {
   private checkpoint(state: RunState): Promise<void> {
     if (this.closing) return Promise.reject(new Error('工作流引擎正在关闭'))
     state.updatedAt = Date.now()
-    const record = this.toRecord(state)
+    const record = toRunRecord(state)
     const write = state.writeTail.then(() => this.runStore.put(state.runId, record))
     state.writeTail = write.catch((_error: unknown) => {
       // 失败已通过 `write` 交给调用方；队列只负责顺序。
@@ -455,7 +270,7 @@ export class DagEngineProvider extends DagEngine {
       if (TERMINAL_STATUSES.has(record.status) || this.runs.has(runId)) continue
       let state: RunState
       try {
-        state = this.createState(record)
+        state = createRunState(record)
       } catch (error: unknown) {
         const now = Date.now()
         await this.runStore.put(runId, {
@@ -486,7 +301,7 @@ export class DagEngineProvider extends DagEngine {
     }
     let executors: Map<NodeId, WorkflowNodeExecutor>
     try {
-      executors = this.resolveExecutors(state.definition)
+      executors = resolveExecutors(this.registry, state.definition)
     } catch (error: unknown) {
       this.interrupt(state, `无法恢复: ${messageOf(error)}`)
       return
@@ -635,7 +450,7 @@ export class DagEngineProvider extends DagEngine {
     state.completedAt = Date.now()
     if (outcome.error !== undefined) state.error = outcome.error
     if (this.closing) {
-      state.resultResolve(this.toRecord(state))
+      state.resultResolve(toRunRecord(state))
       return
     }
     this.emitEvent('dag/end', this.runInfo(state), { ...outcome })
@@ -643,14 +458,14 @@ export class DagEngineProvider extends DagEngine {
       await this.checkpoint(state)
     } catch (error: unknown) {
       this.ctx.logger.error(`dag: 运行 ${state.runId} 最终状态写入失败: ${messageOf(error)}`)
-      state.resultResolve(this.toRecord(state))
+      state.resultResolve(toRunRecord(state))
       return
     }
     this.runs.delete(state.runId)
     try {
       await this.enqueueMutation(() => this.pruneRuns())
     } finally {
-      state.resultResolve(this.toRecord(state))
+      state.resultResolve(toRunRecord(state))
     }
   }
 
@@ -970,30 +785,6 @@ function workflowSummary(
     name: definition.name,
     ...(definition.description === undefined ? {} : { description: definition.description }),
   }
-}
-
-function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
-  const awaitingInput = TERMINAL_STATUSES.has(record.status)
-    ? 0
-    : record.nodes.reduce((count, node) =>
-      count + (node.interactions ?? []).filter(item => item.answer === undefined).length, 0)
-  return {
-    runId: record.runId,
-    workflowId: record.workflowId,
-    name: record.definition.name,
-    status: record.status,
-    awaitingInput,
-    startedAt: record.startedAt,
-    updatedAt: record.updatedAt,
-    ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
-    ...(record.error === undefined ? {} : { error: record.error }),
-  }
-}
-
-/** 节点仅在等待执行前确认、尚未调用执行器。 */
-function awaitingConfirmation(record: NodeRunRecord): boolean {
-  const pending = (record.interactions ?? []).filter(item => item.answer === undefined)
-  return record.status === 'awaiting-input' && pending.length === 1 && pending[0]?.id === CONFIRM_REQUEST_ID
 }
 
 /** 在信号中止时以中止原因拒绝。 */

@@ -1,8 +1,8 @@
 /** Browser-side workflow editing helpers used by the visual editor. */
 
-import { topologicalLevels } from '../graph.ts'
-import { NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowStudioSnapshot } from '../types.ts'
-import { workflowDefinitionSchema, workflowStudioSnapshotSchema } from '../workflow-schema.ts'
+import { topologicalLevels } from '../shared/graph.ts'
+import { NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowStudioSnapshot } from '../shared/types.ts'
+import { workflowDefinitionSchema, workflowStudioSnapshotSchema } from '../shared/workflow-schema.ts'
 
 /** One saved workflow in the editor snapshot. */
 export type WorkflowRow = WorkflowStudioSnapshot['workflows'][number]

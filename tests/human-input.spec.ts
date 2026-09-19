@@ -6,9 +6,9 @@ import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { parseAnswer, parseQuestions } from '../src/human-input.ts'
-import { NodeId, type RunId } from '../src/types.ts'
+import { NodeId, type RunId } from '../src/shared/types.ts'
 import type { DagEngineProvider } from '../src/engine-provider.ts'
-import type { NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor } from '../src/types.ts'
+import type { NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor } from '../src/shared/types.ts'
 import { TestHosts, inputRequested, runEnded } from './host.ts'
 
 const QUESTIONS: AskUserQuestionItem[] = [

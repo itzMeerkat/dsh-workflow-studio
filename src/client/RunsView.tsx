@@ -6,7 +6,7 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { useState } from 'react'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
-import type { NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary } from '../types.ts'
+import type { NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
 import {
   buildAnswer,
   groupRuns,

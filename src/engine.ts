@@ -10,7 +10,7 @@ import type {
   DagWorkflowDefinition, WorkflowId, RunId,
   WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
   DagRunInfo, NodeRunInfo, WorkflowRunStatus, NodeId,
-} from './types.ts'
+} from './shared/types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

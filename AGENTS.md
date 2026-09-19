@@ -6,13 +6,13 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 
 - `src/registry.ts` owns `ctx.workflowNodeRegistry`.
 - `src/engine.ts` defines `ctx.dagEngine` and DAG lifecycle events.
-- `src/workflow-schema.ts` owns the shared workflow-definition JSON schema.
-- `src/persistence.ts` owns the `workflow_studio` per-record domain.
-- `src/run-persistence.ts` owns the `workflow_studio_runs` per-record domain; `src/json.ts` owns JSON checks for persisted node values.
-- `src/engine-provider.ts` owns durable definitions, validation, scheduling, pause, resume, and cancellation.
+- `src/shared/` holds the modules the Host and the browser both load: types, JSON schemas, graph and port rules, and error messages. Keep them free of Host-only imports.
+- `src/persistence.ts` owns the `workflow_studio` and `workflow_studio_runs` per-record domains; `src/json.ts` owns JSON checks for persisted node values.
+- `src/validation.ts` owns definition validation against the registry; `src/run-state.ts` owns in-memory run state and its conversion to run records.
+- `src/engine-provider.ts` owns durable definitions, scheduling, recovery, human input, pause, resume, and cancellation.
 - `src/node.ts` owns the `WorkflowNode` base class, `NodeFailure`, and the condition gate.
 - The plugin registers no nodes. Node implementations live in node plugins such as `dsh-workflow-demo-node`; `tests/fixture-nodes.ts` holds test-only nodes for engine tests.
-- `src/tools.ts` owns `create_workflow` and `run_workflow`.
+- `src/tools.ts` owns `create_workflow`, `run_workflow`, and `get_workflow_run`.
 - `src/client/index.tsx` owns the `main` panel, workflow picker, and `sidebar.panellist` entry.
 - `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering.
 - `src/client/ExecutionOrderView.tsx` owns the read-only execution dependency graph.

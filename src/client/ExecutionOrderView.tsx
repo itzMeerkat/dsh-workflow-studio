@@ -11,7 +11,7 @@ import {
 } from '@xyflow/react'
 import type { Edge, Node, NodeProps } from '@xyflow/react'
 import { useMemo } from 'react'
-import type { DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../types.ts'
+import type { DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
 import type { ExecutionDependency, ExecutionPlan } from './model.ts'
 import {
   createExecutionPlan,

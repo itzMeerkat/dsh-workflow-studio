@@ -13,7 +13,7 @@ import type {
   NodeExecutionResult,
   PortDefinition,
   WorkflowNodeExecutor,
-} from './types.ts'
+} from './shared/types.ts'
 
 /** {@link WorkflowNode} 为条件节点追加的门控输入端口。 */
 export const CONDITION_PORT: Readonly<PortDefinition> = {

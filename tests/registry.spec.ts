@@ -6,7 +6,7 @@ import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { Context } from '@deepseek-ai/cordis'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
-import type { WorkflowNodeExecutor } from '../src/types.ts'
+import type { WorkflowNodeExecutor } from '../src/shared/types.ts'
 
 describe('WorkflowNodeRegistry', () => {
   let ctx: Context | undefined

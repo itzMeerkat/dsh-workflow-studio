@@ -6,8 +6,8 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { assertUniquePortNames } from './graph.ts'
-import type { NodeTypeSummary, WorkflowNodeExecutor } from './types.ts'
+import { assertUniquePortNames } from './shared/graph.ts'
+import type { NodeTypeSummary, WorkflowNodeExecutor } from './shared/types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

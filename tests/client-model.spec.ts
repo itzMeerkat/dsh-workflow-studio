@@ -15,8 +15,8 @@ import {
   parseEditorDefinition,
   reduceExecutionDependencies,
 } from '../src/client/model.ts'
-import { WorkflowId, type NodeTypeSummary } from '../src/types.ts'
-import { workflowDefinitionSchema } from '../src/workflow-schema.ts'
+import { WorkflowId, type NodeTypeSummary } from '../src/shared/types.ts'
+import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
 
 describe('workflow editor model', () => {
   it('round-trips node positions and explicit ports', () => {

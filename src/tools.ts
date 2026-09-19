@@ -5,8 +5,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { RunId } from './types.ts'
-import { workflowDefinitionSchema } from './workflow-schema.ts'
+import { RunId } from './shared/types.ts'
+import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 
 /**
  * 注册所有工作流模型工具；每个工具随 `ctx` 卸载。

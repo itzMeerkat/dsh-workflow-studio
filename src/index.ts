@@ -38,9 +38,9 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 export { WorkflowNodeRegistry } from './registry.ts'
-export { DagEngineProvider, topologicalSort } from './engine-provider.ts'
+export { DagEngineProvider } from './engine-provider.ts'
+export { topologicalSort } from './validation.ts'
 export type { DagEngineConfig } from './engine-provider.ts'
-export { workflowRunsDomainSpec } from './run-persistence.ts'
 export {
   CONFIRM_REQUEST_ID, CONFIRM_QUESTION_ID, CONFIRM_APPROVE, CONFIRM_REJECT, answerComment, isApproved,
 } from './human-input.ts'
@@ -48,8 +48,8 @@ export { CONDITION_PORT, NodeFailure, WorkflowNode } from './node.ts'
 export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
 export { WorkflowStudioController } from './controller.ts'
-export { workflowStudioDomainSpec } from './persistence.ts'
-export { workflowDefinitionSchema, workflowRunRecordSchema } from './workflow-schema.ts'
+export { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
+export { workflowDefinitionSchema, workflowRunRecordSchema } from './shared/workflow-schema.ts'
 export { DagEngine } from './engine.ts'
 export type { DagRun } from './engine.ts'
 export type {
@@ -59,7 +59,7 @@ export type {
   WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
   NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, HumanInputRequest,
   NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, WorkflowStudioSnapshot,
-} from './types.ts'
+} from './shared/types.ts'
 export {
   WorkflowId, RunId, NodeId, EdgeId,
-} from './types.ts'
+} from './shared/types.ts'

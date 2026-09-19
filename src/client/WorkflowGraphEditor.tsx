@@ -35,8 +35,8 @@ import {
   useRef,
   useState,
 } from 'react'
-import { messageOf } from '../errors.ts'
-import { portsAreCompatible, resolveInputPorts } from '../graph.ts'
+import { messageOf } from '../shared/errors.ts'
+import { portsAreCompatible, resolveInputPorts } from '../shared/graph.ts'
 import {
   EdgeId,
   NodeId,
@@ -47,7 +47,7 @@ import {
   type NodeRunRecord,
   type NodeTypeSummary,
   type PortDefinition,
-} from '../types.ts'
+} from '../shared/types.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 type GraphEditorKey =

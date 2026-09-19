@@ -28,8 +28,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
 import { RunsView, type RunAction, type RunsFilter } from './RunsView.tsx'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
-import { messageOf } from '../errors.ts'
-import type { DagWorkflowDefinition, NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary, WorkflowStudioSnapshot } from '../types.ts'
+import { messageOf } from '../shared/errors.ts'
+import type { DagWorkflowDefinition, NodeTypeSummary, WorkflowRunRecord, WorkflowRunSummary, WorkflowStudioSnapshot } from '../shared/types.ts'
 import type { WorkflowRow } from './model.ts'
 import {
   appendEditorNode,

@@ -150,19 +150,22 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 |---|---|
 | [`src/registry.ts`](src/registry.ts) | 节点执行器注册表 |
 | [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` 服务 API 和事件 |
-| [`src/workflow-schema.ts`](src/workflow-schema.ts) | Host 与浏览器共享的工作流 JSON schema |
-| [`src/persistence.ts`](src/persistence.ts) | per-record storage-domain 声明 |
-| [`src/engine-provider.ts`](src/engine-provider.ts) | 校验、调度、暂停、恢复和取消 |
+| [`src/engine-provider.ts`](src/engine-provider.ts) | 调度、恢复、人工输入、暂停、恢复执行和取消 |
+| [`src/validation.ts`](src/validation.ts) | 按注册表校验定义，以及拓扑顺序 |
+| [`src/run-state.ts`](src/run-state.ts) | 运行的内存状态与运行记录转换 |
+| [`src/persistence.ts`](src/persistence.ts) | 定义与运行的 per-record storage domain |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类、`NodeFailure` 和 condition 门控 |
-| [`src/run-persistence.ts`](src/run-persistence.ts) | 运行记录 schema 和 storage-domain 声明 |
 | [`src/json.ts`](src/json.ts) | 节点输出和 notepad 值的 JSON 检查 |
-| [`src/human-input.ts`](src/human-input.ts) | 问题与答案校验，以及 `dsh.confirm` 确认问题 |
-| [`src/tools.ts`](src/tools.ts) | 模型工具注册和 JSON 输入解析 |
+| [`src/human-input.ts`](src/human-input.ts) | 问题与答案校验、审批辅助函数，以及 `dsh.confirm` 确认问题 |
+| [`src/tools.ts`](src/tools.ts) | 模型工具注册 |
 | [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行控制所用的 Host Remote |
+| [`src/shared/types.ts`](src/shared/types.ts) | Host 与浏览器共享的类型 |
+| [`src/shared/workflow-schema.ts`](src/shared/workflow-schema.ts) | 定义、运行记录、运行摘要和编辑器快照的 JSON schema |
+| [`src/shared/graph.ts`](src/shared/graph.ts) | 拓扑层级、端口兼容性和输入端口解析 |
 | [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序/运行视图、保存、运行和运行状态刷新 |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | 只读执行依赖图和运行状态 |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布、自定义节点、连线、底部详情面板和运行状态 |
-| [`src/client/model.ts`](src/client/model.ts) | 浏览器侧 JSON 解析和编辑器 DTO |
+| [`src/client/model.ts`](src/client/model.ts) | 快照解析、节点摆放和执行计划 |
 | [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | 运行标签页：运行列表、控制按钮、问题表单和节点状态 |
 | [`src/client/runs-model.ts`](src/client/runs-model.ts) | 运行记录解析、分组、待回答请求和答案构建 |
 

@@ -9,8 +9,8 @@ import type {
 import { z } from 'zod'
 import type {
   HumanInputRequest, NodeRunRecord, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
-} from '../types.ts'
-import { workflowRunRecordSchema, workflowRunSummarySchema } from '../workflow-schema.ts'
+} from '../shared/types.ts'
+import { workflowRunRecordSchema, workflowRunSummarySchema } from '../shared/workflow-schema.ts'
 
 /**
  * Parse the `listRuns` Remote result.

@@ -7,9 +7,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
-import { NodeId, RunId, WorkflowId, type WorkflowStudioSnapshot } from './types.ts'
-import { workflowDefinitionSchema } from './workflow-schema.ts'
-import { messageOf } from './errors.ts'
+import { NodeId, RunId, WorkflowId, type WorkflowStudioSnapshot } from './shared/types.ts'
+import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
+import { messageOf } from './shared/errors.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

@@ -7,9 +7,6 @@
   "include": [
     "src/client/**/*.ts",
     "src/client/**/*.tsx",
-    "src/errors.ts",
-    "src/graph.ts",
-    "src/types.ts",
-    "src/workflow-schema.ts"
+    "src/shared/**/*.ts"
   ]
 }

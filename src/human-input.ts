@@ -13,7 +13,7 @@ import type {
 } from '@deepseek-ai/dsh-user-questions/types'
 import { z } from 'zod'
 import { toJsonValue } from './json.ts'
-import type { DagNodeDefinition } from './types.ts'
+import type { DagNodeDefinition } from './shared/types.ts'
 
 /** 引擎保留的请求 ID 前缀；节点自身的请求 ID 不得使用。 */
 export const RESERVED_REQUEST_PREFIX = 'dsh.'

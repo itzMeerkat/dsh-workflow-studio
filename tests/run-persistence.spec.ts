@@ -9,10 +9,10 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { DagEngineConfig, DagEngineProvider } from '../src/engine-provider.ts'
 import { TestHosts, inputRequested, runEnded } from './host.ts'
-import { EdgeId, NodeId, type RunId, type WorkflowId, type WorkflowRunRecord } from '../src/types.ts'
+import { EdgeId, NodeId, type RunId, type WorkflowId, type WorkflowRunRecord } from '../src/shared/types.ts'
 import type {
   NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor,
-} from '../src/types.ts'
+} from '../src/shared/types.ts'
 
 /** 可观察的节点调用记录。 */
 interface Calls {

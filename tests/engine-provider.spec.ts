@@ -24,8 +24,8 @@ import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 import { Config as PluginConfig, apply as applyPlugin, inject as pluginInject } from '../src/index.ts'
-import { EdgeId, NodeId, RunId, WorkflowId } from '../src/types.ts'
-import type { DagWorkflowDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/types.ts'
+import { EdgeId, NodeId, RunId, WorkflowId } from '../src/shared/types.ts'
+import type { DagWorkflowDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/shared/types.ts'
 
 class SourceNode extends WorkflowNode {
   readonly type = 'source'

@@ -150,19 +150,22 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 |---|---|
 | [`src/registry.ts`](src/registry.ts) | Node executor registry |
 | [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` service API and events |
-| [`src/workflow-schema.ts`](src/workflow-schema.ts) | Shared Host and browser workflow JSON schema |
-| [`src/persistence.ts`](src/persistence.ts) | Per-record storage-domain declaration |
-| [`src/engine-provider.ts`](src/engine-provider.ts) | Validation, scheduling, pause, resume, and cancellation |
+| [`src/engine-provider.ts`](src/engine-provider.ts) | Scheduling, recovery, human input, pause, resume, and cancellation |
+| [`src/validation.ts`](src/validation.ts) | Definition validation against the registry and topological order |
+| [`src/run-state.ts`](src/run-state.ts) | In-memory run state and run-record conversion |
+| [`src/persistence.ts`](src/persistence.ts) | Per-record storage domains for definitions and runs |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` base class, `NodeFailure`, and the condition gate |
-| [`src/run-persistence.ts`](src/run-persistence.ts) | Run record schema and storage-domain declaration |
 | [`src/json.ts`](src/json.ts) | JSON checks for node outputs and notepad values |
-| [`src/human-input.ts`](src/human-input.ts) | Question and answer checks and the `dsh.confirm` confirmation question |
-| [`src/tools.ts`](src/tools.ts) | Model tool registration and JSON input parsing |
+| [`src/human-input.ts`](src/human-input.ts) | Question and answer checks, approval helpers, and the `dsh.confirm` confirmation question |
+| [`src/tools.ts`](src/tools.ts) | Model tool registration |
 | [`src/controller.ts`](src/controller.ts) | Host Remote for browser snapshots, saves, and run control |
+| [`src/shared/types.ts`](src/shared/types.ts) | Types shared by the Host and the browser |
+| [`src/shared/workflow-schema.ts`](src/shared/workflow-schema.ts) | JSON schemas for definitions, run records, run summaries, and the editor snapshot |
+| [`src/shared/graph.ts`](src/shared/graph.ts) | Topological levels, port compatibility, and input-port resolution |
 | [`src/client/index.tsx`](src/client/index.tsx) | Localized workflow picker, canvas/execution/runs views, save, run, and run-status refresh |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | Read-only execution dependency graph and run status |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow canvas, custom nodes, connections, bottom details panel, and run state |
-| [`src/client/model.ts`](src/client/model.ts) | Browser-side JSON parsing and editor DTOs |
+| [`src/client/model.ts`](src/client/model.ts) | Snapshot parsing, node placement, and the execution plan |
 | [`src/client/RunsView.tsx`](src/client/RunsView.tsx) | Runs tab: run list, controls, question forms, and node states |
 | [`src/client/runs-model.ts`](src/client/runs-model.ts) | Run record parsing, grouping, pending requests, and answer building |
 

@@ -3,7 +3,7 @@
  * @module dsh-workflow-studio
  */
 
-import type { JsonObject, JsonValue } from './types.ts'
+import type { JsonObject, JsonValue } from './shared/types.ts'
 
 /**
  * 返回值的独立 JSON 副本；值无法无损写入 JSON 时抛出。
