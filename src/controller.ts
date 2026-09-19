@@ -25,7 +25,6 @@ export interface WorkflowNodeCatalogEntry {
   readonly inputs: readonly import('./types.ts').PortDefinition[]
   readonly outputs: readonly import('./types.ts').PortDefinition[]
   readonly controls: readonly import('./types.ts').NodeControlDefinition[]
-  readonly acceptsCondition: boolean
   readonly variadicInputs?: import('./types.ts').WorkflowNodeExecutor['variadicInputs']
 }
 
@@ -77,7 +76,6 @@ export class WorkflowStudioController extends TypertRemoteService {
         inputs: node.inputs ?? [],
         outputs: node.outputs ?? [],
         controls: node.controls ?? [],
-        acceptsCondition: node.acceptsCondition,
         ...(node.variadicInputs === undefined ? {} : { variadicInputs: node.variadicInputs }),
       })),
     }

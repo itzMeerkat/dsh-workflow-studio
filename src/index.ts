@@ -1,14 +1,13 @@
 /**
  * dsh-workflow-studio 主插件入口。
  *
- * 注册节点表、执行引擎、内置节点和模型面工具。
+ * 注册节点表、执行引擎和模型面工具；本插件不注册任何节点。
  * @module dsh-workflow-studio
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { WorkflowNodeRegistry } from './registry.ts'
 import { DagEngineProvider } from './engine-provider.ts'
-import { registerBuiltinNodes } from './basic-nodes.ts'
 import { registerWorkflowTools } from './tools.ts'
 import { WorkflowStudioController } from './controller.ts'
 
@@ -24,7 +23,6 @@ export function apply(ctx: Context): void {
 
   ctx.inject(['workflowNodeRegistry'], (scope) => {
     scope.plugin(DagEngineProvider)
-    return registerBuiltinNodes(scope)
   })
 
   ctx.inject(['dagEngine', 'workflowNodeRegistry'], (scope) => {
@@ -35,7 +33,8 @@ export function apply(ctx: Context): void {
 
 export { WorkflowNodeRegistry } from './registry.ts'
 export { DagEngineProvider, topologicalSort } from './engine-provider.ts'
-export { registerBuiltinNodes } from './basic-nodes.ts'
+export { CONDITION_PORT, NodeFailure, WorkflowNode } from './node.ts'
+export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
 export { WorkflowStudioController } from './controller.ts'
 export { workflowStudioDomainSpec } from './persistence.ts'
@@ -45,6 +44,7 @@ export type { DagRun } from './engine.ts'
 export type {
   DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
+  NodeExecutionCompleted, NodeExecutionFailed, NodeExecutionSkipped, NodeControlDefinition,
   WorkflowResult, WorkflowSummary, WorkflowRunStatus,
   NodeRunRecord, NodeRunStatus, PortDefinition,
 } from './types.ts'

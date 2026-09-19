@@ -20,7 +20,6 @@ import type {
   WorkflowNodeExecutor,
 } from './types.ts'
 import { WorkflowId, RunId } from './types.ts'
-import { CONDITION_PORT } from './registry.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import { workflowStudioDomainSpec } from './persistence.ts'
 import { workflowDefinitionSchema } from './workflow-schema.ts'
@@ -232,12 +231,11 @@ export class DagEngineProvider extends DagEngine {
     node: DagNodeDefinition,
     executor: WorkflowNodeExecutor,
   ): readonly PortDefinition[] {
-    const inputs = node.inputs ?? executor.inputs ?? []
-    if (executor.acceptsCondition === false) return inputs
-    if (inputs.some(port => port.name === CONDITION_PORT.name)) {
-      throw new Error(`节点 ${node.id} 的输入端口 condition 由引擎保留`)
-    }
-    return [...inputs, CONDITION_PORT]
+    const declared = executor.inputs ?? []
+    if (node.inputs === undefined) return declared
+    // 带 role 的端口属于执行器；实例覆盖输入端口时保留执行器声明的这些端口。
+    const instanceNames = new Set(node.inputs.map(port => port.name))
+    return [...node.inputs, ...declared.filter(port => port.role !== undefined && !instanceNames.has(port.name))]
   }
 
   private validateVariadicInputs(
@@ -504,11 +502,12 @@ export class DagEngineProvider extends DagEngine {
     // 收集上游输入
     const inputs = this.collectInputs(node, definition, state)
     const inputPorts = this.resolveInputPorts(node, executor)
-    const businessInputPorts = inputPorts.filter(port => port.role !== 'condition')
+    const businessInputPorts = inputPorts.filter(port => port.role === undefined)
     const suppliedInputs = businessInputPorts.filter(port => Object.hasOwn(inputs, port.name))
-    const conditionEdge = definition.edges.find(edge =>
-      edge.target === node.id && (edge.targetPort ?? 'input') === CONDITION_PORT.name)
     const requiredInputPorts = inputPorts.filter(port => port.required !== false)
+    const connected = new Set(definition.edges
+      .filter(edge => edge.target === node.id)
+      .map(edge => edge.targetPort ?? 'input'))
     const startedAt = Date.now()
     execState.record.startedAt = startedAt
     execState.record.inputs = structuredClone(inputs)
@@ -522,15 +521,28 @@ export class DagEngineProvider extends DagEngine {
     execState.record.status = 'running'
     this.emitEvent('dag/node-start', this.runInfo(state), nodeInfo)
 
-    if (conditionEdge !== undefined) {
-      if (!Object.hasOwn(inputs, CONDITION_PORT.name) || inputs.condition === false) {
-        this.completeNode(state, execState, nodeInfo, 'skipped', {})
-        return
-      }
-      if (inputs.condition !== true) {
-        this.failNode(state, execState, nodeInfo, 'condition 输入必须为布尔值')
-        return
-      }
+    const context: NodeExecutionContext = {
+      runId: state.runId,
+      config: node.config,
+      inputs,
+      connected,
+      invocationKey: `${state.runId}/${node.id}`,
+      signal,
+      log: (msg: string) => {
+        this.ctx.logger.info(`[${state.definition.name}/${node.label ?? node.type}] ${msg}`)
+      },
+    }
+
+    let preflight: NodeExecutionResult | undefined
+    try {
+      preflight = executor.preflight?.(context)
+    } catch (error: unknown) {
+      this.failNode(state, execState, nodeInfo, error instanceof Error ? error.message : String(error))
+      return
+    }
+    if (preflight !== undefined) {
+      this.settleNode(state, node, executor, execState, nodeInfo, preflight)
+      return
     }
 
     if (requiredInputPorts.length > 0 && suppliedInputs.length === 0) {
@@ -563,32 +575,40 @@ export class DagEngineProvider extends DagEngine {
     }
 
     try {
-      const context: NodeExecutionContext = {
-        runId: state.runId,
-        config: node.config,
-        inputs: executor.acceptsCondition === false
-          ? inputs
-          : Object.fromEntries(
-            Object.entries(inputs).filter(([name]) => name !== CONDITION_PORT.name),
-          ),
-        signal,
-        log: (msg: string) => {
-          this.ctx.logger.info(`[${state.definition.name}/${node.label ?? node.type}] ${msg}`)
-        },
-      }
-
       const result = await executor.execute(context)
       if (signal.aborted) {
         this.completeNode(state, execState, nodeInfo, 'cancelled')
-      } else if (result.status === 'failed') {
-        this.failNode(state, execState, nodeInfo, result.error, result.outputs)
       } else {
-        this.validateOutputs(node, executor, result)
-        this.completeNode(state, execState, nodeInfo, 'completed', result.outputs)
+        this.settleNode(state, node, executor, execState, nodeInfo, result)
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       this.failNode(state, execState, nodeInfo, message)
+    }
+  }
+
+  /** 按节点返回的结果结束节点；completed 结果的输出须为已声明端口。 */
+  private settleNode(
+    state: RunState,
+    node: DagNodeDefinition,
+    executor: WorkflowNodeExecutor,
+    execState: NodeExecState,
+    nodeInfo: NodeRunInfo,
+    result: NodeExecutionResult,
+  ): void {
+    switch (result.status) {
+      case 'completed':
+        this.validateOutputs(node, executor, result)
+        this.completeNode(state, execState, nodeInfo, 'completed', result.outputs)
+        return
+      case 'failed':
+        this.failNode(state, execState, nodeInfo, result.error, result.outputs)
+        return
+      case 'skipped':
+        this.completeNode(state, execState, nodeInfo, 'skipped', {})
+        return
+      default:
+        return assertNever(result)
     }
   }
 
@@ -756,4 +776,8 @@ function workflowSummary(
     name: definition.name,
     ...(definition.description === undefined ? {} : { description: definition.description }),
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`未知的节点执行结果: ${JSON.stringify(value)}`)
 }

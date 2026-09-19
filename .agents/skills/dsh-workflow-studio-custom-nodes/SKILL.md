@@ -5,63 +5,63 @@ description: "Create and register custom Workflow Studio node executors with por
 
 # Workflow Studio Custom Nodes
 
-Use this skill to add or change a `WorkflowNodeExecutor`. It is an implementation workflow, not a replacement for the current [executor types](../../../src/types.ts), [registry](../../../src/registry.ts), or package [README](../../../README.md).
+Use this skill to add or change a Workflow Studio node. It is an implementation workflow, not a replacement for the current [executor types](../../../src/types.ts), [base class](../../../src/node.ts), [registry](../../../src/registry.ts), or package [README](../../../README.md).
 
 ## Define the node contract
 
-Decide these fields before writing `execute()`:
+Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node needs full control of `execute()`. Decide these members before writing `run()`:
 
 - `type`: globally unique lowercase kebab-case identifier.
 - `label` and `description`: concise user-visible catalog text.
-- `inputs` and `outputs`: exact port names, types, requiredness, descriptions, and card display modes.
+- `ports`: business `inputs` and `outputs` with exact names, types, requiredness, descriptions, and card display modes. Do not declare an input named `condition`; the base class owns it.
 - `controls`: optional browser controls backed by fields in `context.config`.
-- `acceptsCondition`: omit for a normal node; use `false` only when the node implements flow control and must not receive engine gating.
+- `conditional`: leave it `true` for a normal node. Set it to `false` only for a flow-control node that computes branch signals and must not be gated by one.
 - `variadicInputs`: declare the minimum instance input count and optional same-type output requirement.
 - `requiresHumanInput`: use only when every execution of this node requires an external `DagRun.resume()`.
 
-Do not declare an input named `condition` on a normal node. The engine reserves and adds that port.
+## Implement a node
 
-## Implement an executor
-
-Treat `context.config` and `context.inputs` as runtime JSON. Validate values that the executor relies on, then return the discriminated result instead of throwing for expected business failures.
+Treat `context.config` and `context.inputs` as runtime JSON. Validate values that `run()` relies on. Return the outputs, or throw `NodeFailure` for an expected business failure; any other thrown error also fails the node, with its message.
 
 ```ts
-import type {
-  NodeExecutionResult,
-  WorkflowNodeExecutor,
+import {
+  NodeFailure,
+  WorkflowNode,
+  type NodeControlDefinition,
+  type NodeExecutionContext,
+  type WorkflowNodePorts,
 } from 'dsh-workflow-studio'
 
-export const prefixTextNode: WorkflowNodeExecutor = {
-  type: 'prefix-text',
-  label: 'Prefix text',
-  description: 'Prepends configured text to one string input',
-  inputs: [
-    { name: 'input', type: 'string', description: 'Text to transform' },
-  ],
-  outputs: [
-    { name: 'output', type: 'string', description: 'Prefixed text', display: 'value' },
-  ],
-  controls: [{
+export class PrefixTextNode extends WorkflowNode<{ output: string }> {
+  readonly type = 'prefix-text'
+  readonly label = 'Prefix text'
+  readonly description = 'Prepends configured text to one string input'
+  protected readonly ports: WorkflowNodePorts = {
+    inputs: [{ name: 'input', type: 'string', description: 'Text to transform' }],
+    outputs: [{ name: 'output', type: 'string', description: 'Prefixed text', display: 'value' }],
+  }
+  override readonly controls: readonly NodeControlDefinition[] = [{
     name: 'prefix',
     label: 'Prefix',
     kind: 'text',
     defaultValue: '',
-  }],
-  execute(context): NodeExecutionResult {
+  }]
+
+  protected run(context: NodeExecutionContext): { output: string } {
     const input = context.inputs.input
     const prefix = context.config.prefix ?? ''
-    if (typeof input !== 'string') {
-      return { status: 'failed', error: 'input must be a string' }
-    }
-    if (typeof prefix !== 'string') {
-      return { status: 'failed', error: 'prefix must be a string' }
-    }
-    return { status: 'completed', outputs: { output: `${prefix}${input}` } }
-  },
+    if (typeof input !== 'string') throw new NodeFailure('input must be a string')
+    if (typeof prefix !== 'string') throw new NodeFailure('prefix must be a string')
+    return { output: `${prefix}${input}` }
+  }
 }
 ```
 
-Every key in a completed `outputs` object must match a declared output port. A failed result may include diagnostic outputs but must provide an actionable `error`.
+Every key in the returned outputs must match a declared output port. `NodeFailure` may carry diagnostic outputs but must provide an actionable message.
+
+`context.inputs` contains only ports whose upstream produced a value, and `run()` never sees `condition`. Use `context.connected.has(name)` to distinguish a connected port whose upstream produced nothing from a disconnected port. `context.invocationKey` is `<runId>/<nodeId>`; use it to name or deduplicate external work when the node may run again.
+
+A plain object that implements `WorkflowNodeExecutor` is also accepted. It returns the result union from `execute()` itself, may implement `preflight()`, and receives no condition input unless it declares one.
 
 ## Register with Cordis ownership
 
@@ -70,13 +70,13 @@ Declare the registry dependency and let a Cordis effect own the disposer returne
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from 'dsh-workflow-studio'
-import { prefixTextNode } from './prefix-text.ts'
+import { PrefixTextNode } from './prefix-text.ts'
 
 export const inject = ['workflowNodeRegistry']
 
 export function apply(ctx: Context): void {
   ctx.effect(
-    () => ctx.workflowNodeRegistry.register(prefixTextNode, 'my-workflow-nodes'),
+    () => ctx.workflowNodeRegistry.register(new PrefixTextNode(), 'my-workflow-nodes'),
     'my-workflow-nodes:prefix-text',
   )
 }
@@ -91,8 +91,9 @@ Use the actual provider plugin name as `sourcePlugin`. It appears in the browser
 - Port compatibility requires equal types unless one side uses `any`.
 - An instance may override `inputs` or `outputs`; the engine validates the resulting ports when saving the workflow.
 - One input port accepts at most one incoming edge.
-- A normal node receives the optional boolean `condition` port automatically.
-- A control-flow node with `acceptsCondition: false` declares its own boolean branch outputs.
+- A `WorkflowNode` with `conditional` left `true` receives the optional boolean `condition` port. A connected condition that is `false` or produces nothing skips the node; a non-boolean value fails it.
+- A control-flow node with `conditional: false` declares its own boolean branch outputs.
+- An instance `inputs` override replaces the business inputs; the base class's `condition` port remains.
 
 Use `display: 'value'` for compact scalar output and `display: 'json'` for structured output. Display metadata affects the card only; it does not validate runtime values.
 
@@ -129,7 +130,7 @@ Before finishing, confirm:
 - The type is kebab-case and unique.
 - User-visible text is concise and locale ownership is respected for client changes.
 - Every used input and produced output is declared.
-- Expected invalid data returns `failed` with a useful error.
+- Expected invalid data throws `NodeFailure` (or returns `failed` from a plain executor) with a useful error.
 - Async work observes cancellation and releases resources.
 - Registration is effect-owned and names its source plugin.
 - The browser catalog exposes the intended ports and controls.

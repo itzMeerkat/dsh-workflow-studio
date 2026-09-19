@@ -77,7 +77,6 @@ describe('workflow editor model', () => {
         inputs: [],
         outputs: [],
         controls: [],
-        acceptsCondition: true,
       },
       {
         type: 'lookup-user',
@@ -87,7 +86,6 @@ describe('workflow editor model', () => {
         inputs: [],
         outputs: [],
         controls: [],
-        acceptsCondition: true,
       },
     ]
 
@@ -125,7 +123,6 @@ describe('workflow editor model', () => {
         kind: 'boolean',
         defaultValue: true,
       }],
-      acceptsCondition: true,
     }
     const initial = { name: 'editor', nodes: [], edges: [] }
     const first = appendEditorNode(initial, nodeType)

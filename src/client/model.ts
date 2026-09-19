@@ -76,7 +76,6 @@ export interface NodeTypeRow {
   readonly inputs: readonly EditorPort[]
   readonly outputs: readonly EditorPort[]
   readonly controls: readonly EditorControl[]
-  readonly acceptsCondition: boolean
   readonly variadicInputs?: {
     readonly min: number
     readonly outputType?: 'same'

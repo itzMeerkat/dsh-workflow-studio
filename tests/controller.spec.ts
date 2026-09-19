@@ -17,7 +17,7 @@ import {
   apply as storageDomainApply, Config as storageDomainConfig,
   inject as storageDomainInject, name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
-import { registerBuiltinNodes } from '../src/basic-nodes.ts'
+import { registerDemoNodes } from '../src/demo/index.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
@@ -50,7 +50,7 @@ describe('WorkflowStudioController', () => {
       Config: storageDomainConfig,
     }, { backend: 'json' })
     await ctx.plugin(WorkflowNodeRegistry)
-    registerBuiltinNodes(ctx)
+    registerDemoNodes(ctx)
     await ctx.plugin(DagEngineProvider)
     return new WorkflowStudioController(ctx)
   }
@@ -80,7 +80,6 @@ describe('WorkflowStudioController', () => {
         inputs: Array<{ name: string }>
         outputs: Array<{ name: string; display?: string }>
         controls: Array<{ name: string; kind: string }>
-        acceptsCondition: boolean
       }>
     }
     assert.deepEqual(
@@ -92,9 +91,8 @@ describe('WorkflowStudioController', () => {
       ['arithmetic', 'coalesce', 'if', 'input', 'output'],
     )
     const arithmetic = snapshot.nodeTypes.find(node => node.type === 'arithmetic')
-    assert.equal(arithmetic?.sourcePlugin, 'dsh-workflow-studio')
+    assert.equal(arithmetic?.sourcePlugin, 'dsh-workflow-studio/demo')
     assert.deepEqual(arithmetic?.inputs.map(port => port.name), ['left', 'right', 'condition'])
-    assert.equal(arithmetic?.acceptsCondition, true)
     assert.deepEqual(arithmetic?.outputs.map(port => port.name), ['result'])
     assert.equal(arithmetic?.outputs[0]?.display, 'value')
     assert.deepEqual(arithmetic?.controls.map(control => [control.name, control.kind]), [
@@ -102,7 +100,6 @@ describe('WorkflowStudioController', () => {
     ])
     const ifNode = snapshot.nodeTypes.find(node => node.type === 'if')
     assert.deepEqual(ifNode?.inputs.map(port => port.name), ['left', 'right'])
-    assert.equal(ifNode?.acceptsCondition, false)
     assert.deepEqual(ifNode?.controls.map(control => [control.name, control.kind]), [
       ['expression', 'text'],
     ])

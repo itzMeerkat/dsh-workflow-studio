@@ -104,42 +104,40 @@ describe('WorkflowNodeRegistry', () => {
     assert.ok(a !== undefined)
     assert.equal(a.label, 'A')
     assert.equal(a.sourcePlugin, 'plugin-a')
-    assert.deepEqual(a.inputs.map(port => port.name), ['condition'])
+    assert.deepEqual(a.inputs, [])
     assert.deepEqual(a.outputs, [])
 
     const b = types.find(t => t.type === 'type-b')
     assert.ok(b !== undefined)
     assert.equal(b.requiresHumanInput, true)
     assert.equal(b.sourcePlugin, 'plugin-b')
-    assert.deepEqual(b.inputs.map(port => port.name), ['x', 'condition'])
+    assert.deepEqual(b.inputs.map(port => port.name), ['x'])
     assert.deepEqual(b.outputs.map(port => port.name), ['y'])
     assert.deepEqual(b.controls.map(control => control.name), ['factor'])
   })
 
-  it('保留普通节点的 condition 端口并允许流程控制节点退出门控', () => {
+  it('按声明原样列出端口并拒绝重复端口名', () => {
     ctx = new Context()
     const reg = new WorkflowNodeRegistry(ctx)
     assert.throws(
       () => reg.register({
-        type: 'bad-condition',
-        label: 'Bad',
-        description: 'Conflicts with engine port',
-        inputs: [{ name: 'condition', type: 'boolean' }],
+        type: 'duplicate-port',
+        label: 'Duplicate',
+        description: 'Declares one input twice',
+        inputs: [{ name: 'x', type: 'any' }, { name: 'x', type: 'any' }],
         execute: () => ({ status: 'completed', outputs: {} }),
       }, 'test-plugin'),
-      /condition 由引擎保留/,
+      /输入端口 x 重复/,
     )
 
     reg.register({
-      type: 'control-node',
-      label: 'Control',
-      description: 'Owns its condition input',
-      acceptsCondition: false,
+      type: 'plain-condition',
+      label: 'Plain',
+      description: 'Declares its own condition input',
       inputs: [{ name: 'condition', type: 'boolean' }],
       execute: () => ({ status: 'completed', outputs: {} }),
     }, 'test-plugin')
-    assert.deepEqual(reg.listTypes()[0]?.inputs.map(port => port.name), ['condition'])
-    assert.equal(reg.listTypes()[0]?.acceptsCondition, false)
+    assert.deepEqual(reg.listTypes()[0]?.inputs, [{ name: 'condition', type: 'boolean' }])
   })
 
   it('旧 disposer 不应删除后续同类型注册', () => {

@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 摘要
 
-`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、五个基础节点、两个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。运行、重试和审批集成仍局限于进程内或尚未实现。
+`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、供节点作者使用的 `WorkflowNode` 基类、单独挂载的演示节点插件、两个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。运行、重试和审批集成仍局限于进程内或尚未实现。
 
 ## 目录
 
@@ -76,7 +76,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 <a id="use-this-package"></a>
 ## 使用此包
 
-包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio` 插件插入 Harness profile。插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
+包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio` 插件和 `dsh-workflow-studio/demo` 插件插入 Harness profile。核心插件不注册任何节点；演示插件注册示例节点 `input`、`arithmetic`、`if`、`coalesce` 和 `output`，禁用其 `workflow-studio-demo` 行后只保留其他插件提供的节点。核心插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
 
 模型可以使用两个工具：
 
@@ -104,11 +104,11 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 }
 ```
 
-第三方 Cordis 插件通过 `ctx.workflowNodeRegistry.register(executor, sourcePlugin)` 注册 `WorkflowNodeExecutor`。必填的来源插件名会随每种节点类型显示在浏览器目录中，返回的 disposer 只移除该次注册。执行器声明连接端口、各输入是否必填、写入 `config` 的可选卡片控件，以及需要在卡片上渲染的输出。执行器返回 `{ status: 'completed', outputs }` 或 `{ status: 'failed', error, outputs? }`。
+第三方 Cordis 插件通过 `ctx.workflowNodeRegistry.register(executor, sourcePlugin)` 注册 `WorkflowNodeExecutor`。注册表按字段检查执行器，任何具备必需成员的对象都会被接受。必填的来源插件名会随每种节点类型显示在浏览器目录中，返回的 disposer 只移除该次注册。执行器声明连接端口、各输入是否必填、写入 `config` 的可选卡片控件，以及需要在卡片上渲染的输出。执行器返回 `{ status: 'completed', outputs }`、`{ status: 'failed', error, outputs? }` 或 `{ status: 'skipped' }`。执行上下文包含 `connected`（有入边的输入端口）和 `invocationKey`（即 `<runId>/<nodeId>`）。节点作者通常继承 `WorkflowNode`，它要求声明 `type`、`label`、`description`、业务 `ports` 和 `run()`；`run()` 返回输出或抛出 `NodeFailure`。
 
-引擎为每个普通节点添加可选的布尔 `condition` 输入。未连接的 condition 不影响执行；已连接的 condition 必须产生 `true`，否则引擎跳过该节点且不调用执行器。内置 `if` 节点针对两个类型为 `any` 的必填输入 `left` 和 `right` 计算用户配置的 JEXL 表达式，然后产生互斥的 `true` 和 `false` condition 信号。表达式支持 JavaScript 风格的比较、算术、属性访问、`&&`、`||`、`!` 和三元运算，包括 `===` 与 `!==`。求值器不暴露 Host 全局对象或函数，拒绝语句和赋值，并要求结果为布尔值。
+除非子类将 `conditional` 设为 `false`，`WorkflowNode` 会追加可选的布尔 `condition` 输入。未连接的 condition 不影响执行；已连接的 condition 必须产生 `true`，否则节点被跳过且不调用 `run()`，非布尔值使节点失败。门控在执行器可选的 `preflight()` 中进行，引擎在检查输入和任何人工确认之前调用它。普通执行器除非自行声明，否则没有 condition 输入。演示 `if` 节点针对两个类型为 `any` 的必填输入 `left` 和 `right` 计算用户配置的 JEXL 表达式，然后产生互斥的 `true` 和 `false` condition 信号。表达式支持 JavaScript 风格的比较、算术、属性访问、`&&`、`||`、`!` 和三元运算，包括 `===` 与 `!==`。求值器不暴露 Host 全局对象或函数，拒绝语句和赋值，并要求结果为布尔值。
 
-内置 `coalesce` 节点用于合并互斥的数据分支。每个 coalesce 实例声明至少两个同类型可选输入和一个相同类型的输出。运行时必须恰好有一个已连接输入包含非 `null` 值；零个或多个非 `null` 值都会使节点失败。实例可以通过 `inputs` 增加候选端口，但必须保持这些类型规则。
+演示 `coalesce` 节点用于合并互斥的数据分支。每个 coalesce 实例声明至少两个同类型可选输入和一个相同类型的输出。运行时必须恰好有一个已连接输入包含非 `null` 值；零个或多个非 `null` 值都会使节点失败。实例可以通过 `inputs` 增加候选端口，但必须保持这些类型规则。
 
 侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按照调度器拓扑阶段排列的节点图替代原始 JSON 视图。它对数据和 condition 依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。保留的 condition 边会从分支节点上标有 `true` 或 `false` 等名称的输出发出；同一阶段的节点并发运行。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
 
@@ -122,7 +122,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 `WorkflowNodeRegistry` 管理节点类型注册。`DagEngineProvider` 将已校验定义存入 `workflow_studio` domain，使用 Kahn 算法计算拓扑层，并并行执行每一层。该 domain 使用 `per-record` 布局，因此 JSON 后端会将每个 ID 写入 `<storage-root>/workflow_studio/workflows/<id>.json`。名称查找和写入共用一个引擎变更队列，因此并发保存同名工作流时会复用同一个 ID。节点失败后，引擎等待当前层结束，再将工作流标记为失败，并取消尚未启动的下游节点。
 
-当上游输出对象自身包含选定 key 时，该输入端口存在，即使其值为 `undefined`。已连接 condition 为 false 或未产出时，目标节点会被跳过；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
+当上游输出对象自身包含选定 key 时，该输入端口存在，即使其值为 `undefined`。`preflight()` 返回的结果会在引擎检查输入之前结束节点；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
 
 `pause()` 在拓扑层之间生效。标记 `requiresHumanInput` 的节点会在执行前暂停。一次 `resume()` 调用会释放同一并行层中等待的全部节点。`cancel()` 会中止运行并释放全部暂停等待者。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。
 
@@ -135,7 +135,8 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/workflow-schema.ts`](src/workflow-schema.ts) | Host 与浏览器共享的工作流 JSON schema |
 | [`src/persistence.ts`](src/persistence.ts) | per-record storage-domain 声明 |
 | [`src/engine-provider.ts`](src/engine-provider.ts) | 校验、调度、暂停、恢复和取消 |
-| [`src/basic-nodes.ts`](src/basic-nodes.ts) | `input`、`arithmetic`、`if`、`coalesce` 和 `output` 执行器 |
+| [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类、`NodeFailure` 和 condition 门控 |
+| [`src/demo/`](src/demo/) | 演示节点 `input`、`arithmetic`、`if`、`coalesce`、`output` 及其插件入口 |
 | [`src/tools.ts`](src/tools.ts) | 模型工具注册和 JSON 输入解析 |
 | [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行所用的 Host Remote |
 | [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序视图、保存和运行操作 |

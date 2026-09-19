@@ -18,30 +18,58 @@ import {
   apply as storageDomainApply, Config as storageDomainConfig,
   inject as storageDomainInject, name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
-import { registerBuiltinNodes } from '../src/basic-nodes.ts'
+import * as demoPlugin from '../src/demo/index.ts'
+import { WorkflowNode } from '../src/node.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 import { apply as applyPlugin, inject as pluginInject } from '../src/index.ts'
 import { EdgeId, NodeId, RunId, WorkflowId } from '../src/types.ts'
-import type { DagWorkflowDefinition, WorkflowNodeExecutor } from '../src/types.ts'
+import type { DagWorkflowDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/types.ts'
 
-const source: WorkflowNodeExecutor = {
-  type: 'source',
-  label: 'Source',
-  description: 'Produces its configured value',
-  inputs: [],
-  outputs: [{ name: 'output', type: 'any' }],
-  execute: ({ config }) => ({ status: 'completed', outputs: { output: config.value } }),
+class SourceNode extends WorkflowNode {
+  readonly type = 'source'
+  readonly label = 'Source'
+  readonly description = 'Produces its configured value'
+  protected readonly ports = { inputs: [], outputs: [{ name: 'output', type: 'any' as const }] }
+  protected run({ config }: NodeExecutionContext) { return { output: config.value } }
 }
 
-const pass: WorkflowNodeExecutor = {
-  type: 'pass',
-  label: 'Pass',
-  description: 'Passes one input through',
-  inputs: [{ name: 'input', type: 'any' }],
+class PassNode extends WorkflowNode {
+  readonly type = 'pass'
+  readonly label = 'Pass'
+  readonly description = 'Passes one input through'
+  protected readonly ports = {
+    inputs: [{ name: 'input', type: 'any' as const }],
+    outputs: [{ name: 'output', type: 'any' as const }],
+  }
+  protected run({ inputs }: NodeExecutionContext) { return { output: inputs.input } }
+}
+
+const source = new SourceNode()
+const pass = new PassNode()
+
+/** Plain executor without the base class: receives no condition port. */
+const plain: WorkflowNodeExecutor = {
+  type: 'plain',
+  label: 'Plain',
+  description: 'Plain-object executor that records its context',
+  inputs: [{ name: 'input', type: 'any', required: false }],
   outputs: [{ name: 'output', type: 'any' }],
-  execute: ({ inputs }) => ({ status: 'completed', outputs: { output: inputs.input } }),
+  execute: ({ connected, invocationKey, inputs }) => ({
+    status: 'completed',
+    outputs: { output: { connected: [...connected], invocationKey, inputs } },
+  }),
+}
+
+/** Executor whose execute() declines to run. */
+const decline: WorkflowNodeExecutor = {
+  type: 'decline',
+  label: 'Decline',
+  description: 'Returns a skipped result',
+  inputs: [],
+  outputs: [{ name: 'output', type: 'any' }],
+  execute: () => ({ status: 'skipped' }),
 }
 
 const fail: WorkflowNodeExecutor = {
@@ -90,7 +118,7 @@ const hitl: WorkflowNodeExecutor = {
   execute: () => ({ status: 'completed', outputs: { output: true } }),
 }
 
-const executors = [source, pass, fail, branch, binary, hitl]
+const executors = [source, pass, plain, decline, fail, branch, binary, hitl]
 
 function linearWorkflow(name: string): DagWorkflowDefinition {
   return {
@@ -133,7 +161,7 @@ describe('DagEngineProvider', () => {
       Config: storageDomainConfig,
     }, { backend: 'json' })
     await ctx.plugin(WorkflowNodeRegistry)
-    registerBuiltinNodes(ctx)
+    demoPlugin.registerDemoNodes(ctx)
     for (const executor of executors) {
       ctx.workflowNodeRegistry.register(executor, 'engine-provider-tests')
     }
@@ -147,7 +175,7 @@ describe('DagEngineProvider', () => {
     assert.ok(ctx.dagEngine instanceof DagEngineProvider)
   })
 
-  it('完整插件装配并随 fiber 卸载节点和工具', async () => {
+  it('核心插件不注册节点，演示插件独立注册并卸载节点', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     const root = await mkdtemp(join(tmpdir(), 'dsh-workflow-studio-'))
@@ -184,12 +212,17 @@ describe('DagEngineProvider', () => {
     await plugin
     await ready.promise
 
-    assert.deepEqual(
-      ctx.workflowNodeRegistry.listTypes().map(item => item.type).sort(),
-      ['arithmetic', 'coalesce', 'if', 'input', 'output'],
-    )
+    assert.deepEqual(ctx.workflowNodeRegistry.listTypes(), [])
     assert.deepEqual([...tools.keys()].sort(), ['create_workflow', 'run_workflow'])
     assert.ok(ctx.workflowStudioController instanceof WorkflowStudioController)
+
+    const demo = ctx.plugin(demoPlugin)
+    await demo
+    const demoTypes = ctx.workflowNodeRegistry.listTypes()
+    assert.deepEqual(demoTypes.map(item => item.type).sort(), ['arithmetic', 'coalesce', 'if', 'input', 'output'])
+    assert.ok(demoTypes.every(item => item.sourcePlugin === 'dsh-workflow-studio/demo'))
+    await demo.dispose()
+    assert.deepEqual(ctx.workflowNodeRegistry.listTypes(), [])
 
     await plugin.dispose()
     assert.equal(ctx.get('dagEngine'), undefined)
@@ -412,6 +445,83 @@ describe('DagEngineProvider', () => {
 
     assert.equal(result.status, 'failed')
     assert.match(result.error ?? '', /condition 输入必须为布尔值/)
+  })
+
+  it('节点上下文提供已连接端口和稳定调用键，普通执行器不获得 condition 端口', async () => {
+    const { engine } = await setup()
+    await assert.rejects(engine.save({
+      name: 'plain-condition',
+      nodes: [
+        { id: NodeId('flag'), type: 'source', config: { value: true } },
+        { id: NodeId('probe'), type: 'plain', config: {} },
+      ],
+      edges: [{ id: EdgeId('flag'), source: NodeId('flag'), target: NodeId('probe'), targetPort: 'condition' }],
+    }), /不存在的输入端口 condition/)
+
+    const id = await engine.save({
+      name: 'plain-context',
+      nodes: [
+        { id: NodeId('gate'), type: 'branch', config: {} },
+        { id: NodeId('probe'), type: 'plain', config: {} },
+      ],
+      edges: [{ id: EdgeId('gate'), source: NodeId('gate'), sourcePort: 'true', target: NodeId('probe') }],
+    })
+    const result = await engine.start(id).result
+    const probe = result.nodeRecords.find(record => record.nodeId === NodeId('probe'))
+    assert.equal(probe?.status, 'completed')
+    assert.deepEqual(probe?.outputs?.output, {
+      connected: ['input'],
+      invocationKey: `${result.runId}/probe`,
+      inputs: {},
+    })
+  })
+
+  it('execute 返回 skipped 时节点跳过且下游随之跳过', async () => {
+    const { engine } = await setup()
+    const id = await engine.save({
+      name: 'declined',
+      nodes: [
+        { id: NodeId('decline'), type: 'decline', config: {} },
+        { id: NodeId('sink'), type: 'pass', config: {} },
+      ],
+      edges: [{ id: EdgeId('edge'), source: NodeId('decline'), target: NodeId('sink') }],
+    })
+    const result = await engine.start(id).result
+    assert.equal(result.status, 'completed')
+    assert.deepEqual(result.nodeRecords.map(record => record.status), ['skipped', 'skipped'])
+  })
+
+  it('condition 为 false 时 HITL 节点直接跳过而不暂停', { timeout: 1000 }, async () => {
+    const { engine } = await setup()
+    const id = await engine.save({
+      name: 'gated-hitl',
+      nodes: [
+        { id: NodeId('flag'), type: 'source', config: { value: false } },
+        { id: NodeId('confirm'), type: 'source', config: { value: 1 }, requiresHumanInput: true },
+      ],
+      edges: [{ id: EdgeId('flag'), source: NodeId('flag'), target: NodeId('confirm'), targetPort: 'condition' }],
+    })
+    const result = await engine.start(id).result
+    assert.equal(result.status, 'completed')
+    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('confirm'))?.status, 'skipped')
+  })
+
+  it('实例覆盖输入端口时保留基类的 condition 端口', async () => {
+    const { engine } = await setup()
+    const id = await engine.save({
+      name: 'instance-inputs',
+      nodes: [
+        { id: NodeId('flag'), type: 'source', config: { value: false } },
+        { id: NodeId('value'), type: 'source', config: { value: 1 } },
+        { id: NodeId('sink'), type: 'pass', config: {}, inputs: [{ name: 'input', type: 'number' }] },
+      ],
+      edges: [
+        { id: EdgeId('flag'), source: NodeId('flag'), target: NodeId('sink'), targetPort: 'condition' },
+        { id: EdgeId('value'), source: NodeId('value'), target: NodeId('sink') },
+      ],
+    })
+    const result = await engine.start(id).result
+    assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
   })
 
   it('if 门控分支并由 coalesce 合并选中结果', async () => {

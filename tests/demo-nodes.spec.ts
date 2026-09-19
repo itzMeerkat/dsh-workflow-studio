@@ -1,19 +1,23 @@
 /**
- * 内置节点单元测试。
+ * 演示节点单元测试。
  */
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
-import { BUILTIN_NODES, registerBuiltinNodes } from '../src/basic-nodes.ts'
+import { createDemoNodes, registerDemoNodes } from '../src/demo/index.ts'
 import type { NodeExecutionContext } from '../src/types.ts'
 import { RunId } from '../src/types.ts'
+
+const DEMO_NODES = createDemoNodes()
 
 function buildCtx(overrides: Partial<NodeExecutionContext> = {}): NodeExecutionContext {
   return {
     runId: RunId('test'),
     config: {},
     inputs: {},
+    connected: new Set(),
+    invocationKey: 'test/node',
     signal: new AbortController().signal,
     log: () => {},
     ...overrides,
@@ -21,7 +25,7 @@ function buildCtx(overrides: Partial<NodeExecutionContext> = {}): NodeExecutionC
 }
 
 describe('input 节点', () => {
-  const node = BUILTIN_NODES.find(n => n.type === 'input')!
+  const node = DEMO_NODES.find(n => n.type === 'input')!
 
   it('应使用配置的默认值', () => {
     const result = node.execute(buildCtx({ config: { defaultValue: 42 } }))
@@ -42,7 +46,7 @@ describe('input 节点', () => {
 })
 
 describe('arithmetic 节点', () => {
-  const node = BUILTIN_NODES.find(n => n.type === 'arithmetic')!
+  const node = DEMO_NODES.find(n => n.type === 'arithmetic')!
 
   it('应正确执行加法', () => {
     const result = node.execute(buildCtx({
@@ -80,7 +84,7 @@ describe('arithmetic 节点', () => {
 })
 
 describe('if 节点', () => {
-  const node = BUILTIN_NODES.find(n => n.type === 'if')!
+  const node = DEMO_NODES.find(n => n.type === 'if')!
 
   it('表达式为 true 时只产生 true 门控信号', () => {
     const result = node.execute(buildCtx({
@@ -140,7 +144,7 @@ describe('if 节点', () => {
 })
 
 describe('coalesce 节点', () => {
-  const node = BUILTIN_NODES.find(n => n.type === 'coalesce')!
+  const node = DEMO_NODES.find(n => n.type === 'coalesce')!
 
   it('返回唯一的非 null 输入', () => {
     const result = node.execute(buildCtx({
@@ -168,7 +172,7 @@ describe('coalesce 节点', () => {
   })
 })
 
-describe('内置节点注册', () => {
+describe('演示节点注册', () => {
   it('注册中途失败时回滚已注册节点', () => {
     const registered = new Set<string>()
     const ctx = {
@@ -182,7 +186,7 @@ describe('内置节点注册', () => {
       },
     } as unknown as Context
 
-    assert.throws(() => { registerBuiltinNodes(ctx) }, /planned registration failure/)
+    assert.throws(() => { registerDemoNodes(ctx) }, /planned registration failure/)
     assert.deepEqual([...registered], [])
   })
 })

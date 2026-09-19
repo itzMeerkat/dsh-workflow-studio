@@ -12,6 +12,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./demo": {
+      "types": "./lib/types/demo/index.d.ts",
+      "default": "./lib/demo.js"
+    },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
@@ -20,8 +24,7 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
+    "lib/*.js",
     "lib/client.js.map",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml"

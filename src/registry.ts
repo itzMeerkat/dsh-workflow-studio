@@ -28,23 +28,7 @@ export interface NodeTypeSummary {
   inputs: readonly PortDefinition[]
   outputs: readonly PortDefinition[]
   controls: readonly NodeControlDefinition[]
-  acceptsCondition: boolean
   variadicInputs?: WorkflowNodeExecutor['variadicInputs']
-}
-
-/** 所有普通节点共享的引擎门控端口。 */
-export const CONDITION_PORT: Readonly<PortDefinition> = {
-  name: 'condition',
-  type: 'boolean',
-  description: '仅在输入为 true 时执行节点',
-  required: false,
-  role: 'condition',
-}
-
-/** 返回执行器目录中可见的输入端口，包括引擎门控端口。 */
-export function catalogInputPorts(executor: WorkflowNodeExecutor): readonly PortDefinition[] {
-  const inputs = executor.inputs ?? []
-  return executor.acceptsCondition === false ? inputs : [...inputs, CONDITION_PORT]
 }
 
 /**
@@ -81,9 +65,12 @@ export class WorkflowNodeRegistry extends Service {
     if (this.executors.has(type)) {
       throw new Error(`节点类型 "${type}" 已注册`)
     }
-    if (executor.acceptsCondition !== false
-      && executor.inputs?.some(port => port.name === CONDITION_PORT.name)) {
-      throw new Error(`节点类型 "${type}" 的输入端口 condition 由引擎保留`)
+    for (const [kind, ports] of [['输入', executor.inputs ?? []], ['输出', executor.outputs ?? []]] as const) {
+      const names = new Set<string>()
+      for (const port of ports) {
+        if (names.has(port.name)) throw new Error(`节点类型 "${type}" 的${kind}端口 ${port.name} 重复`)
+        names.add(port.name)
+      }
     }
     if (executor.variadicInputs !== undefined
       && (!Number.isInteger(executor.variadicInputs.min) || executor.variadicInputs.min < 1)) {
@@ -113,16 +100,14 @@ export class WorkflowNodeRegistry extends Service {
    */
   listTypes(): NodeTypeSummary[] {
     return [...this.executors.values()].map(({ executor: e, sourcePlugin }) => {
-      const inputs = catalogInputPorts(e)
       const s: NodeTypeSummary = {
         type: e.type,
         label: e.label,
         description: e.description,
         sourcePlugin,
-        inputs,
+        inputs: e.inputs ?? [],
         outputs: e.outputs ?? [],
         controls: e.controls ?? [],
-        acceptsCondition: e.acceptsCondition !== false,
       }
       if (e.requiresHumanInput !== undefined) s.requiresHumanInput = e.requiresHumanInput
       if (e.variadicInputs !== undefined) s.variadicInputs = e.variadicInputs

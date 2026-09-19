@@ -131,8 +131,12 @@ export interface NodeExecutionContext {
   runId: RunId
   /** 节点配置（来自 {@link DagNodeDefinition.config}）。 */
   config: Record<string, unknown>
-  /** 上游端口数据，key 为当前节点的输入端口名。 */
+  /** 上游端口数据，key 为当前节点的输入端口名；有入边但上游未产生值的端口不出现。 */
   inputs: Record<string, unknown>
+  /** 有入边的输入端口名，用于区分未连接的端口与上游未产生值的端口。 */
+  connected: ReadonlySet<string>
+  /** `${runId}/${nodeId}`，在同一运行中该节点的每次调用间保持不变，供节点自行去重或恢复。 */
+  invocationKey: string
   /** 取消信号。 */
   signal: AbortSignal
   /** 输出一条日志。 */
@@ -155,8 +159,13 @@ export interface NodeExecutionFailed {
   outputs?: Record<string, unknown>
 }
 
+/** 节点自行决定不执行的结果；下游缺少其数据的必需输入时同样被跳过。 */
+export interface NodeExecutionSkipped {
+  status: 'skipped'
+}
+
 /** 节点执行结果。 */
-export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed
+export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed | NodeExecutionSkipped
 
 /** 节点运行状态。 */
 export type NodeRunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'skipped' | 'failed' | 'cancelled'
@@ -214,8 +223,6 @@ export interface WorkflowNodeExecutor {
   readonly outputs?: PortDefinition[]
   /** 浏览器节点卡片直接渲染的配置控件。 */
   readonly controls?: readonly NodeControlDefinition[]
-  /** false 表示该流程控制节点不接受引擎提供的 condition 门控。 */
-  readonly acceptsCondition?: boolean
   /** 节点实例可以声明的同型可变输入端口约束。 */
   readonly variadicInputs?: {
     readonly min: number
@@ -223,5 +230,17 @@ export interface WorkflowNodeExecutor {
   }
   /** 是否需要人工介入执行该节点。 */
   readonly requiresHumanInput?: boolean
+  /**
+   * 在引擎的输入检查和人工确认之前调用。返回结果时节点直接以该结果结束，不调用 {@link execute}；
+   * 返回 undefined 时继续执行。
+   * @param context - 与随后 {@link execute} 相同的执行上下文。
+   * @returns 结束节点的结果，或 undefined。
+   */
+  preflight?(context: NodeExecutionContext): NodeExecutionResult | undefined
+  /**
+   * 执行节点。
+   * @param context - 执行上下文，`inputs` 包含所有已产生值的输入端口。
+   * @returns 节点执行结果。
+   */
   execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult>
 }

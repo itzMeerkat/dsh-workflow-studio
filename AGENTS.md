@@ -9,7 +9,8 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/workflow-schema.ts` owns the shared workflow-definition JSON schema.
 - `src/persistence.ts` owns the `workflow_studio` per-record domain.
 - `src/engine-provider.ts` owns durable definitions, validation, scheduling, pause, resume, and cancellation.
-- `src/basic-nodes.ts` owns the five bundled executors.
+- `src/node.ts` owns the `WorkflowNode` base class, `NodeFailure`, and the condition gate.
+- `src/demo/` owns the demo nodes and the `dsh-workflow-studio/demo` plugin that registers them; the core plugin registers no nodes.
 - `src/tools.ts` owns `create_workflow` and `run_workflow`.
 - `src/client/index.tsx` owns the `main` panel, workflow picker, and `sidebar.panellist` entry.
 - `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering.
@@ -34,7 +35,8 @@ Do not describe Session persistence, retries, Skills, or approval-service integr
 - Store and return independent snapshots; callers must not mutate engine state through retained references.
 - Execute topological levels in order and nodes within one level concurrently.
 - A failed node fails the workflow after the current level settles; pending downstream nodes become cancelled.
-- A false or absent connected `condition` value skips a normal node without calling its executor.
+- The engine calls an executor's optional `preflight()` before input checks and human confirmation; a returned result settles the node. The engine assigns no meaning to `condition`; `WorkflowNode.preflight()` owns that gate.
+- Pass `connected` (input ports with an incoming edge) and `invocationKey` (`<runId>/<nodeId>`) in every execution context.
 - Missing required data from a skipped dependency propagates `skipped`; other partial required inputs fail.
 - Executors return the discriminated `NodeExecutionResult` union and observe `context.signal` during asynchronous work.
 - HITL pause waiters must be released by both `resume()` and `cancel()`.

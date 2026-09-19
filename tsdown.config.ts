@@ -22,7 +22,7 @@ const CLIENT_EXTERNALS = new Set([
 export default defineConfig([
   {
     name: PACKAGE_ID,
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', demo: 'src/demo/index.ts' },
     outDir: 'lib',
     format: 'esm',
     platform: 'node',
