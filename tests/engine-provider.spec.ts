@@ -18,7 +18,7 @@ import {
   apply as storageDomainApply, Config as storageDomainConfig,
   inject as storageDomainInject, name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
-import * as demoPlugin from '../src/demo/index.ts'
+import { registerFixtureNodes } from './fixture-nodes.ts'
 import { WorkflowNode } from '../src/node.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
@@ -161,7 +161,7 @@ describe('DagEngineProvider', () => {
       Config: storageDomainConfig,
     }, { backend: 'json' })
     await ctx.plugin(WorkflowNodeRegistry)
-    demoPlugin.registerDemoNodes(ctx)
+    registerFixtureNodes(ctx)
     for (const executor of executors) {
       ctx.workflowNodeRegistry.register(executor, 'engine-provider-tests')
     }
@@ -175,7 +175,7 @@ describe('DagEngineProvider', () => {
     assert.ok(ctx.dagEngine instanceof DagEngineProvider)
   })
 
-  it('核心插件不注册节点，演示插件独立注册并卸载节点', async () => {
+  it('核心插件不注册节点并随卸载移除服务和工具', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     const root = await mkdtemp(join(tmpdir(), 'dsh-workflow-studio-'))
@@ -215,14 +215,6 @@ describe('DagEngineProvider', () => {
     assert.deepEqual(ctx.workflowNodeRegistry.listTypes(), [])
     assert.deepEqual([...tools.keys()].sort(), ['create_workflow', 'get_workflow_run', 'run_workflow'])
     assert.ok(ctx.workflowStudioController instanceof WorkflowStudioController)
-
-    const demo = ctx.plugin(demoPlugin)
-    await demo
-    const demoTypes = ctx.workflowNodeRegistry.listTypes()
-    assert.deepEqual(demoTypes.map(item => item.type).sort(), ['arithmetic', 'coalesce', 'if', 'input', 'output'])
-    assert.ok(demoTypes.every(item => item.sourcePlugin === 'dsh-workflow-studio/demo'))
-    await demo.dispose()
-    assert.deepEqual(ctx.workflowNodeRegistry.listTypes(), [])
 
     await plugin.dispose()
     assert.equal(ctx.get('dagEngine'), undefined)
@@ -524,19 +516,19 @@ describe('DagEngineProvider', () => {
     assert.equal(result.nodeRecords.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
   })
 
-  it('if 门控分支并由 coalesce 合并选中结果', async () => {
+  it('流程控制节点门控分支，可变输入节点合并选中结果', async () => {
     const { engine } = await setup()
     const id = await engine.save({
-      name: 'if-coalesce',
+      name: 'branch-merge',
       nodes: [
         { id: NodeId('compare-left'), type: 'source', config: { value: 10 } },
         { id: NodeId('compare-right'), type: 'source', config: { value: 5 } },
-        { id: NodeId('branch'), type: 'if', config: { expression: 'left > right' } },
+        { id: NodeId('branch'), type: 'greater', config: {} },
         { id: NodeId('left-value'), type: 'source', config: { value: 'left' } },
         { id: NodeId('right-value'), type: 'source', config: { value: 'right' } },
         { id: NodeId('left'), type: 'pass', config: {} },
         { id: NodeId('right'), type: 'pass', config: {} },
-        { id: NodeId('merge'), type: 'coalesce', config: {} },
+        { id: NodeId('merge'), type: 'merge', config: {} },
       ],
       edges: [
         {
@@ -593,13 +585,13 @@ describe('DagEngineProvider', () => {
     )
   })
 
-  it('coalesce 拒绝不同类型、过少输入和不同型输出', async () => {
+  it('可变输入节点拒绝不同类型、过少输入和不同型输出', async () => {
     const { engine } = await setup()
     const base = {
       name: 'invalid-coalesce',
       nodes: [{
         id: NodeId('merge'),
-        type: 'coalesce',
+        type: 'merge',
         config: {},
         inputs: [
           { name: 'first', type: 'number' as const, required: false },

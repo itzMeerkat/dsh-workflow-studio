@@ -59,22 +59,9 @@ const PANEL_ID = 'dsh-workflow-studio' as MainPanelId
 /** Browser services required before the editor mounts its Remote and slots. */
 export const inject = ['slots', 'locale', 'remote']
 
+/** An empty workflow; Studio registers no nodes, so the template names none. */
 function createDefaultDefinition(name: string): EditorWorkflowDefinition {
-  return {
-    name,
-    description: 'Add two values',
-    nodes: [
-      { id: 'left', type: 'input', config: { defaultValue: 10 }, position: { x: 80, y: 80 } },
-      { id: 'right', type: 'input', config: { defaultValue: 20 }, position: { x: 80, y: 260 } },
-      { id: 'add', type: 'arithmetic', config: { operator: 'add' }, position: { x: 360, y: 170 } },
-      { id: 'result', type: 'output', config: {}, position: { x: 650, y: 170 } },
-    ],
-    edges: [
-      { id: 'left-add', source: 'left', target: 'add', targetPort: 'left' },
-      { id: 'right-add', source: 'right', target: 'add', targetPort: 'right' },
-      { id: 'add-result', source: 'add', sourcePort: 'result', target: 'result' },
-    ],
-  }
+  return { name, nodes: [], edges: [] }
 }
 
 const INITIAL_DEFINITION = createDefaultDefinition('workflow-1')

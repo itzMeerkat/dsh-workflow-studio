@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, a separately mounted demo node plugin, two model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Each run is checkpointed to its own record and continues after a Host restart, and nodes can ask a person questions whose answers are saved with the run.
+`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, three model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Each run is checkpointed to its own record and continues after a Host restart, and nodes can ask a person questions whose answers are saved with the run.
 
 ## Table of Contents
 
@@ -76,7 +76,7 @@ The profile loads the checkout's `lib/` directly. After editing the source, run 
 <a id="use-this-package"></a>
 ## Use this package
 
-The package's [`cordis.patch.yml`](cordis.patch.yml) inserts the `dsh-workflow-studio`, `dsh-workflow-studio/nodes`, and `dsh-workflow-studio/demo` plugins into a Harness profile. The core plugin registers no nodes; the nodes plugin registers the `human-approval` node; the demo plugin registers the example `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes, and disabling its `workflow-studio-demo` row leaves only nodes from other plugins. The core plugin requires `ctx.tools` and `ctx.storageDomain`, then provides `ctx.workflowNodeRegistry` and `ctx.dagEngine`. The base bundle supplies the JSON backend and routes domains to it.
+The package's [`cordis.patch.yml`](cordis.patch.yml) inserts the `dsh-workflow-studio` plugin into a Harness profile. The plugin registers no nodes: node plugins supply them, such as the separate `dsh-workflow-demo-node` plugin with its agent-prompt, human-approval, and basic example nodes. New workflows start empty. The plugin requires `ctx.tools` and `ctx.storageDomain`, then provides `ctx.workflowNodeRegistry` and `ctx.dagEngine`. The base bundle supplies the JSON backend and routes domains to it.
 
 The model receives three tools:
 
@@ -103,8 +103,6 @@ A node asks a person with `await context.askHuman(requestId, questions)`, using 
 
 A node marked `requiresHumanInput`, by its executor or in the workflow definition, asks the reserved `dsh.confirm` request with the options `批准` and `拒绝` before its executor runs. `批准` runs the node; `拒绝` or a custom answer fails it, and the custom text becomes part of the error. A node skipped by its condition is not asked. A node still waiting for this confirmation when the Host stops is always restarted, whatever its `recovery` policy, because its executor has not run.
 
-The `dsh-workflow-studio/nodes` plugin registers the `human-approval` node (人工审批), which pauses one step of a workflow until a person decides. It asks its configurable `question` through `askHuman` with the options `批准` and `拒绝`, and shows the optional `input` value to the approver. Approval outputs `approved: true` and passes `input` through as `output`. `拒绝`, or a custom text answer, rejects: with `onReject: 'fail'` (the default) the node fails and the text becomes part of the error; with `onReject: 'branch'` it outputs `rejected: true` so a downstream `condition` can route the rejection. A custom text answer is also output as `comment`. The node has the standard condition input, so an ungated branch never asks.
-
 ```json
 {
   "name": "sum",
@@ -124,9 +122,9 @@ The `dsh-workflow-studio/nodes` plugin registers the `human-approval` node (人�
 
 Third-party Cordis plugins register a `WorkflowNodeExecutor` through `ctx.workflowNodeRegistry.register(executor, sourcePlugin)`. The registry checks the executor's fields, so any object with the required members is accepted. The required source plugin name appears with every node type in the browser catalog, and the returned disposer removes that exact registration. An executor declares connection ports, whether each input is required, optional card controls backed by `config`, and which outputs render on the card. It returns `{ status: 'completed', outputs }`, `{ status: 'failed', error, outputs? }`, or `{ status: 'skipped' }`. Its context carries `connected`, the input ports that have an incoming edge, and `invocationKey`, which is `<runId>/<nodeId>`. Node authors normally extend `WorkflowNode`, which requires `type`, `label`, `description`, business `ports`, and `run()`; `run()` returns outputs or throws `NodeFailure`.
 
-`WorkflowNode` appends an optional boolean `condition` input unless the subclass sets `conditional` to `false`. A disconnected condition does not affect execution; a connected condition must produce `true`, otherwise the node is skipped without calling `run()`, and a non-boolean value fails it. The gate runs in the executor's optional `preflight()`, which the engine calls before its input checks and any human confirmation. A plain executor has no condition input unless it declares one. The demo `if` node evaluates a user-configured JEXL expression against required `left` and `right` inputs of type `any`, then produces mutually exclusive `true` and `false` condition signals. Expressions support JavaScript-style comparison, arithmetic, property access, `&&`, `||`, `!`, and ternary operators, including `===` and `!==`. The evaluator exposes no Host globals or functions, rejects statements and assignment, and requires a boolean result.
+`WorkflowNode` appends an optional boolean `condition` input unless the subclass sets `conditional` to `false`. A disconnected condition does not affect execution; a connected condition must produce `true`, otherwise the node is skipped without calling `run()`, and a non-boolean value fails it. The gate runs in the executor's optional `preflight()`, which the engine calls before its input checks and any human confirmation. A plain executor has no condition input unless it declares one. A flow-control node that computes branch signals sets `conditional` to `false` and outputs mutually exclusive boolean signals, such as `true` and `false`, for downstream `condition` inputs.
 
-The demo `coalesce` node merges mutually exclusive data branches. A coalesce instance declares at least two optional inputs of one port type and one output of that same type. At runtime, exactly one connected input may contain a non-`null` value; zero or multiple non-`null` values fail the node. Instance `inputs` can add more candidates while preserving these type rules.
+An executor with `variadicInputs` lets each workflow node declare its own `inputs`: at least `min` ports, all of one type, and with `outputType: 'same'` exactly one output of that type. The engine checks these rules when a workflow is saved.
 
 The sidebar's **Workflow Studio** panel opens the editor. The toolbar provides a searchable workflow picker, edits the current workflow name, and opens a searchable node menu whose rows identify their source plugins. Renaming and saving an existing workflow preserves its ID; a duplicate name is rejected. The React Flow canvas renders one handle per declared input and output, with inputs on the left and outputs on the right. Connection previews follow the pointer while dragging. Existing edge endpoints can be moved to another compatible port or dropped on empty canvas space to delete the edge. Selecting a node opens its details and the run result below the full-width canvas. The canvas also supports node placement, typed port-to-port connections, node creation and deletion, card controls, card output previews, JSON configuration editing, saved positions, and run-status overlays. The read-only execution-order view replaces the raw JSON view with a node graph arranged by the scheduler's topological stages. It applies transitive reduction to data and condition dependencies, removing a direct edge when another directed path already represents the same execution-order relation. A retained condition edge leaves its branch node through a labeled output such as `true` or `false`; nodes in one stage run concurrently. Save and run operations use the Host's `workflowStudio` Remote; parsing and graph validation remain Host-owned.
 
@@ -156,8 +154,6 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/persistence.ts`](src/persistence.ts) | Per-record storage-domain declaration |
 | [`src/engine-provider.ts`](src/engine-provider.ts) | Validation, scheduling, pause, resume, and cancellation |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` base class, `NodeFailure`, and the condition gate |
-| [`src/nodes/`](src/nodes/) | `human-approval` node and the `dsh-workflow-studio/nodes` plugin entry |
-| [`src/demo/`](src/demo/) | Demo `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes and their plugin entry |
 | [`src/run-persistence.ts`](src/run-persistence.ts) | Run record schema and storage-domain declaration |
 | [`src/json.ts`](src/json.ts) | JSON checks for node outputs and notepad values |
 | [`src/human-input.ts`](src/human-input.ts) | Question and answer checks and the `dsh.confirm` confirmation question |

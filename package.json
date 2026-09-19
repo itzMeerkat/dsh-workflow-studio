@@ -12,14 +12,6 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./demo": {
-      "types": "./lib/types/demo/index.d.ts",
-      "default": "./lib/demo.js"
-    },
-    "./nodes": {
-      "types": "./lib/types/nodes/index.d.ts",
-      "default": "./lib/nodes.js"
-    },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
@@ -69,7 +61,6 @@
     "@deepseek-ai/dsh-user-questions": "0.1.6-alpha.2",
     "@deepseek-ai/schemastery": "^3.18.2",
     "@xyflow/react": "^12.11.6",
-    "jexl": "2.3.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -83,7 +74,6 @@
     "@deepseek-ai/dsh-storage": "0.1.6-alpha.2",
     "@deepseek-ai/dsh-storage-json": "0.1.6-alpha.2",
     "@deepseek-ai/dsh-typert-generator": "0.1.6-alpha.2",
-    "@types/jexl": "^2.3.4",
     "@types/node": "^24.10.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "^18.3.7",

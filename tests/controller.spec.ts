@@ -17,7 +17,7 @@ import {
   apply as storageDomainApply, Config as storageDomainConfig,
   inject as storageDomainInject, name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
-import { registerDemoNodes } from '../src/demo/index.ts'
+import { registerFixtureNodes } from './fixture-nodes.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
@@ -50,7 +50,7 @@ describe('WorkflowStudioController', () => {
       Config: storageDomainConfig,
     }, { backend: 'json' })
     await ctx.plugin(WorkflowNodeRegistry)
-    registerDemoNodes(ctx)
+    registerFixtureNodes(ctx)
     await ctx.plugin(DagEngineProvider)
     return new WorkflowStudioController(ctx)
   }
@@ -60,15 +60,13 @@ describe('WorkflowStudioController', () => {
     const workflowId = await controller.save(JSON.stringify({
       name: 'sum',
       nodes: [
-        { id: 'left', type: 'input', config: { defaultValue: 10 }, position: { x: 24, y: 48 } },
-        { id: 'right', type: 'input', config: { defaultValue: 20 } },
-        { id: 'add', type: 'arithmetic', config: { operator: 'add' } },
-        { id: 'result', type: 'output', config: {} },
+        { id: 'left', type: 'value', config: { value: 10 }, position: { x: 24, y: 48 } },
+        { id: 'right', type: 'value', config: { value: 20 } },
+        { id: 'add', type: 'sum', config: { offset: 0 } },
       ],
       edges: [
         { id: 'left-add', source: 'left', target: 'add', targetPort: 'left' },
         { id: 'right-add', source: 'right', target: 'add', targetPort: 'right' },
-        { id: 'add-result', source: 'add', sourcePort: 'result', target: 'result' },
       ],
     }))
 
@@ -88,21 +86,16 @@ describe('WorkflowStudioController', () => {
     )
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
-      ['arithmetic', 'coalesce', 'if', 'input', 'output'],
+      ['greater', 'merge', 'sum', 'value'],
     )
-    const arithmetic = snapshot.nodeTypes.find(node => node.type === 'arithmetic')
-    assert.equal(arithmetic?.sourcePlugin, 'dsh-workflow-studio/demo')
-    assert.deepEqual(arithmetic?.inputs.map(port => port.name), ['left', 'right', 'condition'])
-    assert.deepEqual(arithmetic?.outputs.map(port => port.name), ['result'])
-    assert.equal(arithmetic?.outputs[0]?.display, 'value')
-    assert.deepEqual(arithmetic?.controls.map(control => [control.name, control.kind]), [
-      ['operator', 'select'],
-    ])
-    const ifNode = snapshot.nodeTypes.find(node => node.type === 'if')
-    assert.deepEqual(ifNode?.inputs.map(port => port.name), ['left', 'right'])
-    assert.deepEqual(ifNode?.controls.map(control => [control.name, control.kind]), [
-      ['expression', 'text'],
-    ])
+    const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
+    assert.equal(sum?.sourcePlugin, 'test-fixtures')
+    assert.deepEqual(sum?.inputs.map(port => port.name), ['left', 'right', 'condition'])
+    assert.deepEqual(sum?.outputs.map(port => port.name), ['result'])
+    assert.equal(sum?.outputs[0]?.display, 'value')
+    assert.deepEqual(sum?.controls.map(control => [control.name, control.kind]), [['offset', 'number']])
+    const greater = snapshot.nodeTypes.find(node => node.type === 'greater')
+    assert.deepEqual(greater?.inputs.map(port => port.name), ['left', 'right'])
     const savedDefinition = JSON.parse(
       (JSON.parse(controller.snapshot()) as { workflows: Array<{ definition: string }> }).workflows[0]!.definition,
     ) as { nodes: Array<{ id: string; position?: { x: number; y: number } }> }
@@ -113,14 +106,14 @@ describe('WorkflowStudioController', () => {
       nodeRecords: Array<{ nodeId: string; outputs?: Record<string, unknown> }>
     }
     assert.equal(result.status, 'completed')
-    assert.deepEqual(result.nodeRecords.find(node => node.nodeId === 'result')?.outputs, { output: 30 })
+    assert.deepEqual(result.nodeRecords.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
   })
 
   it('按 ID 更新定义时保留工作流身份并允许重命名', async () => {
     const controller = await setup()
     const source = {
       name: 'before',
-      nodes: [{ id: 'input', type: 'input', config: { defaultValue: 1 } }],
+      nodes: [{ id: 'input', type: 'value', config: { value: 1 } }],
       edges: [],
     }
     const workflowId = await controller.save(JSON.stringify(source))

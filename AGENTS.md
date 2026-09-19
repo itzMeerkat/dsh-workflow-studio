@@ -11,8 +11,7 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/run-persistence.ts` owns the `workflow_studio_runs` per-record domain; `src/json.ts` owns JSON checks for persisted node values.
 - `src/engine-provider.ts` owns durable definitions, validation, scheduling, pause, resume, and cancellation.
 - `src/node.ts` owns the `WorkflowNode` base class, `NodeFailure`, and the condition gate.
-- `src/nodes/` owns general-purpose nodes (`human-approval`) and the `dsh-workflow-studio/nodes` plugin that registers them.
-- `src/demo/` owns the demo nodes and the `dsh-workflow-studio/demo` plugin that registers them; the core plugin registers no nodes.
+- The plugin registers no nodes. Node implementations live in node plugins such as `dsh-workflow-demo-node`; `tests/fixture-nodes.ts` holds test-only nodes for engine tests.
 - `src/tools.ts` owns `create_workflow` and `run_workflow`.
 - `src/client/index.tsx` owns the `main` panel, workflow picker, and `sidebar.panellist` entry.
 - `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering.
