@@ -12,8 +12,8 @@ Use this skill to create, modify, run, and diagnose workflow definitions. It is 
 | Task | Interface |
 |---|---|
 | Visually create, connect, configure, save, or run a workflow | Workflow Studio browser panel |
-| Let a model create or start a workflow | `create_workflow` and `run_workflow` tools |
-| Read definitions, preserve workflow IDs, await results, pause, resume, or cancel | `ctx.dagEngine` |
+| Let a model create, start, or check a workflow | `create_workflow`, `run_workflow`, and `get_workflow_run` tools |
+| Read definitions, preserve workflow IDs, await results, list runs, pause, resume, cancel, or answer human input | `ctx.dagEngine` |
 
 Do not edit files under the storage root directly. The engine owns schema parsing, graph validation, name uniqueness, snapshots, and durable writes.
 
@@ -66,7 +66,7 @@ Use registered node types only. Match port names exactly. Connected types must m
 
 Use `create_workflow` with a complete definition. A workflow with the same name replaces the prior definition and retains its workflow ID.
 
-Use `run_workflow` with the exact saved name. The tool reports that the run started; it does not wait for the final result.
+Use `run_workflow` with the exact saved name. The tool returns the run ID and does not wait for the final result; use `get_workflow_run` with that ID to read the run and node statuses.
 
 Do not invent node types, ports, IDs, or missing required values when preparing tool arguments. Inspect the registered catalog or existing definition first.
 
@@ -104,7 +104,7 @@ export async function runWorkflow(ctx: Context, name: string) {
 }
 ```
 
-`run.result` settles with a `WorkflowResult` and does not reject. Use `pause()`, `resume()`, `cancel()`, and `dispose()` only on the returned run handle.
+`run.result` settles with a `WorkflowResult` and does not reject. A run restored after a Host restart has no handle; control it by ID with `pauseRun()`, `resumeRun()`, `cancelRun()`, and `answerInput()`, and read it with `getRun()` or `listRuns()`.
 
 ## Modify safely
 
@@ -121,10 +121,10 @@ export async function runWorkflow(ctx: Context, name: string) {
 ## Understand execution
 
 - The scheduler executes topological stages in order and nodes within one stage concurrently.
-- Normal nodes receive an engine-owned optional boolean `condition` input. A disconnected condition has no effect. A connected value other than `true` skips the node.
+- Nodes built on `WorkflowNode` have an optional boolean `condition` input unless they opt out. A disconnected condition has no effect. A connected `false` or missing value skips the node; a non-boolean value fails it.
 - Missing required data from a skipped dependency propagates `skipped`. Other partial required inputs fail the node.
 - A failed node fails the workflow after the current stage settles. Pending downstream nodes become cancelled.
-- Runs are process-local. Definitions survive Host restarts; active runs do not.
+- Runs are saved with a definition snapshot. After a Host restart, unfinished runs continue and nodes that were running are called again; runs that need a person to decide become `interrupted`.
 - Cancellation during executor work depends on that executor observing `context.signal`.
 
 ## Diagnose failures
@@ -137,6 +137,7 @@ Check these causes in order:
 4. Cycle: inspect **Execution order** and remove the dependency cycle.
 5. Skipped node: inspect its connected condition and skipped upstream dependencies.
 6. Failed node: inspect the node record's `inputs`, `outputs`, and `error`.
-7. Hanging HITL run: resume or cancel the owning `DagRun`; the browser has no approval control.
+7. Run waiting on a person: `listRuns()` shows `awaitingInput`; find the unanswered entry in the node record's `interactions` and answer it with `answerInput()`. The browser has no answer form yet.
+8. Interrupted run: read its `error` for the reason, fix it (for example, load the missing node plugin), then call `resumeRun()` or `cancelRun()`.
 
 When package code changes, run `pnpm test` and `pnpm build` from `dsh-workflow-studio`.

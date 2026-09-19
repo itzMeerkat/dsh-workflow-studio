@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
-import { RunId, WorkflowId } from './types.ts'
+import { NodeId, RunId, WorkflowId } from './types.ts'
 import { parseWorkflowDefinition } from './tools.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -187,6 +187,22 @@ export class WorkflowStudioController extends TypertRemoteService {
   @Remote
   cancel(runId: string): void {
     this.control(() => { this.engine.cancelRun(RunId(runId), '用户取消') })
+  }
+
+  /**
+   * Answer a node's human-input request.
+   * @param runId - Run ID.
+   * @param nodeId - Node that asked.
+   * @param requestId - Request ID from the node record's `interactions`.
+   * @param answer - `ask_user_question` answer encoded as JSON.
+   */
+  @Remote
+  async answer(runId: string, nodeId: string, requestId: string, answer: string): Promise<void> {
+    try {
+      await this.engine.answerInput(RunId(runId), NodeId(nodeId), requestId, JSON.parse(answer) as unknown)
+    } catch (error: unknown) {
+      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+    }
   }
 
   private control(action: () => void): void {

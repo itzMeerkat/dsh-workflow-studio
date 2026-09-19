@@ -6,6 +6,7 @@
  */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 
 // ---- Branded IDs ----
 
@@ -158,6 +159,14 @@ export interface NodeExecutionContext {
   invocationKey: string
   /** 随运行记录持久化的节点私有值，在同一运行中该节点的重新调用间保留。 */
   notepad: NodeNotepad
+  /**
+   * 向人提问并等待答案。请求与答案写入运行记录：节点被重新调用后，以相同 `requestId` 再次提问时，
+   * 已回答的请求立即返回保存的答案，未回答的请求继续等待，不会重复提问。
+   * @param requestId - 节点内唯一的请求 ID；不得以 `dsh.` 开头。
+   * @param questions - Harness `ask_user_question` 格式的问题。
+   * @returns 按问题顺序排列的答案；运行取消时拒绝。
+   */
+  askHuman(requestId: string, questions: AskUserQuestionItem[]): Promise<AskUserQuestionAnswer>
   /** 取消信号。 */
   signal: AbortSignal
   /** 输出一条日志。 */
@@ -201,7 +210,19 @@ export interface NodeExecutionSkipped {
 export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed | NodeExecutionSkipped
 
 /** 节点运行状态。 */
-export type NodeRunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'skipped' | 'failed' | 'cancelled'
+export type NodeRunStatus =
+  | 'pending' | 'running' | 'awaiting-input' | 'completed' | 'skipped' | 'failed' | 'cancelled'
+
+/** 节点发起的一次人工输入请求。 */
+export interface HumanInputRequest {
+  /** 节点内唯一的请求 ID。 */
+  id: string
+  questions: AskUserQuestionItem[]
+  /** 已提交的答案；未回答时不存在。 */
+  answer?: AskUserQuestionAnswer
+  askedAt: number
+  answeredAt?: number
+}
 
 /** 节点运行记录。 */
 export interface NodeRunRecord {
@@ -214,6 +235,8 @@ export interface NodeRunRecord {
   attempts: number
   /** 节点通过 {@link NodeNotepad.save} 保存的最近值。 */
   notepad?: JsonValue
+  /** 节点在本次运行中发起的人工输入请求，按提问顺序排列。 */
+  interactions?: HumanInputRequest[]
   startedAt: number
   completedAt?: number
   runId: RunId
@@ -242,6 +265,8 @@ export interface WorkflowRunSummary {
   workflowId: WorkflowId
   name: string
   status: WorkflowRunStatus
+  /** 未结束运行中尚未回答的人工输入请求数量。 */
+  awaitingInput: number
   error?: string
   startedAt: number
   updatedAt: number

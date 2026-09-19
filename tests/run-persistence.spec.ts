@@ -4,24 +4,14 @@
 
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import {
-  apply as storageJsonApply, Config as storageJsonConfig,
-  inject as storageJsonInject, name as storageJsonName,
-} from '@deepseek-ai/dsh-storage-json'
-import {
-  apply as storageDomainApply, Config as storageDomainConfig,
-  inject as storageDomainInject, name as storageDomainName,
-} from '@deepseek-ai/dsh-storage-domain'
-import { WorkflowNodeRegistry } from '../src/registry.ts'
-import { DagEngineProvider, type DagEngineConfig } from '../src/engine-provider.ts'
+import type { Context } from '@deepseek-ai/cordis'
+import type { DagEngineConfig, DagEngineProvider } from '../src/engine-provider.ts'
+import { TestHosts, runEnded } from './host.ts'
 import { EdgeId, NodeId, type RunId, type WorkflowId } from '../src/types.ts'
 import type {
-  NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor, WorkflowResult,
+  NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor,
 } from '../src/types.ts'
 
 /** 可观察的节点调用记录。 */
@@ -81,44 +71,24 @@ function executors(calls: Calls, behavior: HostBehavior, stepStarted: () => void
 }
 
 describe('运行持久化与恢复', () => {
-  const contexts: Context[] = []
-  const roots: string[] = []
+  const hosts = new TestHosts()
 
-  afterEach(async () => {
-    await Promise.all(contexts.splice(0).map(async ctx => ctx.fiber.dispose()))
-    await Promise.all(roots.splice(0).map(async root => rm(root, { recursive: true, force: true })))
-  })
+  afterEach(async () => { await hosts.cleanup() })
 
-  /** 启动一个 Host：存储、注册表、节点和引擎。 */
+  /** 启动一个 Host，并返回 step 首次阻塞时兑现的 promise。 */
   async function host(
     root: string,
     calls: Calls,
     behavior: HostBehavior,
     config?: Partial<DagEngineConfig>,
   ): Promise<{ ctx: Context; engine: DagEngineProvider; stepStarted: Promise<void> }> {
-    const ctx = new Context()
-    contexts.push(ctx)
-    await ctx.plugin(Storage)
-    await ctx.plugin({ name: storageJsonName, inject: storageJsonInject, apply: storageJsonApply, Config: storageJsonConfig }, { root })
-    await ctx.plugin({
-      name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig,
-    }, { backend: 'json' })
-    await ctx.plugin(WorkflowNodeRegistry)
     const started = Promise.withResolvers<void>()
-    for (const executor of executors(calls, behavior, () => { started.resolve() })) {
-      ctx.workflowNodeRegistry.register(executor, 'run-persistence-tests')
-    }
-    if (config === undefined) await ctx.plugin(DagEngineProvider)
-    else await ctx.plugin(DagEngineProvider, config)
-    const engine = ctx.dagEngine as DagEngineProvider
-    await engine.recovered
+    const { ctx, engine } = await hosts.start(root, executors(calls, behavior, () => { started.resolve() }), config)
     return { ctx, engine, stepStarted: started.promise }
   }
 
   async function newRoot(): Promise<string> {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-workflow-runs-'))
-    roots.push(root)
-    return root
+    return hosts.root()
   }
 
   function freshCalls(): Calls {
@@ -145,16 +115,7 @@ describe('运行持久化与恢复', () => {
     return run.runId
   }
 
-  function ended(ctx: Context, runId: RunId): Promise<WorkflowResult> {
-    const engine = ctx.dagEngine
-    return new Promise((resolve) => {
-      const dispose = ctx.on('dag/end', (info) => {
-        if (info.runId !== runId) return
-        dispose()
-        queueMicrotask(() => { resolve(engine.getRun(runId)!) })
-      })
-    })
-  }
+  const ended = runEnded
 
   it('运行记录独立写入文件，结束后仍可查询和列出', async () => {
     const root = await newRoot()

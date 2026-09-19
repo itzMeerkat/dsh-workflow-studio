@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 摘要
 
-`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、供节点作者使用的 `WorkflowNode` 基类、单独挂载的演示节点插件、两个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。每次运行都会写入独立记录的检查点，并在 Host 重启后继续；审批集成尚未实现。
+`dsh-workflow-studio` 为 DeepSeek Harness 增加持久化 DAG 定义存储、执行引擎、可扩展节点注册表、供节点作者使用的 `WorkflowNode` 基类、单独挂载的演示节点插件、两个模型工具和浏览器图编辑器。每个工作流定义都保存在独立的 storage-domain 记录中，并在 Host 重启后恢复。每次运行都会写入独立记录的检查点，并在 Host 重启后继续，节点还可以向人提问，答案随运行保存。
 
 ## 目录
 
@@ -99,6 +99,10 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 不应重复已完成工作的节点可以使用 `context.invocationKey`（同一运行中该节点每次调用都相同）和 `context.notepad`。`await context.notepad.save(value)` 会把 JSON 值保存到运行记录中，重启后再次被调用的节点可从 `context.notepad.value` 读取它。
 
+节点通过 `await context.askHuman(requestId, questions)` 向人提问，问题与答案采用 `@deepseek-ai/dsh-user-questions` 中 Harness `ask_user_question` 工具的格式：每个问题可以提供选项、允许多选并接受自定义文本。引擎把请求保存到节点的运行记录中，并将节点标记为 `awaiting-input`；`listRuns()` 以 `awaitingInput` 报告每个未结束运行中未回答请求的数量。`answerInput()` 或 `answer` Remote 按问题校验答案、保存答案，然后交给等待中的节点。运行处于 running、paused 或 interrupted 时都可以回答。重启后再次被调用的节点，对已回答的 `requestId` 立即得到保存的答案，对未回答的请求则继续等待原有请求。以 `dsh.` 开头的请求 ID 由引擎保留。
+
+执行器或工作流定义标记了 `requiresHumanInput` 的节点，会在执行器运行前以保留请求 `dsh.confirm` 提出包含 `批准` 和 `拒绝` 选项的确认。`批准` 执行节点；`拒绝` 或自定义答案使节点失败，自定义文本会写入错误信息。被 condition 跳过的节点不会提问。Host 停止时仍在等待该确认的节点总会被重新执行，不受其 `recovery` 策略约束，因为它的执行器尚未运行。
+
 ```json
 {
   "name": "sum",
@@ -136,7 +140,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 当上游输出对象包含选定 key 时，该输入端口存在。`preflight()` 返回的结果会在引擎检查输入之前结束节点；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
 
-`pause()` 在拓扑层之间生效。标记 `requiresHumanInput` 的节点会在执行前暂停。一次 `resume()` 调用会释放同一并行层中等待的全部节点。`cancel()` 会中止运行并释放全部暂停等待者。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume` 和 `cancel`；`run` 启动运行并等待其结束。
+`pause()` 在拓扑层之间生效。`cancel()` 会中止运行，并结束所有暂停和所有等待中的 `askHuman()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `answer`；`run` 启动运行并等待其结束。
 
 `get()` 返回的定义、`getRun()` 返回的运行记录和最终结果都是独立快照。调用方修改这些值不会改变引擎内部状态。
 
@@ -151,6 +155,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/demo/`](src/demo/) | 演示节点 `input`、`arithmetic`、`if`、`coalesce`、`output` 及其插件入口 |
 | [`src/run-persistence.ts`](src/run-persistence.ts) | 运行记录 schema 和 storage-domain 声明 |
 | [`src/json.ts`](src/json.ts) | 节点输出和 notepad 值的 JSON 检查 |
+| [`src/human-input.ts`](src/human-input.ts) | 问题与答案校验，以及 `dsh.confirm` 确认问题 |
 | [`src/tools.ts`](src/tools.ts) | 模型工具注册和 JSON 输入解析 |
 | [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行控制所用的 Host Remote |
 | [`src/client/index.tsx`](src/client/index.tsx) | 本地化工作流选择器、画布/执行顺序视图、保存和运行操作 |
@@ -194,7 +199,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 - 节点只在 Host 重启后被再次调用；运行中的 Host 不会重试失败的节点。
 - `start()` 不接受工作流级输入值。
 - `PortDefinition.type` 用于控制边的兼容性，但引擎不执行通用运行时值类型校验。
-- HITL 只能通过 `DagRun` handle 控制，尚未连接 Harness 审批服务或浏览器 UI；因此从编辑器运行 HITL 工作流会等待外部恢复。Host 停止时正在等待确认的 HITL 节点会在运行恢复后再次请求确认。
+- 浏览器编辑器尚无回答人工输入请求的表单；答案只能通过 `answer` Remote 或 `answerInput()` 提交。请求不会转发到 Harness 聊天 Session。
 - 执行器运行期间能否取消，取决于执行器是否观察 `context.signal`。
 - 可视化编辑器尚未提供撤销/重做、复制/粘贴、分组、自动布局或多节点批量配置。
 

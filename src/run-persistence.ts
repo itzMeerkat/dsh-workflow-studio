@@ -10,20 +10,36 @@
 import { z } from 'zod'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { NodeId, RunId, WorkflowId } from './types.ts'
-import type { JsonObject, JsonValue, NodeRunRecord, WorkflowRunRecord } from './types.ts'
+import type { HumanInputRequest, JsonObject, JsonValue, NodeRunRecord, WorkflowRunRecord } from './types.ts'
 import { workflowDefinitionSchema } from './workflow-schema.ts'
 
 const jsonObject = z.record(z.string(), z.json()) as z.ZodType<JsonObject>
 
+// 问题和答案在提问与回答时由 human-input.ts 校验；此处只要求可读回的 JSON 结构。
+const humanInputRequestSchema = z.object({
+  id: z.string().min(1),
+  questions: z.array(z.json()) as unknown as z.ZodType<HumanInputRequest['questions']>,
+  answer: (z.json() as unknown as z.ZodType<NonNullable<HumanInputRequest['answer']>>).optional(),
+  askedAt: z.number(),
+  answeredAt: z.number().optional(),
+}).transform((raw): HumanInputRequest => ({
+  id: raw.id,
+  questions: raw.questions,
+  askedAt: raw.askedAt,
+  ...(raw.answer === undefined ? {} : { answer: raw.answer }),
+  ...(raw.answeredAt === undefined ? {} : { answeredAt: raw.answeredAt }),
+}))
+
 const nodeRunRecordSchema = z.object({
   nodeId: z.string().min(1).transform(NodeId),
   runId: z.string().min(1).transform(RunId),
-  status: z.enum(['pending', 'running', 'paused', 'completed', 'skipped', 'failed', 'cancelled']),
+  status: z.enum(['pending', 'running', 'awaiting-input', 'completed', 'skipped', 'failed', 'cancelled']),
   attempts: z.number().int().nonnegative(),
   inputs: jsonObject.optional(),
   outputs: jsonObject.optional(),
   error: z.string().optional(),
   notepad: (z.json() as z.ZodType<JsonValue>).optional(),
+  interactions: z.array(humanInputRequestSchema).optional(),
   startedAt: z.number(),
   completedAt: z.number().optional(),
 }).transform((raw): NodeRunRecord => ({
@@ -36,6 +52,7 @@ const nodeRunRecordSchema = z.object({
   ...(raw.outputs === undefined ? {} : { outputs: raw.outputs }),
   ...(raw.error === undefined ? {} : { error: raw.error }),
   ...(raw.notepad === undefined ? {} : { notepad: raw.notepad }),
+  ...(raw.interactions === undefined ? {} : { interactions: raw.interactions }),
   ...(raw.completedAt === undefined ? {} : { completedAt: raw.completedAt }),
 }))
 

@@ -9,7 +9,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   DagWorkflowDefinition, WorkflowId, RunId,
   WorkflowResult, WorkflowSummary, WorkflowRunSummary,
-  DagRunInfo, NodeRunInfo, WorkflowRunStatus,
+  DagRunInfo, NodeRunInfo, WorkflowRunStatus, NodeId,
 } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -50,6 +50,22 @@ declare module '@deepseek-ai/cordis' {
      * @param info - 已恢复的运行信息。
      */
     'dag/resumed'(info: DagRunInfo): void
+    /**
+     * 节点请求人工输入。
+     * @mode emit
+     * @param info - 工作流运行信息。
+     * @param node - 发起请求的节点。
+     * @param requestId - 节点内的请求 ID。
+     */
+    'dag/input-requested'(info: DagRunInfo, node: NodeRunInfo, requestId: string): void
+    /**
+     * 人工输入请求已回答且答案已写入运行记录。
+     * @mode emit
+     * @param info - 工作流运行信息。
+     * @param nodeId - 发起请求的节点 ID。
+     * @param requestId - 已回答的请求 ID。
+     */
+    'dag/input-answered'(info: DagRunInfo, nodeId: NodeId, requestId: string): void
     /**
      * 运行因 Host 停止而中断，需要人工恢复，或恢复时缺少节点类型。
      * @mode emit
@@ -147,6 +163,17 @@ export abstract class DagEngine extends Service {
    * @param reason - 写入运行记录的取消原因。
    */
   abstract cancelRun(runId: RunId, reason?: string): void
+
+  /**
+   * 回答节点的人工输入请求。答案按请求中的问题校验后写入运行记录，再交给等待中的节点。
+   * 运行 interrupted 或 paused 时也可回答，节点被重新调用时会直接得到该答案。
+   * @param runId - 运行 ID。
+   * @param nodeId - 发起请求的节点 ID。
+   * @param requestId - 请求 ID。
+   * @param answer - Harness `ask_user_question` 格式的答案。
+   * @returns 答案写入运行记录后兑现。
+   */
+  abstract answerInput(runId: RunId, nodeId: NodeId, requestId: string, answer: unknown): Promise<void>
 
   /** 安全派发 Cordis 事件。 */
   protected emitEvent(name: string, ...args: unknown[]): void {

@@ -40,7 +40,9 @@ Do not describe Session persistence, retries, Skills, or approval-service integr
 - Pass `connected` (input ports with an incoming edge) and `invocationKey` (`<runId>/<nodeId>`) in every execution context.
 - Missing required data from a skipped dependency propagates `skipped`; other partial required inputs fail.
 - Executors return the discriminated `NodeExecutionResult` union and observe `context.signal` during asynchronous work.
-- HITL pause waiters must be released by both `resume()` and `cancel()`.
+- `pause()` waiters must be released by both `resume()` and `cancel()`; `cancel()` and shutdown also reject pending `askHuman()` calls.
+- Save a human-input request before announcing it and save an answer before delivering it. An answered request returns its saved answer when a re-called node asks with the same ID; an unanswered one is reused, never duplicated.
+- `requiresHumanInput` asks the reserved `dsh.confirm` request before the executor runs; only `批准` without custom text approves, and anything else fails the node.
 - Write a node's running state before calling it and its final state before the next level starts; a node is finished only once its final state is durable.
 - Engine shutdown writes no final run state, so restart recovery sees the last checkpoint. Recovery starts only after the plugin loader finishes.
 - Never call a completed or skipped node again during recovery. A recovered run restarts only when `autoRestart` is on, every interrupted node's effective `recovery` is `rerun`, and every node type resolves; otherwise it becomes `interrupted`.

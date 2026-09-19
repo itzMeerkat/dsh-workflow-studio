@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, a separately mounted demo node plugin, two model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Each run is checkpointed to its own record and continues after a Host restart; approval integration remains unimplemented.
+`dsh-workflow-studio` adds a durable DAG definition store, an execution engine, an extensible node registry, a `WorkflowNode` base class for node authors, a separately mounted demo node plugin, two model tools, and a browser graph editor to DeepSeek Harness. Each workflow definition survives Host restarts in its own storage-domain record. Each run is checkpointed to its own record and continues after a Host restart, and nodes can ask a person questions whose answers are saved with the run.
 
 ## Table of Contents
 
@@ -99,6 +99,10 @@ A run restored after a restart becomes `interrupted` instead of restarting when 
 
 A node that should not repeat completed work uses `context.invocationKey`, which stays the same for every call of that node in one run, and `context.notepad`. `await context.notepad.save(value)` stores a JSON value in the run record, and a node called again after a restart reads it from `context.notepad.value`.
 
+A node asks a person with `await context.askHuman(requestId, questions)`, using the question and answer format of the Harness `ask_user_question` tool from `@deepseek-ai/dsh-user-questions`: each question may offer options, allow several selections, and accept custom text. The engine saves the request in the node's run record and marks the node `awaiting-input`; `listRuns()` reports each unfinished run's number of unanswered requests as `awaitingInput`. `answerInput()` or the `answer` Remote checks the answer against the questions, saves it, and then passes it to the waiting node. Answers are accepted while the run is running, paused, or interrupted. A node called again after a restart gets the saved answer at once for an answered `requestId`, or waits on the existing request for an unanswered one. Request IDs starting with `dsh.` are reserved for the engine.
+
+A node marked `requiresHumanInput`, by its executor or in the workflow definition, asks the reserved `dsh.confirm` request with the options `批准` and `拒绝` before its executor runs. `批准` runs the node; `拒绝` or a custom answer fails it, and the custom text becomes part of the error. A node skipped by its condition is not asked. A node still waiting for this confirmation when the Host stops is always restarted, whatever its `recovery` policy, because its executor has not run.
+
 ```json
 {
   "name": "sum",
@@ -136,7 +140,7 @@ The sidebar's **Workflow Studio** panel opens the editor. The toolbar provides a
 
 An input port is present when the upstream output object has the selected key. A `preflight()` result settles the node before the engine checks inputs. A missing required input from a skipped dependency also propagates `skipped`; other partial required inputs fail. Missing optional inputs do not block execution.
 
-`pause()` takes effect between levels. A node marked `requiresHumanInput` pauses before its executor runs. One `resume()` call releases every node waiting in the same parallel level. `cancel()` aborts the run and releases all pause waiters. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work. The `workflowStudio` Remote exposes `start`, `listRuns`, `getRun`, `pause`, `resume`, and `cancel` by run ID; `run` starts a run and waits for it to settle.
+`pause()` takes effect between levels. `cancel()` aborts the run and ends every pause and every pending `askHuman()` call. Executors receive the same `AbortSignal` and must cooperate for cancellation during their own asynchronous work. The `workflowStudio` Remote exposes `start`, `listRuns`, `getRun`, `pause`, `resume`, `cancel`, and `answer` by run ID; `run` starts a run and waits for it to settle.
 
 Definitions returned by `get()`, run records returned by `getRun()`, and final results are independent snapshots. Caller mutation cannot alter saved definitions or internal run state.
 
@@ -151,6 +155,7 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/demo/`](src/demo/) | Demo `input`, `arithmetic`, `if`, `coalesce`, and `output` nodes and their plugin entry |
 | [`src/run-persistence.ts`](src/run-persistence.ts) | Run record schema and storage-domain declaration |
 | [`src/json.ts`](src/json.ts) | JSON checks for node outputs and notepad values |
+| [`src/human-input.ts`](src/human-input.ts) | Question and answer checks and the `dsh.confirm` confirmation question |
 | [`src/tools.ts`](src/tools.ts) | Model tool registration and JSON input parsing |
 | [`src/controller.ts`](src/controller.ts) | Host Remote for browser snapshots, saves, and run control |
 | [`src/client/index.tsx`](src/client/index.tsx) | Localized workflow picker, canvas/execution views, save, and run actions |
@@ -194,7 +199,7 @@ The three tool schemas increase every request that exposes the global tool set. 
 - Nodes are called again only after a Host restart; a failed node is not retried within a running Host.
 - `start()` accepts no workflow-level input values.
 - `PortDefinition.type` controls edge compatibility, but the engine does not perform general runtime value-type validation.
-- HITL is controlled only through the `DagRun` handle and is not connected to the Harness approval service or browser UI; running a HITL workflow from the editor therefore waits for an external resume. A HITL node waiting for confirmation when the Host stops asks again after the run resumes.
+- The browser editor has no form for answering human-input requests yet; answers arrive only through the `answer` Remote or `answerInput()`. Requests are not forwarded to Harness chat Sessions.
 - Cancellation during executor work depends on the executor observing `context.signal`.
 - The visual editor does not yet provide undo/redo, copy/paste, groups, automatic layout, or multi-node configuration editing.
 

@@ -27,6 +27,8 @@ import { workflowStudioDomainSpec } from './persistence.ts'
 import { workflowRunsDomainSpec } from './run-persistence.ts'
 import { workflowDefinitionSchema } from './workflow-schema.ts'
 import { toJsonOutputs, toJsonValue } from './json.ts'
+import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
+import { CONFIRM_REQUEST_ID, confirmQuestions, confirmRejection, parseAnswer, parseQuestions } from './human-input.ts'
 
 // ---- 内部状态 ----
 
@@ -56,6 +58,8 @@ interface RunState {
   resultResolve: (result: WorkflowResult) => void
   /** 本运行的检查点写入按顺序排队。 */
   writeTail: Promise<void>
+  /** 等待答案的节点请求，键为 `${nodeId}\u0000${requestId}`。 */
+  inputWaiters: Map<string, (answer: AskUserQuestionAnswer) => void>
 }
 
 const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
@@ -496,6 +500,7 @@ export class DagEngineProvider extends DagEngine {
       resultPromise,
       resultResolve,
       writeTail: Promise.resolve(),
+      inputWaiters: new Map(),
     }
   }
 
@@ -549,8 +554,9 @@ export class DagEngineProvider extends DagEngine {
       }
       const interrupted: NodeId[] = []
       for (const { record: nodeRecord } of state.nodeStates.values()) {
-        if (nodeRecord.status !== 'running' && nodeRecord.status !== 'paused') continue
-        interrupted.push(nodeRecord.nodeId)
+        if (nodeRecord.status !== 'running' && nodeRecord.status !== 'awaiting-input') continue
+        // 仍在等待执行前确认的节点尚未调用执行器，重新调用总是安全的，不受 recovery 策略约束。
+        if (!awaitingConfirmation(nodeRecord)) interrupted.push(nodeRecord.nodeId)
         nodeRecord.status = 'pending'
         delete nodeRecord.outputs
         delete nodeRecord.error
@@ -642,17 +648,58 @@ export class DagEngineProvider extends DagEngine {
     await resumed
   }
 
-  private async handleHumanInTheLoop(state: RunState, execState: NodeExecState, node: DagNodeDefinition): Promise<void> {
-    this.ctx.logger.info(`[workflow] 节点 ${node.label ?? node.type} 需要人工确认，暂停等待`)
-    const resumed = this.waitForResume(state)
-    state.status = 'paused'
-    execState.record.status = 'paused'
-    this.emitEvent('dag/paused', this.runInfo(state))
+  // ---- 人工输入 ----
+
+  async answerInput(runId: RunId, nodeId: NodeId, requestId: string, answer: unknown): Promise<void> {
+    const state = this.liveState(runId)
+    if (state === undefined) throw new Error(`运行 ${runId} 已结束`)
+    const execState = state.nodeStates.get(nodeId)
+    if (execState === undefined) throw new Error(`运行 ${runId} 没有节点 ${nodeId}`)
+    const request = execState.record.interactions?.find(item => item.id === requestId)
+    if (request === undefined) throw new Error(`节点 ${nodeId} 没有请求 ${requestId}`)
+    if (request.answer !== undefined) throw new Error(`请求 ${requestId} 已回答`)
+    const parsed = parseAnswer(request.questions, answer)
+    request.answer = parsed
+    request.answeredAt = Date.now()
     await this.checkpoint(state)
+    this.emitEvent('dag/input-answered', this.runInfo(state), nodeId, requestId)
+    state.inputWaiters.get(inputKey(nodeId, requestId))?.(structuredClone(parsed))
+  }
+
+  /**
+   * 发起或复用节点的人工输入请求并等待答案。
+   * @param allowReserved - 引擎自身的请求可使用保留前缀。
+   */
+  private async askHuman(
+    state: RunState,
+    execState: NodeExecState,
+    nodeInfo: NodeRunInfo,
+    requestId: string,
+    questions: AskUserQuestionItem[],
+    signal: AbortSignal,
+    allowReserved = false,
+  ): Promise<AskUserQuestionAnswer> {
+    const parsed = parseQuestions(requestId, questions, allowReserved)
+    const record = execState.record
+    record.interactions ??= []
+    let request = record.interactions.find(item => item.id === requestId)
+    if (request?.answer !== undefined) return structuredClone(request.answer)
+    signal.throwIfAborted()
+    if (request === undefined) {
+      request = { id: requestId, questions: parsed, askedAt: Date.now() }
+      record.interactions.push(request)
+    }
+    const key = inputKey(record.nodeId, requestId)
+    const { promise, resolve } = Promise.withResolvers<AskUserQuestionAnswer>()
+    state.inputWaiters.set(key, resolve)
+    record.status = 'awaiting-input'
     try {
-      await resumed
+      await this.checkpoint(state)
+      this.emitEvent('dag/input-requested', this.runInfo(state), { ...nodeInfo, status: 'awaiting-input' }, requestId)
+      return await abortable(promise, signal)
     } finally {
-      if (!state.abortController.signal.aborted) execState.record.status = 'running'
+      state.inputWaiters.delete(key)
+      if (record.status === 'awaiting-input' && !hasWaiter(state, record.nodeId)) record.status = 'running'
     }
   }
 
@@ -798,6 +845,8 @@ export class DagEngineProvider extends DagEngine {
           await this.checkpoint(state)
         },
       },
+      askHuman: async (requestId, questions) =>
+        this.askHuman(state, execState, nodeInfo, requestId, questions, signal),
       signal,
       log: (msg: string) => {
         this.ctx.logger.info(`[${state.definition.name}/${node.label ?? node.type}] ${msg}`)
@@ -836,11 +885,21 @@ export class DagEngineProvider extends DagEngine {
       return
     }
 
-    // HITL
+    // 执行前人工确认：拒绝时节点失败。
     if (executor.requiresHumanInput === true || node.requiresHumanInput === true) {
-      await this.handleHumanInTheLoop(state, execState, node)
-      if (signal.aborted) {
+      let answer: AskUserQuestionAnswer
+      try {
+        answer = await this.askHuman(
+          state, execState, nodeInfo, CONFIRM_REQUEST_ID, confirmQuestions(node), signal, true,
+        )
+      } catch (error: unknown) {
+        if (!signal.aborted) throw error
         this.completeNode(state, execState, nodeInfo, 'cancelled')
+        return
+      }
+      const rejection = confirmRejection(answer)
+      if (rejection !== undefined) {
+        this.failNode(state, execState, nodeInfo, rejection)
         return
       }
     }
@@ -1035,16 +1094,50 @@ function resultOfRecord(record: WorkflowRunRecord): WorkflowResult {
 }
 
 function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
+  const awaitingInput = TERMINAL_STATUSES.has(record.status)
+    ? 0
+    : record.nodes.reduce((count, node) =>
+      count + (node.interactions ?? []).filter(item => item.answer === undefined).length, 0)
   return {
     runId: record.runId,
     workflowId: record.workflowId,
     name: record.definition.name,
     status: record.status,
+    awaitingInput,
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
     ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
     ...(record.error === undefined ? {} : { error: record.error }),
   }
+}
+
+function inputKey(nodeId: NodeId, requestId: string): string {
+  return `${nodeId}\u0000${requestId}`
+}
+
+function hasWaiter(state: RunState, nodeId: NodeId): boolean {
+  const prefix = `${nodeId}\u0000`
+  for (const key of state.inputWaiters.keys()) if (key.startsWith(prefix)) return true
+  return false
+}
+
+/** 节点仅在等待执行前确认、尚未调用执行器。 */
+function awaitingConfirmation(record: NodeRunRecord): boolean {
+  const pending = (record.interactions ?? []).filter(item => item.answer === undefined)
+  return record.status === 'awaiting-input' && pending.length === 1 && pending[0]?.id === CONFIRM_REQUEST_ID
+}
+
+/** 在信号中止时以中止原因拒绝。 */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => { reject(signal.reason) }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value) },
+      (error: unknown) => { signal.removeEventListener('abort', onAbort); reject(error) },
+    )
+  })
 }
 
 function assertNever(value: never): never {

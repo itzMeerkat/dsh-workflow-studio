@@ -41,6 +41,7 @@ export { WorkflowNodeRegistry } from './registry.ts'
 export { DagEngineProvider, topologicalSort } from './engine-provider.ts'
 export type { DagEngineConfig } from './engine-provider.ts'
 export { workflowRunsDomainSpec } from './run-persistence.ts'
+export { CONFIRM_REQUEST_ID, CONFIRM_QUESTION_ID, CONFIRM_APPROVE, CONFIRM_REJECT } from './human-input.ts'
 export { CONDITION_PORT, NodeFailure, WorkflowNode } from './node.ts'
 export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
@@ -54,7 +55,7 @@ export type {
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
   NodeExecutionCompleted, NodeExecutionFailed, NodeExecutionSkipped, NodeControlDefinition,
   WorkflowResult, WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
-  NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject,
+  NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, HumanInputRequest,
   NodeRunRecord, NodeRunStatus, PortDefinition,
 } from './types.ts'
 export {

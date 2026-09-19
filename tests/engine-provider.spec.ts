@@ -654,17 +654,19 @@ describe('DagEngineProvider', () => {
     assert.match(result.error ?? '', /缺少输入端口: left/)
   })
 
-  it('取消暂停中的 HITL 运行会释放等待并结束', { timeout: 1000 }, async () => {
+  it('requiresHumanInput 节点等待确认，取消运行时结束等待', { timeout: 1000 }, async () => {
     const { ctx, engine } = await setup()
     const id = await engine.save({
       name: 'cancel-hitl',
       nodes: [{ id: NodeId('approval'), type: 'hitl', config: {} }],
       edges: [],
     })
-    const paused = Promise.withResolvers<void>()
-    ctx.on('dag/paused', () => { paused.resolve() })
+    const requested = Promise.withResolvers<string>()
+    ctx.on('dag/input-requested', (_info, _node, requestId) => { requested.resolve(requestId) })
     const run = engine.start(id)
-    await paused.promise
+    assert.equal(await requested.promise, 'dsh.confirm')
+    assert.equal(engine.getRun(run.runId)?.nodeRecords[0]?.status, 'awaiting-input')
+    assert.equal(engine.listRuns()[0]?.awaitingInput, 1)
 
     run.cancel('operator cancelled')
     const result = await run.result
@@ -673,7 +675,7 @@ describe('DagEngineProvider', () => {
     assert.equal(result.nodeRecords[0]?.status, 'cancelled')
   })
 
-  it('一次恢复会释放同层所有 HITL 节点', { timeout: 1000 }, async () => {
+  it('requiresHumanInput 批准后执行，拒绝时节点失败', { timeout: 1000 }, async () => {
     const { ctx, engine } = await setup()
     const id = await engine.save({
       name: 'parallel-hitl',
@@ -683,21 +685,28 @@ describe('DagEngineProvider', () => {
       ],
       edges: [],
     })
-    let pausedCount = 0
-    const bothPaused = Promise.withResolvers<void>()
-    const run = engine.start(id)
-    ctx.on('dag/paused', () => {
-      pausedCount += 1
-      if (pausedCount === 2) bothPaused.resolve()
+    const requested: string[] = []
+    const both = Promise.withResolvers<void>()
+    ctx.on('dag/input-requested', (_info, node) => {
+      requested.push(node.nodeId)
+      if (requested.length === 2) both.resolve()
     })
-    await bothPaused.promise
+    const run = engine.start(id)
+    await both.promise
 
-    run.resume()
+    await engine.answerInput(run.runId, NodeId('approval-a'), 'dsh.confirm', {
+      answers: [{ id: 'decision', selected: ['批准'] }],
+    })
+    await engine.answerInput(run.runId, NodeId('approval-b'), 'dsh.confirm', {
+      answers: [{ id: 'decision', selected: [], custom: 'not now' }],
+    })
     const result = await run.result
 
-    assert.equal(result.status, 'completed')
-    assert.equal(pausedCount, 2)
-    assert.deepEqual(result.nodeRecords.map(record => record.status), ['completed', 'completed'])
+    assert.equal(result.status, 'failed')
+    assert.deepEqual(result.nodeRecords.map(record => [record.nodeId, record.status, record.error]), [
+      ['approval-a', 'completed', undefined],
+      ['approval-b', 'failed', '人工拒绝执行: not now'],
+    ])
   })
 
   it('完成结果和 getRun 返回值不能修改内部记录', async () => {

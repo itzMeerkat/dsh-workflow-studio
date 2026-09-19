@@ -17,7 +17,7 @@ Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node
 - `controls`: optional browser controls backed by fields in `context.config`.
 - `conditional`: leave it `true` for a normal node. Set it to `false` only for a flow-control node that computes branch signals and must not be gated by one.
 - `variadicInputs`: declare the minimum instance input count and optional same-type output requirement.
-- `requiresHumanInput`: use only when every execution of this node requires an external `DagRun.resume()`.
+- `requiresHumanInput`: set it when every execution needs a person's approval first; the engine asks `批准`/`拒绝` before `run()`.
 
 ## Implement a node
 
@@ -112,6 +112,10 @@ The engine guarantees at-least-once invocation: after a Host restart, a node tha
 - Declare `recovery = 'hold'` when a person must decide whether a second call is safe. The run then waits as `interrupted` until someone resumes it. A workflow node's own `recovery` overrides this.
 
 Outputs and notepad values are stored as JSON. An output port set to `undefined` counts as not produced; other non-JSON values, such as `Date`, `Map`, class instances, or non-finite numbers, fail the node.
+
+## Asking a person
+
+Call `await context.askHuman(requestId, questions)` with questions in the Harness `ask_user_question` format from `@deepseek-ai/dsh-user-questions/types`. Use a fixed `requestId` for each question the node asks: when the node is called again after a restart, the same ID returns the saved answer or keeps waiting on the existing request. Do not start IDs with `dsh.`. The call rejects when the run is cancelled; let that rejection propagate.
 
 ## Asynchronous work and cancellation
 
