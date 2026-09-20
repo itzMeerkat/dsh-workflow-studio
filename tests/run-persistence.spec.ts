@@ -103,7 +103,7 @@ describe('运行持久化与恢复', () => {
         { id: NodeId('source'), type: 'source', config: { value: 7 } },
         { id: NodeId('step'), type: 'step', config: {}, ...overrides },
       ],
-      edges: [{ id: EdgeId('edge'), source: NodeId('source'), target: NodeId('step') }],
+      edges: [{ id: EdgeId('edge'), kind: 'data', source: NodeId('source'), target: NodeId('step') }],
     })
   }
 
@@ -210,7 +210,7 @@ describe('运行持久化与恢复', () => {
         { id: NodeId('a'), type: 'source', config: { value: 1 } },
         { id: NodeId('b'), type: 'step', config: {} },
       ],
-      edges: [{ id: EdgeId('ab'), source: NodeId('a'), target: NodeId('b') }],
+      edges: [{ id: EdgeId('ab'), kind: 'data', source: NodeId('a'), target: NodeId('b') }],
     })
     const paused = new Promise<void>((resolve) => { first.ctx.on('dag/paused', () => { resolve() }) })
     const run = first.engine.start(workflowId)

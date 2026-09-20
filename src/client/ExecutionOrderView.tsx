@@ -55,11 +55,12 @@ export function ExecutionOrderView({
     () => reduceExecutionDependencies(plan),
     [plan],
   )
+  const branchPorts = useMemo(() => branchPinsBySource(dependencies, catalog), [catalog, dependencies])
   const nodes = useMemo(
-    () => executionNodes(plan, dependencies, catalog, runRecords, t('execution.stage')),
-    [catalog, dependencies, plan, runRecords, t],
+    () => executionNodes(plan, branchPorts, catalog, runRecords, t('execution.stage')),
+    [branchPorts, catalog, plan, runRecords, t],
   )
-  const edges = useMemo(() => executionEdges(dependencies), [dependencies])
+  const edges = useMemo(() => executionEdges(dependencies, branchPorts), [branchPorts, dependencies])
 
   return (
     <section className={css.executionView} aria-label={t('execution.title')}>
@@ -156,21 +157,35 @@ function ExecutionNodeCard({ data }: NodeProps<ExecutionFlowNode>) {
   )
 }
 
+/**
+ * The execution pins worth labelling, by source node ID.
+ *
+ * Only a node that declares several pins has a branch to show; a lone `then` would label every edge.
+ * @param dependencies - The reduced execution dependencies.
+ * @param catalog - Registered node types by type.
+ */
+function branchPinsBySource(
+  dependencies: readonly ExecutionDependency[],
+  catalog: ReadonlyMap<string, NodeTypeSummary>,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const branchPorts = new Map<string, Set<string>>()
+  for (const dependency of dependencies) {
+    const pin = dependency.execSourcePin
+    if (pin === undefined || (catalog.get(dependency.source.type)?.execOutputs.length ?? 1) < 2) continue
+    const ports = branchPorts.get(dependency.source.id) ?? new Set<string>()
+    ports.add(pin)
+    branchPorts.set(dependency.source.id, ports)
+  }
+  return branchPorts
+}
+
 function executionNodes(
   plan: ExecutionPlan,
-  dependencies: readonly ExecutionDependency[],
+  branchPorts: ReadonlyMap<string, ReadonlySet<string>>,
   catalog: ReadonlyMap<string, NodeTypeSummary>,
   runRecords: ReadonlyMap<string, NodeRunRecord>,
   stageLabel: string,
 ): ExecutionFlowNode[] {
-  const branchPorts = new Map<string, Set<string>>()
-  for (const dependency of dependencies) {
-    if (dependency.conditionSourcePort === undefined) continue
-    const ports = branchPorts.get(dependency.source.id) ?? new Set<string>()
-    ports.add(dependency.conditionSourcePort)
-    branchPorts.set(dependency.source.id, ports)
-  }
-
   return plan.stages.flatMap(stage => stage.nodes.map((item, index) => {
     const nodeType = catalog.get(item.node.type)
     const runRecord = runRecords.get(item.node.id)
@@ -196,17 +211,23 @@ function executionNodes(
   }))
 }
 
-function executionEdges(dependencies: readonly ExecutionDependency[]): Edge[] {
-  return dependencies.map(dependency => ({
-    id: `execution:${dependency.source.id}:${dependency.target.id}`,
-    source: dependency.source.id,
-    sourceHandle: dependency.conditionSourcePort === undefined
-      ? 'dependency'
-      : `branch:${dependency.conditionSourcePort}`,
-    target: dependency.target.id,
-    targetHandle: 'dependency',
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }))
+function executionEdges(
+  dependencies: readonly ExecutionDependency[],
+  branchPorts: ReadonlyMap<string, ReadonlySet<string>>,
+): Edge[] {
+  return dependencies.map((dependency) => {
+    const pin = dependency.execSourcePin
+    const branch = pin !== undefined && branchPorts.get(dependency.source.id)?.has(pin) === true
+    return {
+      id: `execution:${dependency.source.id}:${dependency.target.id}`,
+      source: dependency.source.id,
+      sourceHandle: branch ? `branch:${pin!}` : 'dependency',
+      target: dependency.target.id,
+      targetHandle: 'dependency',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      ...(pin === undefined ? {} : { className: 'workflow-exec-edge' }),
+    }
+  })
 }
 
 function compareBranchPorts(left: string, right: string): number {

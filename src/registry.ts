@@ -6,7 +6,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { assertUniquePortNames } from './shared/graph.ts'
+import { assertUniquePortNames, execOutputPins } from './shared/graph.ts'
 import type { NodeTypeSummary, WorkflowNodeExecutor } from './shared/types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -86,6 +86,7 @@ export class WorkflowNodeRegistry extends Service {
         sourcePlugin,
         inputs: e.inputs ?? [],
         outputs: e.outputs ?? [],
+        execOutputs: execOutputPins(e),
         controls: e.controls ?? [],
       }
       if (e.variadicInputs !== undefined) s.variadicInputs = e.variadicInputs

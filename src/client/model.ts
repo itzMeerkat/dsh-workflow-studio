@@ -1,17 +1,18 @@
 /** Browser-side workflow editing helpers used by the visual editor. */
 
-import { topologicalLevels } from '../shared/graph.ts'
+import { execSourcePin, isExecEdge, topologicalLevels } from '../shared/graph.ts'
 import { NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowStudioSnapshot } from '../shared/types.ts'
 import { workflowDefinitionSchema, workflowStudioSnapshotSchema } from '../shared/workflow-schema.ts'
 
 /** One saved workflow in the editor snapshot. */
 export type WorkflowRow = WorkflowStudioSnapshot['workflows'][number]
 
-/** A scheduling dependency between two nodes, with the branch port when it gates the target. */
+/** A scheduling dependency between two nodes, with the execution pin when one gates the target. */
 export interface ExecutionDependency {
   readonly source: DagNodeDefinition
   readonly target: DagNodeDefinition
-  readonly conditionSourcePort?: string
+  /** The source's execution pin, set only for an execution dependency, which reduction keeps. */
+  readonly execSourcePin?: string
 }
 
 export interface ExecutionPlanNode {
@@ -113,19 +114,17 @@ export function createExecutionPlan(definition: DagWorkflowDefinition): Executio
   const incoming = new Map(definition.nodes.map(node => [node.id, [] as { -readonly [K in keyof ExecutionDependency]: ExecutionDependency[K] }[]]))
   const dependencies: ExecutionDependency[] = []
   for (const edge of definition.edges) {
-    const conditionSourcePort = edge.targetPort === 'condition' ? edge.sourcePort : undefined
+    const pin = isExecEdge(edge) ? execSourcePin(edge) : undefined
     const targetDependencies = incoming.get(edge.target)!
     const existing = targetDependencies.find(dependency => dependency.source.id === edge.source)
     if (existing !== undefined) {
-      if (existing.conditionSourcePort === undefined && conditionSourcePort !== undefined) {
-        existing.conditionSourcePort = conditionSourcePort
-      }
+      if (existing.execSourcePin === undefined && pin !== undefined) existing.execSourcePin = pin
       continue
     }
     const dependency = {
       source: nodeById.get(edge.source)!,
       target: nodeById.get(edge.target)!,
-      ...(conditionSourcePort === undefined ? {} : { conditionSourcePort }),
+      ...(pin === undefined ? {} : { execSourcePin: pin }),
     }
     targetDependencies.push(dependency)
     dependencies.push(dependency)
@@ -165,6 +164,8 @@ function nextEditorNodePosition(nodes: readonly DagNodeDefinition[]): { x: numbe
 
 /**
  * Remove dependency edges already represented by another directed path.
+ *
+ * An execution dependency is kept even when a data path already implies it, because the author drew it.
  * @param plan - Scheduler-compatible execution plan.
  * @returns The graph's transitive reduction, or all dependencies for a cyclic graph.
  */
@@ -181,7 +182,8 @@ export function reduceExecutionDependencies(
   }
 
   return plan.dependencies.filter(dependency =>
-    !hasAlternatePath(
+    dependency.execSourcePin !== undefined
+    || !hasAlternatePath(
       dependency.source.id,
       dependency.target.id,
       outgoing,

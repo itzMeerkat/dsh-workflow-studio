@@ -52,10 +52,8 @@ export interface PortDefinition {
   name: string
   type: PortType
   description?: string
-  /** 输入端口是否必须连接；省略时为 true。 */
+  /** 输入端口是否必须连接；省略时为 true。输出端口始终产生值，该字段对其无意义。 */
   required?: boolean
-  /** 引擎赋予该端口的特殊执行语义。 */
-  role?: 'condition'
   /** 在节点卡片中展示输出值的方式。 */
   display?: 'value' | 'json'
 }
@@ -112,16 +110,37 @@ export interface DagNodeDefinition {
   inputs?: PortDefinition[]
 }
 
-/** DAG 边定义。 */
-export interface DagEdgeDefinition {
+/** DAG 边的公共字段。 */
+interface DagEdgeBase {
   id: EdgeId
   source: NodeId
+  target: NodeId
+}
+
+/** 把上游输出端口的值送到下游输入端口的数据边。 */
+export interface DagDataEdge extends DagEdgeBase {
+  kind: 'data'
   /** 源节点输出端口（默认 "output"）。 */
   sourcePort?: string
-  target: NodeId
   /** 目标节点输入端口（默认 "input"）。 */
   targetPort?: string
 }
+
+/**
+ * 控制执行顺序的执行边：目标节点在源节点完成后才执行。
+ *
+ * 源节点未完成时该边失效，目标节点不被调用而直接 skipped。数据边不传递这一语义。
+ */
+export interface DagExecEdge extends DagEdgeBase {
+  kind: 'exec'
+  /** 源节点执行输出引脚（默认 {@link EXEC_THEN_PIN}）。 */
+  sourcePort?: string
+  /** 目标节点执行输入引脚（默认 {@link EXEC_RUN_PIN}）。 */
+  targetPort?: string
+}
+
+/** DAG 边定义。 */
+export type DagEdgeDefinition = DagDataEdge | DagExecEdge
 
 /** 可 JSON 导入导出的完整工作流定义。 */
 export interface DagWorkflowDefinition {
@@ -186,8 +205,13 @@ export interface NodeNotepad {
 /** 节点执行成功结果。 */
 export interface NodeExecutionCompleted {
   status: 'completed'
-  /** 输出端口数据，key 为端口名。 */
+  /** 输出端口数据；每个已声明的输出端口都必须有值，无内容时写 null。 */
   outputs: Record<string, unknown>
+  /**
+   * 本次完成触发的执行输出引脚，取自 {@link WorkflowNodeExecutor.execOutputs}。
+   * 省略时触发全部已声明引脚；包含未声明引脚时节点失败。
+   */
+  next?: readonly string[]
 }
 
 /** 节点执行失败结果。 */
@@ -199,15 +223,10 @@ export interface NodeExecutionFailed {
   outputs?: Record<string, unknown>
 }
 
-/** 节点自行决定不执行的结果；下游缺少其数据的必需输入时同样被跳过。 */
-export interface NodeExecutionSkipped {
-  status: 'skipped'
-}
+/** 节点执行结果。节点不能自行跳过：不适用时以 completed 结束且不做任何事。 */
+export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed
 
-/** 节点执行结果。 */
-export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed | NodeExecutionSkipped
-
-/** 节点运行状态。等待外部结果的节点仍为 running。 */
+/** 节点运行状态。等待外部结果的节点仍为 running；skipped 只由失效的执行边产生。 */
 export type NodeRunStatus =
   | 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'cancelled'
 
@@ -236,6 +255,8 @@ export interface NodeRunRecord {
   notepad?: JsonValue
   /** 节点在本次运行中声明的外部结果等待，按声明顺序排列。 */
   requests?: NodeSignalRequest[]
+  /** 节点完成时触发的执行输出引脚；未完成的节点不触发任何引脚。 */
+  fired?: readonly string[]
   startedAt: number
   completedAt?: number
   runId: RunId
@@ -266,6 +287,8 @@ export interface WorkflowRunSummary {
   status: WorkflowRunStatus
   /** 未结束运行中尚未送达结果的请求数量。 */
   pendingRequests: number
+  /** 因执行边失效而被跳过的节点数量。 */
+  skippedNodes: number
   error?: string
   startedAt: number
   updatedAt: number
@@ -296,8 +319,13 @@ export interface WorkflowNodeExecutor {
   readonly type: string
   readonly label: string
   readonly description: string
-  readonly inputs?: PortDefinition[]
-  readonly outputs?: PortDefinition[]
+  readonly inputs?: readonly PortDefinition[]
+  readonly outputs?: readonly PortDefinition[]
+  /**
+   * 节点声明的执行输出引脚；省略时只有 `then`，在节点完成时触发。
+   * 声明多个引脚的节点通过 {@link NodeExecutionCompleted.next} 选择本次触发哪些。
+   */
+  readonly execOutputs?: readonly string[]
   /** 浏览器节点卡片直接渲染的配置控件。 */
   readonly controls?: readonly NodeControlDefinition[]
   /** 节点实例可以声明的同型可变输入端口约束。 */
@@ -316,13 +344,6 @@ export interface WorkflowNodeExecutor {
    */
   validateSignal?(request: JsonValue, result: unknown): JsonValue
   /**
-   * 在引擎的输入检查之前调用。返回结果时节点直接以该结果结束，不调用 {@link execute}；
-   * 返回 undefined 时继续执行。
-   * @param context - 与随后 {@link execute} 相同的执行上下文。
-   * @returns 结束节点的结果，或 undefined。
-   */
-  preflight?(context: NodeExecutionContext): NodeExecutionResult | undefined
-  /**
    * 执行节点。
    * @param context - 执行上下文，`inputs` 包含所有已产生值的输入端口。
    * @returns 节点执行结果。
@@ -339,6 +360,8 @@ export interface NodeTypeSummary {
   sourcePlugin: string
   inputs: readonly PortDefinition[]
   outputs: readonly PortDefinition[]
+  /** 节点类型的执行输出引脚，浏览器据此渲染执行引脚。 */
+  execOutputs: readonly string[]
   controls: readonly NodeControlDefinition[]
   variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
 }

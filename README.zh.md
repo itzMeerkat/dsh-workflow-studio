@@ -117,20 +117,24 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
     { "id": "result", "type": "output", "config": {} }
   ],
   "edges": [
-    { "id": "left-add", "source": "left", "target": "add", "targetPort": "left" },
-    { "id": "right-add", "source": "right", "target": "add", "targetPort": "right" },
-    { "id": "add-result", "source": "add", "sourcePort": "result", "target": "result" }
+    { "id": "left-add", "kind": "data", "source": "left", "target": "add", "targetPort": "left" },
+    { "id": "right-add", "kind": "data", "source": "right", "target": "add", "targetPort": "right" },
+    { "id": "add-result", "kind": "data", "source": "add", "sourcePort": "result", "target": "result" }
   ]
 }
 ```
 
-第三方 Cordis 插件通过 `ctx.workflowNodeRegistry.register(executor, sourcePlugin)` 注册 `WorkflowNodeExecutor`。注册表按字段检查执行器，任何具备必需成员的对象都会被接受。必填的来源插件名会随每种节点类型显示在浏览器目录中，返回的 disposer 只移除该次注册。执行器声明连接端口、各输入是否必填、写入 `config` 的可选卡片控件，以及需要在卡片上渲染的输出。执行器返回 `{ status: 'completed', outputs }`、`{ status: 'failed', error, outputs? }` 或 `{ status: 'skipped' }`。执行上下文包含 `connected`（有入边的输入端口）和 `invocationKey`（即 `<runId>/<nodeId>`）。节点作者通常继承 `WorkflowNode`，它要求声明 `type`、`label`、`description`、业务 `ports` 和 `run()`；`run()` 返回输出或抛出 `NodeFailure`。
+第三方 Cordis 插件通过 `ctx.workflowNodeRegistry.register(executor, sourcePlugin)` 注册 `WorkflowNodeExecutor`。注册表按字段检查执行器，任何具备必需成员的对象都会被接受。必填的来源插件名会随每种节点类型显示在浏览器目录中，返回的 disposer 只移除该次注册。执行器声明连接端口、各输入是否必填、写入 `config` 的可选卡片控件，以及需要在卡片上渲染的输出。执行器返回 `{ status: 'completed', outputs, next? }` 或 `{ status: 'failed', error, outputs? }`；节点不能自行跳过，不适用时同样以 completed 结束且不做任何事。完成意味着每个已声明的输出端口都有值，无内容时写 `null`。自行选择执行引脚的节点（例如按人工决定分支的节点）直接实现 `execute`，而不继承 `WorkflowNode`。执行上下文包含 `connected`（有入边的输入端口）和 `invocationKey`（即 `<runId>/<nodeId>`）。节点作者通常继承 `WorkflowNode`，它要求声明 `type`、`label`、`description`、业务 `ports` 和 `run()`；`run()` 返回输出或抛出 `NodeFailure`。
 
-除非子类将 `conditional` 设为 `false`，`WorkflowNode` 会追加可选的布尔 `condition` 输入。未连接的 condition 不影响执行；已连接的 condition 必须产生 `true`，否则节点被跳过且不调用 `run()`，非布尔值使节点失败。门控在执行器可选的 `preflight()` 中进行，引擎在检查输入和任何人工确认之前调用它。普通执行器除非自行声明，否则没有 condition 输入。计算分支信号的流程控制节点将 `conditional` 设为 `false`，并输出互斥的布尔信号（例如 `true` 和 `false`）供下游 `condition` 输入使用。
+每条边都要声明 `kind`。`data` 边把一个输出端口的值送到一个输入端口，`sourcePort` 和 `targetPort` 默认为 `output` 和 `input`。`exec` 边不传递数据，只约束执行顺序：目标节点在源节点完成后才执行，`sourcePort` 和 `targetPort` 默认为每个节点都有的 `then` 和 `run` 执行引脚。执行边用于表达数据依赖无法表达的顺序——两个节点写同一条外部记录、一项检查必须先于它所保护的工作被记录，或两个人工提问不能同时发出。没有入执行边的节点在运行到达时即执行；有入执行边的节点只在该边的源节点完成后执行，源节点被跳过时该边失效，目标节点不被调用而直接跳过，因此跳过沿执行边传递。数据边不传递这一信号。同一个节点的 `run` 引脚可以接入多条执行边，全部触发后节点才执行；而数据输入端口仍然只接受一条边。引擎会拒绝引用不存在引脚的执行边、同一对引脚之间的重复执行边，以及数据边与执行边共同构成的环。
+
+分支节点通过 `execOutputs` 声明自己的执行引脚，并用返回值中的 `next` 选择本次触发哪些；声明引脚会替代 `then`，省略 `next` 时全部触发。引擎注册两种行为本身即执行语义的节点类型：`branch` 接收布尔 `condition` 并触发 `true` 或 `false` 之一；`merge` 是唯一的 OR 连接点——只要有一条入执行边触发它就执行，全部失效时才被跳过，并透传唯一送达的输入。其余节点一律是 AND 连接，因此无论走哪条分支都必须执行的节点应接在 `merge` 之后，而不是接在某一条分支之后。
+
+因为跳过只沿执行边传递，一条通向必需输入、而源节点可能被跳过的数据边会让目标节点带着缺失的输入执行。引擎在保存工作流时拒绝这种接线，并指出该边和使源节点变为条件执行的引脚；补一条通向目标节点的执行边，或把输入端口声明为可选即可。
 
 带 `variadicInputs` 的执行器允许每个工作流节点声明自己的 `inputs`：至少 `min` 个端口且类型相同；`outputType: 'same'` 时恰好有一个同类型输出。引擎在保存工作流时检查这些规则。
 
-侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按照调度器拓扑阶段排列的节点图替代原始 JSON 视图。它对数据和 condition 依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。保留的 condition 边会从分支节点上标有 `true` 或 `false` 等名称的输出发出；同一阶段的节点并发运行。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
+侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧，每张卡片还带有 `run` 和 `then` 执行引脚。执行引脚只能连接执行引脚；分支节点按其声明的引脚各渲染一个输出引脚；`run` 引脚接受所有连到它的边，只要没有两条重复同一对引脚。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按照调度器拓扑阶段排列的节点图替代原始 JSON 视图。它对数据依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。执行边始终绘制，因为它由作者显式放置；由声明了多个引脚的节点引出的执行边标注所用的引脚名，例如 `true` 或 `false`。同一阶段的节点并发运行。运行列表会显示一次运行跳过了多少节点，因此悄悄走了分支的运行与全部执行的运行可以区分。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
 
 **运行** 会保存工作流、启动运行而不等待其结束，并打开 **运行** 标签页。该标签页列出当前工作流或全部工作流的运行，并分为 **进行中**（未结束或等待结果）和 **历史**。选中运行后可以看到其状态、开始时间、耗时和错误；适用时的 **暂停**、**恢复** 和 **取消运行**；每个等待中的请求，由为其 `kind` 注册的组件渲染；按运行时工作流快照绘制并标出节点状态的执行顺序图；以及节点状态、调用次数、输出和错误的表格。工具栏显示进行中的运行数量和等待结果的请求数量，点击任一数量会打开运行标签页。面板每两秒刷新一次运行状态；当选中的运行属于当前打开的工作流时，画布显示该运行的节点状态。
 
@@ -144,7 +148,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 `WorkflowNodeRegistry` 管理节点类型注册。`DagEngineProvider` 将已校验定义存入 `workflow_studio` domain，使用 Kahn 算法计算拓扑层，并并行执行每一层。该 domain 使用 `per-record` 布局，因此 JSON 后端会将每个 ID 写入 `<storage-root>/workflow_studio/workflows/<id>.json`。名称查找和写入共用一个引擎变更队列，因此并发保存同名工作流时会复用同一个 ID。节点失败后，引擎等待当前层结束，再将工作流标记为失败，并取消尚未启动的下游节点。
 
-当上游输出对象包含选定 key 时，该输入端口存在。`preflight()` 返回的结果会在引擎检查输入之前结束节点；跳过依赖导致的必填输入缺失也会传播 `skipped`，其他部分必填输入缺失会失败。缺少可选输入不阻止执行。
+当上游输出对象包含选定 key 时，该输入端口存在。任何必需输入缺失都会使节点失败，并指出端口和本应产生它的节点——节点执行就意味着它断言必需数据存在。缺少可选输入不阻止执行。
 
 `pauseRun()` 在拓扑层之间生效。`cancelRun()` 会中止运行，并结束所有暂停和所有等待中的 `awaitSignal()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `signal`。
 
@@ -159,7 +163,8 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/validation.ts`](src/validation.ts) | 按注册表校验定义，以及拓扑顺序 |
 | [`src/run-state.ts`](src/run-state.ts) | 运行的内存状态与运行记录转换 |
 | [`src/persistence.ts`](src/persistence.ts) | 定义与运行的 per-record storage domain |
-| [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类、`NodeFailure` 和 condition 门控 |
+| [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类和 `NodeFailure` |
+| [`src/flow-nodes.ts`](src/flow-nodes.ts) | 引擎自有的 `branch`、`merge` 节点和 OR 连接判断 |
 | [`src/shared/json.ts`](src/shared/json.ts) | 节点输出、notepad 值和信号负载的 JSON 检查 |
 | [`src/shared/questions.ts`](src/shared/questions.ts) | `questions` 请求格式：`askUser`、答案校验和审批辅助函数 |
 | [`src/tools.ts`](src/tools.ts) | 模型工具注册 |

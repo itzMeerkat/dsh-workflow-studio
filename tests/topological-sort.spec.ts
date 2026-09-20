@@ -21,6 +21,7 @@ function makeWorkflow(edges: Array<[string, string]>): DagWorkflowDefinition {
     })),
     edges: edges.map(([s, t], i) => ({
       id: EdgeId(`e${i}`),
+      kind: 'data' as const,
       source: NodeId(s),
       target: NodeId(t),
     })),

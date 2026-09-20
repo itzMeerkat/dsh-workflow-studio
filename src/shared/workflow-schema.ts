@@ -32,7 +32,6 @@ export const workflowPortSchema = z.object({
   type: portType,
   description: nonEmptyString.optional(),
   required: z.boolean().optional(),
-  role: z.literal('condition').optional(),
   display: z.enum(['value', 'json']).optional(),
 }) as unknown as z.ZodType<PortDefinition>
 
@@ -73,14 +72,19 @@ export const workflowNodeSchema = z.object({
   inputs: z.array(workflowPortSchema).optional(),
 }) as unknown as z.ZodType<DagNodeDefinition>
 
-/** 一条工作流边的 JSON 表示。 */
-export const workflowEdgeSchema = z.object({
+const edgeIdentity = {
   id: nonEmptyString,
   source: nonEmptyString,
-  sourcePort: nonEmptyString.optional(),
   target: nonEmptyString,
+  sourcePort: nonEmptyString.optional(),
   targetPort: nonEmptyString.optional(),
-}) as unknown as z.ZodType<DagEdgeDefinition>
+}
+
+/** 一条工作流边的 JSON 表示；`kind` 决定端口名属于数据端口还是执行引脚。 */
+export const workflowEdgeSchema = z.discriminatedUnion('kind', [
+  z.object({ ...edgeIdentity, kind: z.literal('data') }),
+  z.object({ ...edgeIdentity, kind: z.literal('exec') }),
+]) as unknown as z.ZodType<DagEdgeDefinition>
 
 /** 完整工作流定义的持久化和 Remote JSON schema。 */
 export const workflowDefinitionSchema = z.object({
@@ -115,6 +119,7 @@ const nodeRunRecordSchema = z.object({
   error: z.string().optional(),
   notepad: z.json().optional(),
   requests: z.array(nodeSignalRequestSchema).optional(),
+  fired: z.array(z.string()).optional(),
   startedAt: z.number(),
   completedAt: z.number().optional(),
 }) as unknown as z.ZodType<NodeRunRecord>
@@ -139,6 +144,7 @@ export const workflowRunSummarySchema = z.object({
   name: z.string(),
   status: runStatus,
   pendingRequests: z.number().int().nonnegative(),
+  skippedNodes: z.number().int().nonnegative(),
   error: z.string().optional(),
   startedAt: z.number(),
   updatedAt: z.number(),
@@ -160,6 +166,7 @@ export const workflowStudioSnapshotSchema = z.object({
     sourcePlugin: z.string(),
     inputs: z.array(workflowPortSchema),
     outputs: z.array(workflowPortSchema),
+    execOutputs: z.array(z.string()),
     controls: z.array(nodeControlSchema),
     variadicInputs: z.object({ min: z.number(), outputType: z.literal('same').optional() }).optional(),
   })),

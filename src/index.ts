@@ -47,7 +47,11 @@ export {
 } from './shared/questions.ts'
 export type { QuestionsRequest } from './shared/questions.ts'
 export { toJsonValue, toJsonObject } from './shared/json.ts'
-export { CONDITION_PORT, NodeFailure, WorkflowNode } from './node.ts'
+export {
+  EXEC_RUN_PIN, EXEC_THEN_PIN, execOutputPins, execSourcePin, execTargetPin, isDataEdge, isExecEdge,
+} from './shared/graph.ts'
+export { NodeFailure, WorkflowNode, toFailureResult } from './node.ts'
+export { BRANCH_FALSE_PIN, BRANCH_TRUE_PIN, BranchNode, MergeNode } from './flow-nodes.ts'
 export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
 export { WorkflowStudioController } from './controller.ts'
@@ -58,7 +62,8 @@ export type { DagRun } from './engine.ts'
 export type {
   DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
-  NodeExecutionCompleted, NodeExecutionFailed, NodeExecutionSkipped, NodeControlDefinition,
+  DagDataEdge, DagExecEdge,
+  NodeExecutionCompleted, NodeExecutionFailed, NodeControlDefinition,
   WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
   NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, NodeSignalRequest,
   NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, WorkflowStudioSnapshot,

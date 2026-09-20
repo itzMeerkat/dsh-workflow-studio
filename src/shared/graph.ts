@@ -3,7 +3,105 @@
  * @module dsh-workflow-studio
  */
 
-import type { PortDefinition } from './types.ts'
+import type {
+  DagDataEdge, DagEdgeDefinition, DagExecEdge, PortDefinition, WorkflowNodeExecutor,
+} from './types.ts'
+
+/** 每个节点的执行输入引脚名；执行边默认连到该引脚。 */
+export const EXEC_RUN_PIN = 'run'
+
+/** 节点完成时触发的执行输出引脚名；执行边默认由该引脚引出。 */
+export const EXEC_THEN_PIN = 'then'
+
+/**
+ * 边是否为执行边。
+ * @param edge - 任一边。
+ */
+export function isExecEdge(edge: DagEdgeDefinition): edge is DagExecEdge {
+  return edge.kind === 'exec'
+}
+
+/**
+ * 边是否为数据边。
+ * @param edge - 任一边。
+ */
+export function isDataEdge(edge: DagEdgeDefinition): edge is DagDataEdge {
+  return edge.kind === 'data'
+}
+
+/**
+ * 执行器的执行输出引脚；未声明时只有 {@link EXEC_THEN_PIN}。
+ * @param executor - 节点执行器，或浏览器目录中的节点类型。
+ */
+export function execOutputPins(executor: Pick<WorkflowNodeExecutor, 'execOutputs'>): readonly string[] {
+  return executor.execOutputs ?? [EXEC_THEN_PIN]
+}
+
+/** 按目标节点分组的入边，数据边与执行边分开。 */
+export interface InboundEdges {
+  readonly data: ReadonlyMap<string, readonly DagDataEdge[]>
+  readonly exec: ReadonlyMap<string, readonly DagExecEdge[]>
+}
+
+/**
+ * 按目标节点索引入边。
+ *
+ * 调度与校验都要反复取某个节点的入边；对固定的定义建一次索引，避免每个节点各扫一遍全部边。
+ * @param edges - 定义中的全部边。
+ * @returns 数据边与执行边各自的目标索引；没有入边的节点不出现。
+ */
+export function inboundEdges(edges: readonly DagEdgeDefinition[]): InboundEdges {
+  const data = new Map<string, DagDataEdge[]>()
+  const exec = new Map<string, DagExecEdge[]>()
+  for (const edge of edges) {
+    if (isExecEdge(edge)) indexByTarget(exec, edge)
+    else indexByTarget(data, edge)
+  }
+  return { data, exec }
+}
+
+function indexByTarget<E extends { readonly target: string }>(index: Map<string, E[]>, edge: E): void {
+  const existing = index.get(edge.target)
+  if (existing === undefined) index.set(edge.target, [edge])
+  else existing.push(edge)
+}
+
+/** 执行边引脚不成立的一端。 */
+export type ExecPinFault = 'source' | 'target'
+
+/**
+ * 执行边的两个引脚是否成立。
+ *
+ * Host 校验与浏览器连线规则共用本判断，两侧据此给出各自的错误信息；分开实现会随引脚集合的演进而分歧。
+ * @param sourcePins - 源节点声明的执行输出引脚。
+ * @param sourcePin - 边引出的源引脚。
+ * @param targetPin - 边连入的目标引脚。
+ * @returns 不成立的一端，或两端都成立时为 undefined。
+ */
+export function execPinFault(
+  sourcePins: readonly string[],
+  sourcePin: string,
+  targetPin: string,
+): ExecPinFault | undefined {
+  if (!sourcePins.includes(sourcePin)) return 'source'
+  return targetPin === EXEC_RUN_PIN ? undefined : 'target'
+}
+
+/**
+ * 执行边引出的源引脚名。
+ * @param edge - 执行边。
+ */
+export function execSourcePin(edge: DagExecEdge): string {
+  return edge.sourcePort ?? EXEC_THEN_PIN
+}
+
+/**
+ * 执行边连入的目标引脚名。
+ * @param edge - 执行边。
+ */
+export function execTargetPin(edge: DagExecEdge): string {
+  return edge.targetPort ?? EXEC_RUN_PIN
+}
 
 /** 按拓扑层级分组的节点；`cyclic` 为位于环上或依赖环的节点。 */
 export interface TopologicalLevels<N> {
@@ -62,8 +160,7 @@ export function portsAreCompatible(source: PortDefinition, target: PortDefinitio
 }
 
 /**
- * 节点实例的有效输入端口。实例声明的端口替换执行器声明的业务端口；带 `role` 的端口属于执行器，
- * 实例未声明同名端口时保留。
+ * 节点实例的有效输入端口；实例声明的端口替换执行器声明的端口。
  * @param instance - 节点实例声明的输入端口，未声明时为 undefined。
  * @param declared - 执行器声明的输入端口。
  * @returns 有效输入端口。
@@ -72,9 +169,7 @@ export function resolveInputPorts(
   instance: readonly PortDefinition[] | undefined,
   declared: readonly PortDefinition[],
 ): readonly PortDefinition[] {
-  if (instance === undefined) return declared
-  const names = new Set(instance.map(port => port.name))
-  return [...instance, ...declared.filter(port => port.role !== undefined && !names.has(port.name))]
+  return instance ?? declared
 }
 
 /**

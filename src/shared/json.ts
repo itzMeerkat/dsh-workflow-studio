@@ -37,18 +37,3 @@ export function toJsonObject(value: Record<string, unknown>, path: string): Json
   for (const [key, item] of Object.entries(value)) result[key] = toJsonValue(item, `${path}.${key}`)
   return result
 }
-
-/**
- * 返回节点输出的独立 JSON 副本。值为 undefined 的端口视为未产生值并被省略，
- * 使执行中与恢复后读到的输入一致；其余值须可写入 JSON。
- * @param outputs - 节点返回的输出端口数据。
- * @param path - 错误信息中使用的值路径。
- * @returns 新 JSON 对象。
- */
-export function toJsonOutputs(outputs: Record<string, unknown>, path: string): JsonObject {
-  const result: JsonObject = {}
-  for (const [port, item] of Object.entries(outputs)) {
-    if (item !== undefined) result[port] = toJsonValue(item, `${path}.${port}`)
-  }
-  return result
-}

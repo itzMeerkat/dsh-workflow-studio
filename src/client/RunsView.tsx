@@ -99,6 +99,8 @@ function RunGroup({ title, rows, selectedRunId, showName, t, onSelect }: {
           {showName && <strong>{row.name}</strong>}
           <time dateTime={new Date(row.startedAt).toISOString()}>{formatTime(row.startedAt)}</time>
           {row.completedAt !== undefined && <small>{formatDuration(row.completedAt - row.startedAt)}</small>}
+          {/* A run that quietly took a branch is otherwise indistinguishable from one that ran everything. */}
+          {row.skippedNodes > 0 && <small title={t('runs.skipped')}>{t('runs.skipped')} · {row.skippedNodes}</small>}
         </button>
       ))}
     </div>

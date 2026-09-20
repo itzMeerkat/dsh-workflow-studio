@@ -17,7 +17,16 @@ import {
 import { RunId, WorkflowId, type WorkflowRunSummary } from '../src/shared/types.ts'
 
 function row(runId: string, status: WorkflowRunSummary['status'], workflowId = 'w1', pendingRequests = 0): WorkflowRunSummary {
-  return { runId: RunId(runId), workflowId: WorkflowId(workflowId), name: 'flow', status, pendingRequests, startedAt: 1, updatedAt: 1 }
+  return {
+    runId: RunId(runId),
+    workflowId: WorkflowId(workflowId),
+    name: 'flow',
+    status,
+    pendingRequests,
+    skippedNodes: 0,
+    startedAt: 1,
+    updatedAt: 1,
+  }
 }
 
 const QUESTIONS = [

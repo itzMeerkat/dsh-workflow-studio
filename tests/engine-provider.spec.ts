@@ -43,7 +43,8 @@ class PassNode extends WorkflowNode {
     inputs: [{ name: 'input', type: 'any' as const }],
     outputs: [{ name: 'output', type: 'any' as const }],
   }
-  protected run({ inputs }: NodeExecutionContext) { return { output: inputs.input } }
+  // Every declared output carries a value on completion, so an absent optional input becomes null.
+  protected run({ inputs }: NodeExecutionContext) { return { output: inputs.input ?? null } }
 }
 
 const source = new SourceNode()
@@ -62,14 +63,14 @@ const plain: WorkflowNodeExecutor = {
   }),
 }
 
-/** Executor whose execute() declines to run. */
+/** Executor that completes without firing any execution pin, so its successors are skipped. */
 const decline: WorkflowNodeExecutor = {
   type: 'decline',
   label: 'Decline',
-  description: 'Returns a skipped result',
+  description: 'Completes without firing its execution pin',
   inputs: [],
   outputs: [{ name: 'output', type: 'any' }],
-  execute: () => ({ status: 'skipped' }),
+  execute: () => ({ status: 'completed', outputs: { output: null }, next: [] }),
 }
 
 const fail: WorkflowNodeExecutor = {
@@ -79,18 +80,6 @@ const fail: WorkflowNodeExecutor = {
   inputs: [],
   outputs: [{ name: 'output', type: 'any' }],
   execute: () => ({ status: 'failed', error: 'planned failure' }),
-}
-
-const branch: WorkflowNodeExecutor = {
-  type: 'branch',
-  label: 'Branch',
-  description: 'Produces only the false branch',
-  inputs: [],
-  outputs: [
-    { name: 'true', type: 'any' },
-    { name: 'false', type: 'any' },
-  ],
-  execute: () => ({ status: 'completed', outputs: { false: 'selected' } }),
 }
 
 const binary: WorkflowNodeExecutor = {
@@ -127,7 +116,7 @@ class WaiterNode extends WorkflowNode<{ output: unknown }> {
   }
 }
 
-const executors = [source, pass, plain, decline, fail, branch, binary, new WaiterNode()]
+const executors = [source, pass, plain, decline, fail, binary, new WaiterNode()]
 
 function linearWorkflow(name: string): DagWorkflowDefinition {
   return {
@@ -137,7 +126,7 @@ function linearWorkflow(name: string): DagWorkflowDefinition {
       { id: NodeId('pass'), type: 'pass', config: {} },
     ],
     edges: [
-      { id: EdgeId('edge'), source: NodeId('source'), target: NodeId('pass') },
+      { id: EdgeId('edge'), kind: 'data', source: NodeId('source'), target: NodeId('pass') },
     ],
   }
 }
@@ -184,7 +173,7 @@ describe('DagEngineProvider', () => {
     assert.ok(ctx.dagEngine instanceof DagEngineProvider)
   })
 
-  it('核心插件不注册节点并随卸载移除服务和工具', async () => {
+  it('核心插件只注册流程控制节点，并随卸载移除服务和工具', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     const root = await mkdtemp(join(tmpdir(), 'dsh-workflow-studio-'))
@@ -221,7 +210,8 @@ describe('DagEngineProvider', () => {
     await plugin
     await ready.promise
 
-    assert.deepEqual(ctx.workflowNodeRegistry.listTypes(), [])
+    // The engine owns branch and merge because their behavior is execution semantics; nothing else.
+    assert.deepEqual(ctx.workflowNodeRegistry.listTypes().map(node => node.type).sort(), ['branch', 'merge'])
     assert.deepEqual([...tools.keys()].sort(), ['create_workflow', 'get_workflow_run', 'run_workflow'])
     assert.ok(ctx.workflowStudioController instanceof WorkflowStudioController)
 
@@ -298,7 +288,7 @@ describe('DagEngineProvider', () => {
       version: number
       record: DagWorkflowDefinition
     }
-    assert.equal(stored.version, 1)
+    assert.equal(stored.version, 2)
     assert.deepEqual(stored.record.nodes[0]?.position, { x: 24, y: 48 })
     assert.deepEqual(stored.record.edges, alpha.edges)
 
@@ -363,7 +353,7 @@ describe('DagEngineProvider', () => {
         { id: NodeId('after'), type: 'pass', config: {} },
       ],
       edges: [
-        { id: EdgeId('edge'), source: NodeId('fail'), target: NodeId('after') },
+        { id: EdgeId('edge'), kind: 'data', source: NodeId('fail'), target: NodeId('after') },
       ],
     })
 
@@ -374,72 +364,61 @@ describe('DagEngineProvider', () => {
     assert.deepEqual(result.nodes.map(record => record.status), ['failed', 'cancelled'])
   })
 
-  it('未选中的分支跳过下游节点', async () => {
+  it('分支未触发的执行引脚使下游节点被跳过', async () => {
     const { engine } = await setup()
     const id = await engine.save({
       name: 'skip',
       nodes: [
-        { id: NodeId('branch'), type: 'branch', config: {} },
-        { id: NodeId('sink'), type: 'pass', config: {} },
-      ],
-      edges: [{
-        id: EdgeId('true-edge'),
-        source: NodeId('branch'),
-        sourcePort: 'true',
-        target: NodeId('sink'),
-      }],
-    })
-
-    const result = await engine.start(id).result
-
-    assert.equal(result.status, 'completed')
-    assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
-  })
-
-  it('condition 为 false 时不调用执行器', async () => {
-    const { engine } = await setup()
-    const id = await engine.save({
-      name: 'condition-false',
-      nodes: [
-        { id: NodeId('condition'), type: 'source', config: { value: false } },
-        { id: NodeId('value'), type: 'source', config: { value: 3 } },
-        { id: NodeId('sink'), type: 'pass', config: {} },
+        { id: NodeId('flag'), type: 'source', config: { value: false } },
+        { id: NodeId('gate'), type: 'branch', config: {} },
+        { id: NodeId('sink'), type: 'source', config: { value: 'unused' } },
       ],
       edges: [
-        {
-          id: EdgeId('condition-edge'),
-          source: NodeId('condition'),
-          target: NodeId('sink'),
-          targetPort: 'condition',
-        },
-        {
-          id: EdgeId('value-edge'),
-          source: NodeId('value'),
-          target: NodeId('sink'),
-        },
+        { id: EdgeId('flag'), kind: 'data', source: NodeId('flag'), target: NodeId('gate'), targetPort: 'condition' },
+        { id: EdgeId('true-edge'), kind: 'exec', source: NodeId('gate'), sourcePort: 'true', target: NodeId('sink') },
       ],
     })
 
     const result = await engine.start(id).result
 
     assert.equal(result.status, 'completed')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('gate'))?.fired?.[0], 'false')
     assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
   })
+  it('被跳过的节点不被调用，调用次数保持为 0', async () => {
+    const { engine } = await setup()
+    const id = await engine.save({
+      name: 'not-invoked',
+      nodes: [
+        { id: NodeId('flag'), type: 'source', config: { value: false } },
+        { id: NodeId('gate'), type: 'branch', config: {} },
+        { id: NodeId('probe'), type: 'plain', config: {} },
+      ],
+      edges: [
+        { id: EdgeId('flag'), kind: 'data', source: NodeId('flag'), target: NodeId('gate'), targetPort: 'condition' },
+        { id: EdgeId('true-edge'), kind: 'exec', source: NodeId('gate'), sourcePort: 'true', target: NodeId('probe') },
+      ],
+    })
 
-  it('condition 非布尔值时节点和工作流失败', async () => {
+    const result = await engine.start(id).result
+    const probe = result.nodes.find(record => record.nodeId === NodeId('probe'))
+
+    assert.equal(result.status, 'completed')
+    assert.equal(probe?.status, 'skipped')
+    assert.equal(probe?.attempts, 0)
+    assert.equal(probe?.outputs, undefined)
+  })
+  it('branch 的 condition 非布尔值时节点和工作流失败', async () => {
     const { engine } = await setup()
     const id = await engine.save({
       name: 'condition-invalid',
       nodes: [
-        { id: NodeId('condition'), type: 'source', config: { value: 1 } },
-        { id: NodeId('sink'), type: 'source', config: { value: 'unused' } },
+        { id: NodeId('flag'), type: 'source', config: { value: 1 } },
+        { id: NodeId('gate'), type: 'branch', config: {} },
       ],
-      edges: [{
-        id: EdgeId('condition-edge'),
-        source: NodeId('condition'),
-        target: NodeId('sink'),
-        targetPort: 'condition',
-      }],
+      edges: [
+        { id: EdgeId('flag'), kind: 'data', source: NodeId('flag'), target: NodeId('gate'), targetPort: 'condition' },
+      ],
     })
 
     const result = await engine.start(id).result
@@ -447,92 +426,87 @@ describe('DagEngineProvider', () => {
     assert.equal(result.status, 'failed')
     assert.match(result.error ?? '', /condition 输入必须为布尔值/)
   })
-
-  it('节点上下文提供已连接端口和稳定调用键，普通执行器不获得 condition 端口', async () => {
+  it('节点上下文提供已连接的数据端口和稳定调用键', async () => {
     const { engine } = await setup()
-    await assert.rejects(engine.save({
-      name: 'plain-condition',
-      nodes: [
-        { id: NodeId('flag'), type: 'source', config: { value: true } },
-        { id: NodeId('probe'), type: 'plain', config: {} },
-      ],
-      edges: [{ id: EdgeId('flag'), source: NodeId('flag'), target: NodeId('probe'), targetPort: 'condition' }],
-    }), /不存在的输入端口 condition/)
-
     const id = await engine.save({
       name: 'plain-context',
       nodes: [
-        { id: NodeId('gate'), type: 'branch', config: {} },
+        { id: NodeId('value'), type: 'source', config: { value: 7 } },
         { id: NodeId('probe'), type: 'plain', config: {} },
       ],
-      edges: [{ id: EdgeId('gate'), source: NodeId('gate'), sourcePort: 'true', target: NodeId('probe') }],
+      edges: [
+        { id: EdgeId('value'), kind: 'data', source: NodeId('value'), target: NodeId('probe') },
+        { id: EdgeId('order'), kind: 'exec', source: NodeId('value'), target: NodeId('probe') },
+      ],
     })
     const result = await engine.start(id).result
     const probe = result.nodes.find(record => record.nodeId === NodeId('probe'))
     assert.equal(probe?.status, 'completed')
+    // The execution edge supplies no input and does not appear among the connected ports.
     assert.deepEqual(probe?.outputs?.output, {
       connected: ['input'],
       invocationKey: `${result.runId}/probe`,
-      inputs: {},
+      inputs: { input: 7 },
     })
   })
-
-  it('execute 返回 skipped 时节点跳过且下游随之跳过', async () => {
+  it('不触发任何引脚的节点使其执行后继被跳过', async () => {
     const { engine } = await setup()
     const id = await engine.save({
       name: 'declined',
       nodes: [
         { id: NodeId('decline'), type: 'decline', config: {} },
-        { id: NodeId('sink'), type: 'pass', config: {} },
+        { id: NodeId('sink'), type: 'source', config: { value: 'unused' } },
       ],
-      edges: [{ id: EdgeId('edge'), source: NodeId('decline'), target: NodeId('sink') }],
+      edges: [{ id: EdgeId('edge'), kind: 'exec', source: NodeId('decline'), target: NodeId('sink') }],
     })
     const result = await engine.start(id).result
     assert.equal(result.status, 'completed')
-    assert.deepEqual(result.nodes.map(record => record.status), ['skipped', 'skipped'])
+    assert.deepEqual(result.nodes.map(record => record.status), ['completed', 'skipped'])
   })
-
-  it('condition 为 false 时等待节点直接跳过而不等待结果', { timeout: 1000 }, async () => {
+  it('被执行边跳过的等待节点不声明请求', { timeout: 1000 }, async () => {
     const { engine } = await setup()
     const id = await engine.save({
       name: 'gated-waiter',
       nodes: [
         { id: NodeId('flag'), type: 'source', config: { value: false } },
+        { id: NodeId('gate'), type: 'branch', config: {} },
         { id: NodeId('confirm'), type: 'waiter', config: {} },
       ],
-      edges: [{ id: EdgeId('flag'), source: NodeId('flag'), target: NodeId('confirm'), targetPort: 'condition' }],
+      edges: [
+        { id: EdgeId('flag'), kind: 'data', source: NodeId('flag'), target: NodeId('gate'), targetPort: 'condition' },
+        { id: EdgeId('true-edge'), kind: 'exec', source: NodeId('gate'), sourcePort: 'true', target: NodeId('confirm') },
+      ],
     })
     const result = await engine.start(id).result
+    const confirm = result.nodes.find(record => record.nodeId === NodeId('confirm'))
     assert.equal(result.status, 'completed')
-    assert.equal(result.nodes.find(record => record.nodeId === NodeId('confirm'))?.status, 'skipped')
+    assert.equal(confirm?.status, 'skipped')
+    assert.equal(confirm?.requests, undefined)
   })
-
-  it('实例覆盖输入端口时保留基类的 condition 端口', async () => {
+  it('实例声明的输入端口替换执行器声明的端口', async () => {
     const { engine } = await setup()
     const id = await engine.save({
       name: 'instance-inputs',
       nodes: [
-        { id: NodeId('flag'), type: 'source', config: { value: false } },
         { id: NodeId('value'), type: 'source', config: { value: 1 } },
         { id: NodeId('sink'), type: 'pass', config: {}, inputs: [{ name: 'input', type: 'number' }] },
       ],
       edges: [
-        { id: EdgeId('flag'), source: NodeId('flag'), target: NodeId('sink'), targetPort: 'condition' },
-        { id: EdgeId('value'), source: NodeId('value'), target: NodeId('sink') },
+        { id: EdgeId('value'), kind: 'data', source: NodeId('value'), target: NodeId('sink') },
       ],
     })
     const result = await engine.start(id).result
-    assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'completed')
   })
-
-  it('流程控制节点门控分支，可变输入节点合并选中结果', async () => {
+  it('branch 分叉执行流，merge 合并选中分支的数据', async () => {
     const { engine } = await setup()
     const id = await engine.save({
       name: 'branch-merge',
       nodes: [
         { id: NodeId('compare-left'), type: 'source', config: { value: 10 } },
         { id: NodeId('compare-right'), type: 'source', config: { value: 5 } },
-        { id: NodeId('branch'), type: 'greater', config: {} },
+        { id: NodeId('greater'), type: 'greater', config: {} },
+        { id: NodeId('gate'), type: 'branch', config: {} },
         { id: NodeId('left-value'), type: 'source', config: { value: 'left' } },
         { id: NodeId('right-value'), type: 'source', config: { value: 'right' } },
         { id: NodeId('left'), type: 'pass', config: {} },
@@ -540,46 +514,17 @@ describe('DagEngineProvider', () => {
         { id: NodeId('merge'), type: 'merge', config: {} },
       ],
       edges: [
-        {
-          id: EdgeId('compare-left'),
-          source: NodeId('compare-left'),
-          target: NodeId('branch'),
-          targetPort: 'left',
-        },
-        {
-          id: EdgeId('compare-right'),
-          source: NodeId('compare-right'),
-          target: NodeId('branch'),
-          targetPort: 'right',
-        },
-        { id: EdgeId('left-value'), source: NodeId('left-value'), target: NodeId('left') },
-        { id: EdgeId('right-value'), source: NodeId('right-value'), target: NodeId('right') },
-        {
-          id: EdgeId('left-condition'),
-          source: NodeId('branch'),
-          sourcePort: 'true',
-          target: NodeId('left'),
-          targetPort: 'condition',
-        },
-        {
-          id: EdgeId('right-condition'),
-          source: NodeId('branch'),
-          sourcePort: 'false',
-          target: NodeId('right'),
-          targetPort: 'condition',
-        },
-        {
-          id: EdgeId('left-merge'),
-          source: NodeId('left'),
-          target: NodeId('merge'),
-          targetPort: 'input1',
-        },
-        {
-          id: EdgeId('right-merge'),
-          source: NodeId('right'),
-          target: NodeId('merge'),
-          targetPort: 'input2',
-        },
+        { id: EdgeId('cl'), kind: 'data', source: NodeId('compare-left'), target: NodeId('greater'), targetPort: 'left' },
+        { id: EdgeId('cr'), kind: 'data', source: NodeId('compare-right'), target: NodeId('greater'), targetPort: 'right' },
+        { id: EdgeId('gate-in'), kind: 'data', source: NodeId('greater'), sourcePort: 'result', target: NodeId('gate'), targetPort: 'condition' },
+        { id: EdgeId('lv'), kind: 'data', source: NodeId('left-value'), target: NodeId('left') },
+        { id: EdgeId('rv'), kind: 'data', source: NodeId('right-value'), target: NodeId('right') },
+        { id: EdgeId('gate-left'), kind: 'exec', source: NodeId('gate'), sourcePort: 'true', target: NodeId('left') },
+        { id: EdgeId('gate-right'), kind: 'exec', source: NodeId('gate'), sourcePort: 'false', target: NodeId('right') },
+        { id: EdgeId('lm'), kind: 'data', source: NodeId('left'), target: NodeId('merge'), targetPort: 'input1' },
+        { id: EdgeId('rm'), kind: 'data', source: NodeId('right'), target: NodeId('merge'), targetPort: 'input2' },
+        { id: EdgeId('lme'), kind: 'exec', source: NodeId('left'), target: NodeId('merge') },
+        { id: EdgeId('rme'), kind: 'exec', source: NodeId('right'), target: NodeId('merge') },
       ],
     })
 
@@ -588,6 +533,8 @@ describe('DagEngineProvider', () => {
     assert.equal(result.status, 'completed', JSON.stringify(result))
     assert.equal(result.nodes.find(record => record.nodeId === NodeId('left'))?.status, 'completed')
     assert.equal(result.nodes.find(record => record.nodeId === NodeId('right'))?.status, 'skipped')
+    // merge is the OR join: one dead inbound execution edge does not skip it.
+    assert.equal(result.nodes.find(record => record.nodeId === NodeId('merge'))?.status, 'completed')
     assert.deepEqual(
       result.nodes.find(record => record.nodeId === NodeId('merge'))?.outputs,
       { output: 'left' },
@@ -597,7 +544,7 @@ describe('DagEngineProvider', () => {
   it('可变输入节点拒绝不同类型、过少输入和不同型输出', async () => {
     const { engine } = await setup()
     const base: DagWorkflowDefinition = {
-      name: 'invalid-coalesce',
+      name: 'invalid-merge',
       nodes: [{
         id: NodeId('merge'),
         type: 'merge',
@@ -623,36 +570,38 @@ describe('DagEngineProvider', () => {
     await assert.rejects(engine.save(base), /输出端口必须与输入端口使用相同类型/)
   })
 
-  it('仅部分输入可用时节点和工作流失败', async () => {
+  it('save 拒绝源可能被跳过而目标仍会执行的数据边', async () => {
     const { engine } = await setup()
-    const id = await engine.save({
-      name: 'partial-input',
+    const starved: DagWorkflowDefinition = {
+      name: 'starved-input',
       nodes: [
-        { id: NodeId('branch'), type: 'branch', config: {} },
+        { id: NodeId('flag'), type: 'source', config: { value: true } },
+        { id: NodeId('gate'), type: 'branch', config: {} },
+        { id: NodeId('left'), type: 'source', config: { value: 1 } },
         { id: NodeId('source'), type: 'source', config: { value: 2 } },
         { id: NodeId('binary'), type: 'binary', config: {} },
       ],
       edges: [
-        {
-          id: EdgeId('left'),
-          source: NodeId('branch'),
-          sourcePort: 'true',
-          target: NodeId('binary'),
-          targetPort: 'left',
-        },
-        {
-          id: EdgeId('right'),
-          source: NodeId('source'),
-          target: NodeId('binary'),
-          targetPort: 'right',
-        },
+        { id: EdgeId('flag'), kind: 'data', source: NodeId('flag'), target: NodeId('gate'), targetPort: 'condition' },
+        { id: EdgeId('gate-left'), kind: 'exec', source: NodeId('gate'), sourcePort: 'true', target: NodeId('left') },
+        { id: EdgeId('left'), kind: 'data', source: NodeId('left'), target: NodeId('binary'), targetPort: 'left' },
+        { id: EdgeId('right'), kind: 'data', source: NodeId('source'), target: NodeId('binary'), targetPort: 'right' },
       ],
+    }
+    await assert.rejects(engine.save(starved), /可能被跳过，而目标节点 binary 仍会执行/)
+
+    // Gating the consumer behind the same pin makes the wiring sound.
+    starved.edges.push({
+      id: EdgeId('gate-binary'),
+      kind: 'exec',
+      source: NodeId('gate'),
+      sourcePort: 'true',
+      target: NodeId('binary'),
     })
-
+    const id = await engine.save(starved)
     const result = await engine.start(id).result
-
-    assert.equal(result.status, 'failed')
-    assert.match(result.error ?? '', /缺少输入端口: left/)
+    assert.equal(result.status, 'completed', JSON.stringify(result))
+    assert.deepEqual(result.nodes.find(record => record.nodeId === NodeId('binary'))?.outputs, { output: [1, 2] })
   })
 
   it('等待结果的节点保持 running，取消运行时结束等待', { timeout: 1000 }, async () => {

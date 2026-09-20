@@ -7,9 +7,10 @@ import type {
   DagNodeDefinition, JsonValue, NodeExecutionContext, NodeExecutionResult, NodeRunInfo, NodeRunRecord,
   WorkflowNodeExecutor, WorkflowRunStatus,
 } from './shared/types.ts'
-import { toJsonOutputs, toJsonValue } from './shared/json.ts'
+import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { messageOf } from './shared/errors.ts'
-import { resolveInputPorts } from './shared/graph.ts'
+import { execOutputPins, execSourcePin, inboundEdges, resolveInputPorts, type InboundEdges } from './shared/graph.ts'
+import { isAnyJoin } from './flow-nodes.ts'
 import { topologicalSort } from './validation.ts'
 import { cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
 
@@ -34,7 +35,7 @@ export interface RunHost {
 
 /** 节点的结束状态及写入其记录的输出和错误。 */
 type NodeEnd =
-  | { status: 'completed' | 'skipped'; outputs: Record<string, unknown> }
+  | { status: 'completed'; outputs: Record<string, unknown>; fired: readonly string[] }
   | { status: 'cancelled' }
   | { status: 'failed'; error: string; outputs?: Record<string, unknown> }
 
@@ -46,11 +47,11 @@ interface NodeTask {
   info: NodeRunInfo
 }
 
-const SKIPPED: NodeEnd = { status: 'skipped', outputs: {} }
-
 /** 执行一个运行中未结束的节点。每个节点的开始和结束状态都在写入运行记录后才继续。 */
 export class RunExecutor {
   private readonly signal: AbortSignal
+  /** 本次运行定义的入边索引；定义在运行期间不变，因此只建一次。 */
+  private readonly inbound: InboundEdges
 
   /**
    * @param state - 已设置执行器和新的 AbortController 的运行状态。
@@ -58,6 +59,7 @@ export class RunExecutor {
    */
   constructor(private readonly state: RunState, private readonly host: RunHost) {
     this.signal = state.abortController.signal
+    this.inbound = inboundEdges(state.definition.edges)
   }
 
   /**
@@ -73,7 +75,12 @@ export class RunExecutor {
         if (!signal.aborted) await this.checkPause()
         if (signal.aborted) break
 
-        await Promise.all(pending.map(node => this.executeNode(node)))
+        const runnable: DagNodeDefinition[] = []
+        for (const node of pending) {
+          if (!this.gateSkipped(node)) runnable.push(node)
+        }
+        if (runnable.length < pending.length) await this.host.checkpoint(state)
+        await Promise.all(runnable.map(node => this.executeNode(node)))
         const failed = pending
           .map(node => nodeState(state, node.id).record)
           .filter(record => record.status === 'failed')
@@ -138,10 +145,53 @@ export class RunExecutor {
     }
   }
 
-  private async executeNode(node: DagNodeDefinition): Promise<void> {
-    if (this.signal.aborted) return
+  /**
+   * 按执行边决定节点是否被跳过，跳过时就地结束其记录。
+   *
+   * 源节点未完成或未触发该引脚时执行边失效。普通节点是 AND 连接，任一入边失效即跳过；
+   * OR 连接点（{@link isAnyJoin}）只在全部入边失效时跳过。跳过的节点不触发任何引脚，
+   * 因此跳过沿执行边传递。
+   * @param node - 本层级中待执行的节点。
+   * @returns 节点因执行边失效而跳过时为 true。
+   */
+  private gateSkipped(node: DagNodeDefinition): boolean {
+    const inbound = this.inbound.exec.get(node.id) ?? []
+    if (inbound.length === 0) return false
+    const live = inbound.filter((edge) => {
+      const source = nodeState(this.state, edge.source).record
+      return source.status === 'completed' && (source.fired ?? []).includes(execSourcePin(edge))
+    })
+    const dead = isAnyJoin(this.executorFor(node))
+      ? live.length === 0
+      : live.length < inbound.length
+    if (!dead) return false
+    const record = nodeState(this.state, node.id).record
+    record.status = 'skipped'
+    record.startedAt = Date.now()
+    record.completedAt = record.startedAt
+    this.host.emit('dag/node-end', runInfo(this.state), {
+      nodeId: node.id,
+      nodeType: node.type,
+      label: node.label ?? node.type,
+      status: 'skipped',
+    })
+    return true
+  }
+
+  /**
+   * 运行状态中该节点的执行器。
+   * @param node - 定义中的节点。
+   * @throws 运行状态缺少该节点的执行器时；执行器由 `resolveExecutors` 为每个节点填充，缺失即为缺陷。
+   */
+  private executorFor(node: DagNodeDefinition): WorkflowNodeExecutor {
     const executor = this.state.executors.get(node.id)
     if (executor === undefined) throw new Error(`运行状态缺少节点 ${node.id} 的执行器`)
+    return executor
+  }
+
+  private async executeNode(node: DagNodeDefinition): Promise<void> {
+    if (this.signal.aborted) return
+    const executor = this.executorFor(node)
     const record = nodeState(this.state, node.id).record
     const inputs = this.collectInputs(node)
     record.attempts += 1
@@ -160,18 +210,10 @@ export class RunExecutor {
     await this.host.checkpoint(this.state)
   }
 
-  /** 依次经过 preflight 和输入检查后调用执行器。 */
+  /** 通过输入检查后调用执行器。 */
   private async runNode(task: NodeTask, inputs: Record<string, unknown>): Promise<NodeEnd> {
     const { node, executor } = task
     const context = this.nodeContext(task, inputs)
-
-    let preflight: NodeExecutionResult | undefined
-    try {
-      preflight = executor.preflight?.(context)
-    } catch (error: unknown) {
-      return { status: 'failed', error: messageOf(error) }
-    }
-    if (preflight !== undefined) return resultEnd(node, executor, preflight)
 
     const gate = this.inputGate(node, executor, inputs)
     if (gate !== undefined) return gate
@@ -191,9 +233,7 @@ export class RunExecutor {
       runId: state.runId,
       config: node.config,
       inputs,
-      connected: new Set(state.definition.edges
-        .filter(edge => edge.target === node.id)
-        .map(edge => edge.targetPort ?? 'input')),
+      connected: new Set((this.inbound.data.get(node.id) ?? []).map(edge => edge.targetPort ?? 'input')),
       invocationKey: `${state.runId}/${node.id}`,
       notepad: {
         get value() {
@@ -213,8 +253,14 @@ export class RunExecutor {
   }
 
   /**
-   * 按必需输入端口的提供情况决定节点是否执行。
-   * @returns 未提供任何业务输入或缺失输入的上游被跳过时为 skipped，其余缺失为 failed；可执行时为 undefined。
+   * 检查必需输入端口都已送达。
+   *
+   * 节点被调用时，其必需输入按定义就应存在；缺失意味着工作流接线有误或上游未兑现输出，两者都是错误。
+   * 跳过只由失效的执行边产生，不由缺少数据产生。
+   * @param node - 待执行的节点。
+   * @param executor - 该节点的执行器。
+   * @param inputs - 已收集到的输入端口数据。
+   * @returns 缺少必需输入时为 failed；可执行时为 undefined。
    */
   private inputGate(
     node: DagNodeDefinition,
@@ -222,24 +268,21 @@ export class RunExecutor {
     inputs: Record<string, unknown>,
   ): NodeEnd | undefined {
     const inputPorts = resolveInputPorts(node.inputs, executor.inputs ?? [])
-    const required = inputPorts.filter(port => port.required !== false)
-    if (required.length === 0) return undefined
-    const supplied = inputPorts.some(port => port.role === undefined && Object.hasOwn(inputs, port.name))
-    if (!supplied) return SKIPPED
-    const missing = required.filter(port => !Object.hasOwn(inputs, port.name)).map(port => port.name)
+    const missing = inputPorts
+      .filter(port => port.required !== false && !Object.hasOwn(inputs, port.name))
+      .map((port) => {
+        const edge = (this.inbound.data.get(node.id) ?? [])
+          .find(item => (item.targetPort ?? 'input') === port.name)
+        return edge === undefined ? port.name : `${port.name}（应由 ${edge.source} 产生）`
+      })
     if (missing.length === 0) return undefined
-    const skippedDependency = this.state.definition.edges.some(edge =>
-      edge.target === node.id
-      && missing.includes(edge.targetPort ?? 'input')
-      && nodeState(this.state, edge.source).record.status === 'skipped')
-    return skippedDependency ? SKIPPED : { status: 'failed', error: `缺少输入端口: ${missing.join(', ')}` }
+    return { status: 'failed', error: `缺少输入端口: ${missing.join(', ')}` }
   }
 
   /** 收集上游输出到当前节点的输入端口。 */
   private collectInputs(node: DagNodeDefinition): Record<string, unknown> {
     const inputs: Record<string, unknown> = {}
-    for (const edge of this.state.definition.edges) {
-      if (edge.target !== node.id) continue
+    for (const edge of this.inbound.data.get(node.id) ?? []) {
       const outputs = nodeState(this.state, edge.source).record.outputs
       const sourcePort = edge.sourcePort ?? 'output'
       if (outputs !== undefined && Object.hasOwn(outputs, sourcePort)) {
@@ -251,6 +294,7 @@ export class RunExecutor {
 
   private endNode({ record, info }: NodeTask, end: NodeEnd): void {
     record.status = end.status
+    if (end.status === 'completed') record.fired = [...end.fired]
     if (end.status === 'failed') record.error = end.error
     if (end.status === 'cancelled' && this.signal.reason !== undefined) record.error = String(this.signal.reason)
     if ('outputs' in end && end.outputs !== undefined) record.outputs = structuredClone(end.outputs)
@@ -264,11 +308,21 @@ function resultEnd(node: DagNodeDefinition, executor: WorkflowNodeExecutor, resu
   const label = `节点 ${node.id} 的输出`
   switch (result.status) {
     case 'completed': {
-      const declared = new Set((node.outputs ?? executor.outputs ?? []).map(port => port.name))
-      const undeclared = Object.keys(result.outputs).find(name => !declared.has(name))
+      const declared = (node.outputs ?? executor.outputs ?? []).map(port => port.name)
+      const undeclared = Object.keys(result.outputs).find(name => !declared.includes(name))
       if (undeclared !== undefined) return { status: 'failed', error: `节点 ${node.id} 返回未声明的输出端口 ${undeclared}` }
+      const unproduced = declared.filter(name => result.outputs[name] === undefined)
+      if (unproduced.length > 0) {
+        return { status: 'failed', error: `节点 ${node.id} 完成时未产生输出端口 ${unproduced.join(', ')}；无内容时写 null` }
+      }
+      const pins = execOutputPins(executor)
+      const fired = result.next ?? pins
+      const unknown = fired.find(pin => !pins.includes(pin))
+      if (unknown !== undefined) {
+        return { status: 'failed', error: `节点 ${node.id} 触发未声明的执行输出引脚 ${unknown}` }
+      }
       try {
-        return { status: 'completed', outputs: toJsonOutputs(result.outputs, label) }
+        return { status: 'completed', outputs: toJsonObject(result.outputs, label), fired: [...fired] }
       } catch (error: unknown) {
         return { status: 'failed', error: messageOf(error) }
       }
@@ -276,13 +330,11 @@ function resultEnd(node: DagNodeDefinition, executor: WorkflowNodeExecutor, resu
     case 'failed': {
       if (result.outputs === undefined) return { status: 'failed', error: result.error }
       try {
-        return { status: 'failed', error: result.error, outputs: toJsonOutputs(result.outputs, label) }
+        return { status: 'failed', error: result.error, outputs: toJsonObject(result.outputs, label) }
       } catch (error: unknown) {
         return { status: 'failed', error: `${result.error}（诊断输出已丢弃: ${messageOf(error)}）` }
       }
     }
-    case 'skipped':
-      return SKIPPED
     default:
       return assertNever(result)
   }

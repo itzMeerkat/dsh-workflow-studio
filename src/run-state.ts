@@ -101,6 +101,8 @@ export function toRunRecord(state: RunState): WorkflowRunRecord {
 
 /**
  * 运行列表中的一行；已结束运行没有待送达请求。
+ *
+ * `skippedNodes` 使一次悄悄走了分支的运行与全部执行的运行在列表中可区分。
  * @param record - 运行记录。
  */
 export function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
@@ -114,6 +116,7 @@ export function summaryOfRecord(record: WorkflowRunRecord): WorkflowRunSummary {
     name: record.definition.name,
     status: record.status,
     pendingRequests,
+    skippedNodes: record.nodes.filter(node => node.status === 'skipped').length,
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
     ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),

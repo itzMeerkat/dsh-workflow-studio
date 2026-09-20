@@ -3,7 +3,8 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { createContext, useContext } from 'react'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
-import { nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode } from './graph-model.ts'
+import { EXEC_RUN_PIN, execOutputPins } from '../shared/graph.ts'
+import { handleId, nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode } from './graph-model.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 /** Editor callbacks the node cards call. */
@@ -33,6 +34,12 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>
         )}
       </div>
       <code>{data.definition.type}</code>
+      <div className={css.execPins}>
+        <ExecPin pin={EXEC_RUN_PIN} side="input" />
+        <div className={css.execPinGroup}>
+          {execOutputPins(data.catalog ?? {}).map(pin => <ExecPin key={pin} pin={pin} side="output" />)}
+        </div>
+      </div>
       <div className={css.ports}>
         <div>{inputs.map(port => <PortRow key={port.name} port={port} side="input" />)}</div>
         <div>{outputs.map(port => <PortRow key={port.name} port={port} side="output" />)}</div>
@@ -65,21 +72,31 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>
   )
 }
 
+function ExecPin({ pin, side }: { readonly pin: string; readonly side: 'input' | 'output' }) {
+  const isInput = side === 'input'
+  return (
+    <div className={`${css.execPin} ${isInput ? css.execPinInput : css.execPinOutput}`}>
+      <Handle
+        type={isInput ? 'target' : 'source'}
+        position={isInput ? Position.Left : Position.Right}
+        id={handleId({ kind: 'exec', name: pin })}
+      />
+      <span>{pin}</span>
+    </div>
+  )
+}
+
 function PortRow({ port, side }: { readonly port: PortDefinition; readonly side: 'input' | 'output' }) {
   const isInput = side === 'input'
   return (
     <div
-      className={[
-        css.port,
-        isInput ? css.portInput : css.portOutput,
-        port.role === 'condition' ? css.conditionPort : '',
-      ].join(' ')}
+      className={`${css.port} ${isInput ? css.portInput : css.portOutput}`}
       title={port.description}
     >
       <Handle
         type={isInput ? 'target' : 'source'}
         position={isInput ? Position.Left : Position.Right}
-        id={port.name}
+        id={handleId({ kind: 'data', name: port.name })}
       />
       <span>
         {port.name}

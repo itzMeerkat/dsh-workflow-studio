@@ -621,26 +621,11 @@
   font-weight: 600;
 }
 
-.conditionPort {
-  margin-top: 5px;
-  padding-top: 5px;
-  border-top: 0.5px dashed var(--dsw-alias-border-l3);
-  color: #7a4e12;
-}
-
-.conditionPort small {
-  color: #9a651d;
-}
-
 .canvasNode :global(.react-flow__handle) {
   width: 8px;
   height: 8px;
   border: 2px solid var(--dsw-alias-bg-layer-1);
   background: #3978bd;
-}
-
-.conditionPort :global(.react-flow__handle) {
-  background: #c47a16;
 }
 
 .portInput :global(.react-flow__handle-left) {
@@ -649,6 +634,62 @@
 
 .portOutput :global(.react-flow__handle-right) {
   right: -13px;
+}
+
+.execPinGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.execPins {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.execPin {
+  display: flex;
+  position: relative;
+  align-items: center;
+  color: #4a5a86;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.execPinInput {
+  padding-left: 3px;
+}
+
+.execPinOutput {
+  padding-right: 3px;
+}
+
+.execPin :global(.react-flow__handle) {
+  border-radius: 2px;
+  background: #4a5a86;
+}
+
+.execPinInput :global(.react-flow__handle-left) {
+  left: -13px;
+}
+
+.execPinOutput :global(.react-flow__handle-right) {
+  right: -13px;
+}
+
+.canvas :global(.workflow-exec-edge) :global(.react-flow__edge-path) {
+  stroke: #4a5a86;
+  stroke-width: 2.5;
+}
+
+.canvas :global(.workflow-exec-edge) :global(.react-flow__arrowhead) polyline {
+  stroke: #4a5a86;
+  fill: #4a5a86;
 }
 
 .nodeControls,

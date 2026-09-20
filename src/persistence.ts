@@ -13,7 +13,7 @@ import { workflowDefinitionSchema, workflowRunRecordSchema } from './shared/work
 /** 工作流定义 Domain：`workflow_studio/workflows` 表中每个 Workflow ID 一条记录。 */
 export const workflowStudioDomainSpec = defineDomain({
   name: 'workflow_studio',
-  version: 1,
+  version: 2,
   layout: 'per-record',
   tables: {
     workflows: domainTable<WorkflowId, DagWorkflowDefinition>(workflowDefinitionSchema),
@@ -26,7 +26,7 @@ export const workflowStudioDomainSpec = defineDomain({
  */
 export const workflowRunsDomainSpec = defineDomain({
   name: 'workflow_studio_runs',
-  version: 1,
+  version: 2,
   layout: 'per-record',
   tables: {
     runs: domainTable<RunId, WorkflowRunRecord>(workflowRunRecordSchema),

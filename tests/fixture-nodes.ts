@@ -21,7 +21,7 @@ export class ValueNode extends WorkflowNode<{ output: unknown }> {
   ]
 
   protected run({ config }: NodeExecutionContext): { output: unknown } {
-    return { output: config.value }
+    return { output: config.value ?? null }
   }
 }
 
@@ -48,41 +48,18 @@ export class SumNode extends WorkflowNode<{ result: number }> {
   }
 }
 
-/** `greater`：流程控制节点，`left > right` 时输出 `true`，否则输出 `false`。 */
-export class GreaterNode extends WorkflowNode<{ true: true } | { false: true }> {
+/** `greater`：输出 `left > right` 的布尔结果，供引擎的 branch 节点分叉执行流。 */
+export class GreaterNode extends WorkflowNode<{ result: boolean }> {
   readonly type = 'greater'
   readonly label = 'Greater'
-  readonly description = 'Signals whether left is greater than right'
-  protected override readonly conditional = false
+  readonly description = 'Reports whether left is greater than right'
   protected readonly ports: WorkflowNodePorts = {
     inputs: [{ name: 'left', type: 'any' }, { name: 'right', type: 'any' }],
-    outputs: [{ name: 'true', type: 'boolean' }, { name: 'false', type: 'boolean' }],
+    outputs: [{ name: 'result', type: 'boolean' }],
   }
 
-  protected run({ inputs }: NodeExecutionContext): { true: true } | { false: true } {
-    return (inputs.left as number) > (inputs.right as number) ? { true: true } : { false: true }
-  }
-}
-
-/** `merge`：可变输入的流程控制节点，输出唯一的非 null 输入。 */
-export class MergeNode extends WorkflowNode<{ output: unknown }> {
-  readonly type = 'merge'
-  readonly label = 'Merge'
-  readonly description = 'Outputs the single non-null input'
-  protected override readonly conditional = false
-  override readonly variadicInputs = { min: 2, outputType: 'same' as const }
-  protected readonly ports: WorkflowNodePorts = {
-    inputs: [
-      { name: 'input1', type: 'any', required: false },
-      { name: 'input2', type: 'any', required: false },
-    ],
-    outputs: [{ name: 'output', type: 'any' }],
-  }
-
-  protected run({ inputs }: NodeExecutionContext): { output: unknown } {
-    const values = Object.values(inputs).filter(value => value !== null)
-    if (values.length !== 1) throw new NodeFailure(`merge 要求恰好一个非 null 输入，实际为 ${values.length} 个`)
-    return { output: values[0] }
+  protected run({ inputs }: NodeExecutionContext): { result: boolean } {
+    return { result: (inputs.left as number) > (inputs.right as number) }
   }
 }
 
@@ -107,7 +84,7 @@ export class AskNode extends WorkflowNode<{ answer: string }> {
 
 /** 所有测试用节点的新实例。 */
 export function createFixtureNodes(): WorkflowNodeExecutor[] {
-  return [new ValueNode(), new SumNode(), new GreaterNode(), new MergeNode(), new AskNode()]
+  return [new ValueNode(), new SumNode(), new GreaterNode(), new AskNode()]
 }
 
 /**

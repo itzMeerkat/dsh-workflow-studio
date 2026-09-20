@@ -1,9 +1,9 @@
 /**
  * 工作流节点基类。
  *
- * {@link WorkflowNode} 为节点作者实现 {@link WorkflowNodeExecutor}：子类声明身份、业务端口和
- * {@link WorkflowNode.run}，基类负责 condition 门控、剥离 condition 输入以及把
- * {@link NodeFailure} 转换为失败结果。注册表按字段接受执行器，不要求继承本类。
+ * {@link WorkflowNode} 为节点作者实现 {@link WorkflowNodeExecutor}：子类声明身份、端口和
+ * {@link WorkflowNode.run}，基类负责把 {@link NodeFailure} 转换为失败结果。
+ * 注册表按字段接受执行器，不要求继承本类。
  * @module dsh-workflow-studio
  */
 
@@ -14,15 +14,6 @@ import type {
   PortDefinition,
   WorkflowNodeExecutor,
 } from './shared/types.ts'
-
-/** {@link WorkflowNode} 为条件节点追加的门控输入端口。 */
-export const CONDITION_PORT: Readonly<PortDefinition> = {
-  name: 'condition',
-  type: 'boolean',
-  description: '仅在输入为 true 时执行节点',
-  required: false,
-  role: 'condition',
-}
 
 /** 节点在 {@link WorkflowNode.run} 中抛出的预期业务失败。 */
 export class NodeFailure extends Error {
@@ -36,13 +27,19 @@ export class NodeFailure extends Error {
   }
 }
 
-/** {@link WorkflowNode} 子类声明的业务端口，不含 condition。 */
+/** {@link WorkflowNode} 子类声明的端口。 */
 export interface WorkflowNodePorts {
   readonly inputs: readonly PortDefinition[]
   readonly outputs: readonly PortDefinition[]
 }
 
-function toFailure(error: unknown): NodeExecutionResult {
+/**
+ * 把预期业务失败转换为失败结果，供自行实现 {@link WorkflowNodeExecutor.execute} 的节点复用。
+ * @param error - 捕获到的错误。
+ * @returns 对应的失败结果。
+ * @throws 错误不是 {@link NodeFailure} 时原样抛出，因为那是缺陷而不是业务失败。
+ */
+export function toFailureResult(error: unknown): NodeExecutionResult {
   if (!(error instanceof NodeFailure)) throw error
   return error.outputs === undefined
     ? { status: 'failed', error: error.message }
@@ -52,9 +49,8 @@ function toFailure(error: unknown): NodeExecutionResult {
 /**
  * 节点作者的抽象基类。
  *
- * 条件节点（默认）的输入端口为业务端口加 {@link CONDITION_PORT}。condition 端口有入边时：
- * 值为 true 执行节点，值为 false 或未产生值时跳过节点，其他值使节点失败；无入边时不影响执行。
- * 产生分支信号的流程控制节点将 {@link conditional} 设为 false，不获得 condition 端口。
+ * 节点不能自行跳过：条件不成立时同样以 completed 结束，并为每个已声明的输出端口写值（无内容时写 null）。
+ * 节点是否执行只由执行边决定。
  */
 export abstract class WorkflowNode<Outputs extends Record<string, unknown> = Record<string, unknown>>
 implements WorkflowNodeExecutor {
@@ -62,46 +58,33 @@ implements WorkflowNodeExecutor {
   abstract readonly type: string
   abstract readonly label: string
   abstract readonly description: string
-  /** 业务输入与输出端口；条件节点声明名为 condition 的输入时，注册表因端口重名拒绝注册。 */
+  /** 输入与输出端口。 */
   protected abstract readonly ports: WorkflowNodePorts
   declare readonly controls?: readonly NodeControlDefinition[]
+  declare readonly execOutputs?: readonly string[]
   declare readonly variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
   declare readonly validateSignal?: NonNullable<WorkflowNodeExecutor['validateSignal']>
-  /** 为 false 时节点不获得 condition 端口，也不做门控。 */
-  protected readonly conditional: boolean = true
 
   /**
-   * 执行节点业务。`context.inputs` 不含 condition。
+   * 执行节点业务。
    * @param context - 引擎提供的执行上下文。
    * @returns 输出端口数据；预期失败时抛出 {@link NodeFailure}。
    */
   protected abstract run(context: NodeExecutionContext): Outputs | Promise<Outputs>
 
   get inputs(): PortDefinition[] {
-    return this.conditional ? [...this.ports.inputs, CONDITION_PORT] : [...this.ports.inputs]
+    return [...this.ports.inputs]
   }
 
   get outputs(): PortDefinition[] {
     return [...this.ports.outputs]
   }
 
-  preflight(context: NodeExecutionContext): NodeExecutionResult | undefined {
-    if (!this.conditional || !context.connected.has(CONDITION_PORT.name)) return undefined
-    if (!Object.hasOwn(context.inputs, CONDITION_PORT.name)) return { status: 'skipped' }
-    const condition = context.inputs[CONDITION_PORT.name]
-    if (condition === true) return undefined
-    if (condition === false) return { status: 'skipped' }
-    return { status: 'failed', error: 'condition 输入必须为布尔值' }
-  }
-
   async execute(context: NodeExecutionContext): Promise<NodeExecutionResult> {
-    const inputs = this.conditional
-      ? Object.fromEntries(Object.entries(context.inputs).filter(([name]) => name !== CONDITION_PORT.name))
-      : context.inputs
     try {
-      return { status: 'completed', outputs: await this.run({ ...context, inputs }) }
+      return { status: 'completed', outputs: await this.run(context) }
     } catch (error: unknown) {
-      return toFailure(error)
+      return toFailureResult(error)
     }
   }
 }

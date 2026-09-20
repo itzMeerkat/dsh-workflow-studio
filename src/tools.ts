@@ -30,7 +30,10 @@ export function registerWorkflowTools(ctx: Context): void {
       edges: {
         type: 'array',
         required: true,
-        description: '边列表。每条边包含 id, source, target, sourcePort?, targetPort?',
+        description: '边列表。每条边包含 id, kind, source, target, sourcePort?, targetPort?。'
+          + 'kind 为 "data" 时按端口传递数据，sourcePort/targetPort 默认为 "output"/"input"；'
+          + 'kind 为 "exec" 时只控制执行顺序，目标节点在源节点完成后才执行，源节点未完成则目标节点被跳过，'
+          + 'sourcePort/targetPort 默认为 "then"/"run"。',
         items: { type: 'json' },
       },
     },

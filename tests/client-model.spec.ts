@@ -31,7 +31,6 @@ describe('workflow editor model', () => {
           name: 'value',
           type: 'number',
           required: false,
-          role: 'condition',
           display: 'value',
         }],
       }],
@@ -48,7 +47,6 @@ describe('workflow editor model', () => {
       name: 'value',
       type: 'number',
       required: false,
-      role: 'condition',
       display: 'value',
     })
   })
@@ -75,6 +73,7 @@ describe('workflow editor model', () => {
         label: 'Send email',
         description: 'Deliver one message',
         sourcePlugin: 'dsh-mail-workflow',
+        execOutputs: ['then'],
         inputs: [],
         outputs: [],
         controls: [],
@@ -84,6 +83,7 @@ describe('workflow editor model', () => {
         label: 'Lookup user',
         description: 'Resolve one account',
         sourcePlugin: 'dsh-directory-workflow',
+        execOutputs: ['then'],
         inputs: [],
         outputs: [],
         controls: [],
@@ -116,6 +116,7 @@ describe('workflow editor model', () => {
       label: 'Worker',
       description: 'Runs work',
       sourcePlugin: 'test',
+      execOutputs: ['then'],
       inputs: [],
       outputs: [],
       controls: [{
@@ -147,35 +148,17 @@ describe('workflow editor model', () => {
       nodes: [
         { id: 'left', type: 'input', config: {} },
         { id: 'right', type: 'input', config: {} },
-        { id: 'branch', type: 'if', config: {} },
+        { id: 'branch', type: 'branch', config: {} },
         { id: 'accepted', type: 'output', config: {} },
         { id: 'rejected', type: 'output', config: {} },
       ],
       edges: [
-        { id: 'left-branch', source: 'left', target: 'branch', targetPort: 'left' },
-        { id: 'left-accepted', source: 'left', target: 'accepted', targetPort: 'value' },
-        { id: 'right-branch', source: 'right', target: 'branch', targetPort: 'right' },
-        {
-          id: 'accepted-data',
-          source: 'branch',
-          sourcePort: 'true',
-          target: 'accepted',
-          targetPort: 'value',
-        },
-        {
-          id: 'accepted-condition',
-          source: 'branch',
-          sourcePort: 'true',
-          target: 'accepted',
-          targetPort: 'condition',
-        },
-        {
-          id: 'rejected-condition',
-          source: 'branch',
-          sourcePort: 'false',
-          target: 'rejected',
-          targetPort: 'condition',
-        },
+        { id: 'left-branch', kind: 'data', source: 'left', target: 'branch', targetPort: 'left' },
+        { id: 'left-accepted', kind: 'data', source: 'left', target: 'accepted', targetPort: 'value' },
+        { id: 'right-branch', kind: 'data', source: 'right', target: 'branch', targetPort: 'right' },
+        { id: 'accepted-data', kind: 'data', source: 'branch', sourcePort: 'true', target: 'accepted', targetPort: 'value' },
+        { id: 'accepted-exec', kind: 'exec', source: 'branch', sourcePort: 'true', target: 'accepted' },
+        { id: 'rejected-exec', kind: 'exec', source: 'branch', sourcePort: 'false', target: 'rejected' },
       ],
     }))
 
@@ -187,7 +170,7 @@ describe('workflow editor model', () => {
       plan.dependencies.map(dependency => [
         dependency.source.id,
         dependency.target.id,
-        dependency.conditionSourcePort,
+        dependency.execSourcePin,
       ]),
       [
         ['left', 'branch', undefined],
@@ -201,7 +184,7 @@ describe('workflow editor model', () => {
       reduceExecutionDependencies(plan).map(dependency => [
         dependency.source.id,
         dependency.target.id,
-        dependency.conditionSourcePort,
+        dependency.execSourcePin,
       ]),
       [
         ['left', 'branch', undefined],
@@ -222,13 +205,52 @@ describe('workflow editor model', () => {
         { id: 'b', type: 'output', config: {} },
       ],
       edges: [
-        { id: 'a-b', source: 'a', target: 'b' },
-        { id: 'b-a', source: 'b', target: 'a' },
+        { id: 'a-b', kind: 'data', source: 'a', target: 'b' },
+        { id: 'b-a', kind: 'data', source: 'b', target: 'a' },
       ],
     }))
 
     assert.deepEqual(plan.stages, [])
     assert.deepEqual(plan.cyclicNodeIds, ['a', 'b'])
     assert.deepEqual(reduceExecutionDependencies(plan), plan.dependencies)
+  })
+
+  it('keeps an execution dependency a data path already implies', () => {
+    const plan = createExecutionPlan(workflowDefinitionSchema.parse({
+      name: 'redundant-exec',
+      nodes: [
+        { id: 'a', type: 'input', config: {} },
+        { id: 'b', type: 'output', config: {} },
+        { id: 'c', type: 'output', config: {} },
+      ],
+      edges: [
+        { id: 'a-b', kind: 'data', source: 'a', target: 'b' },
+        { id: 'b-c', kind: 'data', source: 'b', target: 'c' },
+        { id: 'a-c-data', kind: 'data', source: 'a', target: 'c' },
+      ],
+    }))
+    // The a -> c data dependency is implied by a -> b -> c, so reduction drops it.
+    assert.deepEqual(
+      reduceExecutionDependencies(plan).map(item => [item.source.id, item.target.id]),
+      [['a', 'b'], ['b', 'c']],
+    )
+
+    const execPlan = createExecutionPlan(workflowDefinitionSchema.parse({
+      name: 'redundant-exec',
+      nodes: [
+        { id: 'a', type: 'input', config: {} },
+        { id: 'b', type: 'output', config: {} },
+        { id: 'c', type: 'output', config: {} },
+      ],
+      edges: [
+        { id: 'a-b', kind: 'data', source: 'a', target: 'b' },
+        { id: 'b-c', kind: 'data', source: 'b', target: 'c' },
+        { id: 'a-c-exec', kind: 'exec', source: 'a', target: 'c' },
+      ],
+    }))
+    assert.deepEqual(
+      reduceExecutionDependencies(execPlan).map(item => [item.source.id, item.target.id]),
+      [['a', 'b'], ['b', 'c'], ['a', 'c']],
+    )
   })
 })

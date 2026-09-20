@@ -67,8 +67,8 @@ describe('WorkflowStudioController', () => {
         { id: 'add', type: 'sum', config: { offset: 0 } },
       ],
       edges: [
-        { id: 'left-add', source: 'left', target: 'add', targetPort: 'left' },
-        { id: 'right-add', source: 'right', target: 'add', targetPort: 'right' },
+        { id: 'left-add', kind: 'data', source: 'left', target: 'add', targetPort: 'left' },
+        { id: 'right-add', kind: 'data', source: 'right', target: 'add', targetPort: 'right' },
       ],
     }))
 
@@ -79,6 +79,7 @@ describe('WorkflowStudioController', () => {
         sourcePlugin: string
         inputs: Array<{ name: string }>
         outputs: Array<{ name: string; display?: string }>
+        execOutputs: string[]
         controls: Array<{ name: string; kind: string }>
       }>
     }
@@ -88,16 +89,19 @@ describe('WorkflowStudioController', () => {
     )
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
-      ['ask', 'greater', 'merge', 'sum', 'value'],
+      ['ask', 'branch', 'greater', 'merge', 'sum', 'value'],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
     assert.equal(sum?.sourcePlugin, 'test-fixtures')
-    assert.deepEqual(sum?.inputs.map(port => port.name), ['left', 'right', 'condition'])
+    assert.deepEqual(sum?.inputs.map(port => port.name), ['left', 'right'])
+    assert.deepEqual(sum?.execOutputs, ['then'])
     assert.deepEqual(sum?.outputs.map(port => port.name), ['result'])
     assert.equal(sum?.outputs[0]?.display, 'value')
     assert.deepEqual(sum?.controls.map(control => [control.name, control.kind]), [['offset', 'number']])
     const greater = snapshot.nodeTypes.find(node => node.type === 'greater')
     assert.deepEqual(greater?.inputs.map(port => port.name), ['left', 'right'])
+    const gate = snapshot.nodeTypes.find(node => node.type === 'branch')
+    assert.deepEqual(gate?.execOutputs, ['true', 'false'])
     const savedDefinition = JSON.parse(
       (JSON.parse(controller.snapshot()) as { workflows: Array<{ definition: string }> }).workflows[0]!.definition,
     ) as { nodes: Array<{ id: string; position?: { x: number; y: number } }> }
