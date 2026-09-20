@@ -10,7 +10,7 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/persistence.ts` owns the `workflow_studio` and `workflow_studio_runs` per-record domains; `src/shared/json.ts` owns JSON checks for persisted node values; `src/shared/questions.ts` owns the `questions` request format.
 - `src/validation.ts` owns definition validation against the registry; `src/run-state.ts` owns in-memory run state and its conversion to run records.
 - `src/engine-provider.ts` owns durable definitions, run control, answers, run-record writes, and recovery.
-- `src/run-executor.ts` owns one run's scheduling loop: levels, pause points, execution-edge gating, input gating, confirmation, human input requests, and node results.
+- `src/run-executor.ts` owns one run's scheduling loop: the ready queue, pause points, execution-edge gating, input gating, confirmation, human input requests, and node results.
 - `src/node.ts` owns the `WorkflowNode` base class and `NodeFailure`.
 - `src/flow-nodes.ts` owns the engine's `branch` and `merge` nodes and the OR-join identity check. The engine registers node types whose behavior *is* execution semantics, and nothing else; every other node lives in a node plugin such as `dsh-workflow-demo-node`. `tests/fixture-nodes.ts` holds test-only nodes for engine tests.
 - `src/tools.ts` owns `create_workflow`, `run_workflow`, and `get_workflow_run`.
@@ -37,11 +37,13 @@ Do not describe Session persistence, retries, Skills, or approval-service integr
 - Serialize name lookup and writes so concurrent same-name saves reuse one workflow ID.
 - Reject empty or duplicate IDs, unknown node types, unknown ports, duplicate target-port edges, missing required input edges, unknown execution pins, duplicate execution edges, and cycles formed by data and execution edges together.
 - Store and return independent snapshots; callers must not mutate engine state through retained references.
-- Execute topological levels in order and nodes within one level concurrently. Both edge kinds contribute ordering constraints to the levelization.
+- Start each node as soon as every one of its own predecessors has settled, not when a topological level completes; both edge kinds count as predecessors. A node waiting for an external result stays `running`, so its successors keep waiting.
 - An execution edge constrains order only. Read inbound edges through the per-run index rather than rescanning `definition.edges`: an execution edge supplies no input, occupies no input port, and never appears in `connected`.
 - `execPinFault` owns whether an execution edge's pins are valid. Host validation and the canvas's connection rules both call it; a second copy of that rule drifts, which is how branch pins once became unconnectable in the editor while `save()` accepted them.
 - A node whose incoming execution edge has a source that did not complete is skipped without being called, so a skip travels along execution edges. A data edge never carries that signal.
-- A failed node fails the workflow after the current level settles; pending downstream nodes become cancelled.
+- A failed node stops the scheduler from starting further nodes; the run fails once the nodes already started have settled, and nodes never started become cancelled. Started work is never abandoned, because a node may have side effects.
+- `pauseRun()` takes effect once the nodes already started have settled, so a paused run has nothing running.
+- Cancelling, failing, and pausing stop new starts but never abandon a started node: the run settles its outcome after the in-flight nodes finish, so a finished run records no node as `running`.
 - A node has three outcomes. `completed` means every declared output port carries a value, whether the node computed it or did nothing. `skipped` means a dead incoming execution edge, and nothing else. `failed` covers everything else, including an absent required input.
 - Nodes cannot skip themselves; a node that does not apply completes having done no work. Enforce output completeness in the engine: the registry accepts executors by field, so a base-class check would not bind third-party node types.
 - Branching is public through `execOutputs` and `next`; joining is not. Every node is an AND join except the engine's `merge`, identified by instance so no third-party node can claim the semantics.
@@ -54,7 +56,7 @@ Do not describe Session persistence, retries, Skills, or approval-service integr
 - Save a waiting request before announcing it and save a result before delivering it. A request with a result returns it when a re-called node waits with the same ID; one without a result is reused, never duplicated.
 - The engine assigns no meaning to a request payload or its result; a node type checks its own result format through `validateSignal`, and the browser dispatches on the payload's `kind`.
 - A node waiting for a result stays `running`, so it obeys its own `recovery` policy after a restart like any other running node.
-- Write a node's running state before calling it and its final state before the next level starts; a node is finished only once its final state is durable.
+- Write a node's running state before calling it and its final state before any successor starts; a node is finished only once its final state is durable.
 - Engine shutdown writes no final run state, so restart recovery sees the last checkpoint. Recovery starts only after the plugin loader finishes.
 - Never call a completed or skipped node again during recovery. A recovered run restarts only when `autoRestart` is on, every interrupted node's effective `recovery` is `rerun`, and every node type resolves; otherwise it becomes `interrupted`.
 - Persist only JSON values: fail nodes whose outputs contain non-JSON values, including an `undefined` port, which is never dropped.

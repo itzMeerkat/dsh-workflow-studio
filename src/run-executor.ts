@@ -1,18 +1,17 @@
 /**
- * 一个运行的调度循环：按拓扑层级执行节点，处理暂停、外部结果等待和节点结果。
+ * 一个运行的调度循环：节点的前驱全部结束后即开始执行，处理暂停、外部结果等待和节点结果。
  * @module dsh-workflow-studio
  */
 
 import type {
-  DagNodeDefinition, JsonValue, NodeExecutionContext, NodeExecutionResult, NodeRunInfo, NodeRunRecord,
+  DagNodeDefinition, JsonValue, NodeId, NodeExecutionContext, NodeExecutionResult, NodeRunInfo, NodeRunRecord,
   WorkflowNodeExecutor, WorkflowRunStatus,
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { messageOf } from './shared/errors.ts'
 import { execOutputPins, execSourcePin, inboundEdges, resolveInputPorts, type InboundEdges } from './shared/graph.ts'
 import { isAnyJoin } from './flow-nodes.ts'
-import { topologicalSort } from './validation.ts'
-import { cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
+import { TERMINAL_NODE_STATUSES, cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
 
 /** 一次调度结束时的运行状态与原因。 */
 export interface RunOutcome {
@@ -64,33 +63,58 @@ export class RunExecutor {
 
   /**
    * 调度所有 pending 节点直到运行结束、失败或被取消。
+   *
+   * 节点在自己的全部前驱结束后立即开始，而不等待同层的其他节点，因此一个长节点不会拖住与它无关的分支。
+   * 节点失败后不再启动新节点，已在执行的节点跑完后运行才失败，使带副作用的节点不被半途丢下。
    * @returns 运行的结束状态；节点失败或写入失败时为 failed。
    */
   async execute(): Promise<RunOutcome> {
     const { state, signal } = this
     try {
-      for (const level of topologicalSort(state.definition)) {
-        const pending = level.filter(node => nodeState(state, node.id).record.status === 'pending')
-        if (pending.length === 0) continue
-        if (!signal.aborted) await this.checkPause()
-        if (signal.aborted) break
+      const waiting = new Set(state.definition.nodes
+        .filter(node => nodeState(state, node.id).record.status === 'pending')
+        .map(node => node.id))
+      const running = new Map<NodeId, Promise<NodeId>>()
+      let failure: string | undefined
 
-        const runnable: DagNodeDefinition[] = []
-        for (const node of pending) {
-          if (!this.gateSkipped(node)) runnable.push(node)
+      while (true) {
+        // A paused run has nothing running, so it first waits for the nodes already started to settle.
+        if (!signal.aborted && failure === undefined && running.size === 0) await this.checkPause()
+        // Cancelling, a failure, and a pause all stop new nodes from starting; none abandons a started one.
+        const halted = signal.aborted || failure !== undefined || state.pauseRequested
+
+        let started = false
+        let skipped = false
+        if (!halted) {
+          for (const id of [...waiting]) {
+            if (!this.ready(id)) continue
+            waiting.delete(id)
+            started = true
+            const { node } = nodeState(state, id)
+            if (this.gateSkipped(node)) skipped = true
+            else running.set(id, this.runTracked(node))
+          }
         }
-        if (runnable.length < pending.length) await this.host.checkpoint(state)
-        await Promise.all(runnable.map(node => this.executeNode(node)))
-        const failed = pending
-          .map(node => nodeState(state, node.id).record)
-          .filter(record => record.status === 'failed')
-        if (failed.length > 0) {
-          const error = failed.map(record => `${record.nodeId}: ${record.error ?? '节点执行失败'}`).join('; ')
-          cancelRemaining(state, error)
-          return { status: 'failed', error }
+        if (skipped) await this.host.checkpoint(state)
+
+        if (running.size > 0) {
+          const settled = await Promise.race(running.values())
+          running.delete(settled)
+          const record = nodeState(state, settled).record
+          if (record.status === 'failed') {
+            failure ??= `${record.nodeId}: ${record.error ?? '节点执行失败'}`
+          }
+          continue
         }
+        if (signal.aborted || failure !== undefined || waiting.size === 0) break
+        // Nothing ran and nothing is running, so a predecessor of every remaining node never settles.
+        if (!started) throw new Error(`工作流无法继续，以下节点的前驱永不结束：${[...waiting].join(', ')}`)
       }
 
+      if (failure !== undefined) {
+        cancelRemaining(state, failure)
+        return { status: 'failed', error: failure }
+      }
       if (!signal.aborted) return { status: 'completed' }
       cancelRemaining(state, signal.reason)
       return signal.reason === undefined ? { status: 'cancelled' } : { status: 'cancelled', error: String(signal.reason) }
@@ -99,6 +123,37 @@ export class RunExecutor {
       cancelRemaining(state, message)
       return { status: 'failed', error: message }
     }
+  }
+
+  /**
+   * 节点的全部前驱是否都已结束。
+   *
+   * 数据边和执行边同样计入：前者的值要先产生，后者是作者声明的顺序。等待外部结果的节点仍为 running，
+   * 因此它的下游继续等待。
+   * @param id - 待执行节点的 ID。
+   */
+  private ready(id: NodeId): boolean {
+    const settled = (source: NodeId): boolean =>
+      TERMINAL_NODE_STATUSES.has(nodeState(this.state, source).record.status)
+    return (this.inbound.data.get(id) ?? []).every(edge => settled(edge.source))
+      && (this.inbound.exec.get(id) ?? []).every(edge => settled(edge.source))
+  }
+
+  /**
+   * 执行一个节点，并把调度器自身的缺陷转为该节点的失败。
+   * @param node - 待执行的节点。
+   * @returns 节点结束后兑现为它的 ID；永不 reject，否则等待中的其他节点会被丢下。
+   */
+  private async runTracked(node: DagNodeDefinition): Promise<NodeId> {
+    try {
+      await this.executeNode(node)
+    } catch (error: unknown) {
+      const record = nodeState(this.state, node.id).record
+      record.status = 'failed'
+      record.error = messageOf(error)
+      record.completedAt = Date.now()
+    }
+    return node.id
   }
 
   /**
@@ -129,7 +184,7 @@ export class RunExecutor {
     }
   }
 
-  /** 在层级之间响应暂停请求，直到运行恢复或取消。 */
+  /** 在没有节点执行时响应暂停请求，直到运行恢复或取消。 */
   private async checkPause(): Promise<void> {
     const { state } = this
     if (!state.pauseRequested || state.status !== 'running') return
@@ -151,7 +206,7 @@ export class RunExecutor {
    * 源节点未完成或未触发该引脚时执行边失效。普通节点是 AND 连接，任一入边失效即跳过；
    * OR 连接点（{@link isAnyJoin}）只在全部入边失效时跳过。跳过的节点不触发任何引脚，
    * 因此跳过沿执行边传递。
-   * @param node - 本层级中待执行的节点。
+   * @param node - 前驱已全部结束、待执行的节点。
    * @returns 节点因执行边失效而跳过时为 true。
    */
   private gateSkipped(node: DagNodeDefinition): boolean {

@@ -23,9 +23,9 @@ import type {
 } from './shared/types.ts'
 
 /**
- * 按拓扑层级返回节点，同一层级的节点可并行执行。
+ * 按拓扑层级返回节点。层级表示依赖深度，供校验和编辑器展示；调度按每个节点自身的前驱进行。
  * @param definition - 工作流定义。
- * @returns 按执行顺序排列的层级。
+ * @returns 按依赖深度排列的层级。
  * @throws 工作流包含环或边引用不存在的节点时。
  */
 export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefinition[][] {

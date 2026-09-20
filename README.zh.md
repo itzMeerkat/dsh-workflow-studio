@@ -134,7 +134,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 带 `variadicInputs` 的执行器允许每个工作流节点声明自己的 `inputs`：至少 `min` 个端口且类型相同；`outputType: 'same'` 时恰好有一个同类型输出。引擎在保存工作流时检查这些规则。
 
-侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧，每张卡片还带有 `run` 和 `then` 执行引脚。执行引脚只能连接执行引脚；分支节点按其声明的引脚各渲染一个输出引脚；`run` 引脚接受所有连到它的边，只要没有两条重复同一对引脚。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按照调度器拓扑阶段排列的节点图替代原始 JSON 视图。它对数据依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。执行边始终绘制，因为它由作者显式放置；由声明了多个引脚的节点引出的执行边标注所用的引脚名，例如 `true` 或 `false`。同一阶段的节点并发运行。运行列表会显示一次运行跳过了多少节点，因此悄悄走了分支的运行与全部执行的运行可以区分。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
+侧栏中的 **Workflow Studio** 面板用于打开编辑器。工具栏提供可搜索的工作流选择器、当前工作流名称编辑功能，以及可检索的节点菜单；节点菜单中的每一项都会标明来源插件。重命名并保存已有工作流时会保留其 ID，重复名称会被拒绝。React Flow 画布为每个已声明输入和输出渲染一个连接点，输入位于左侧，输出位于右侧，每张卡片还带有 `run` 和 `then` 执行引脚。执行引脚只能连接执行引脚；分支节点按其声明的引脚各渲染一个输出引脚；`run` 引脚接受所有连到它的边，只要没有两条重复同一对引脚。拖动连线时，连接预览会跟随指针；已有边的端点可以移动到另一个兼容端口，也可以拖到画布空白处删除。选中节点后，其详情和运行结果会在全宽画布下方展开。画布还支持节点定位、类型化端口连线、节点增删、卡片控件、卡片输出预览、JSON 配置编辑、坐标保存和运行状态覆盖。只读执行顺序视图使用按依赖深度排列的节点图替代原始 JSON 视图。它对数据依赖进行传递约简：如果另一条有向路径已经表示相同的执行顺序关系，就移除对应的直接边。执行边始终绘制，因为它由作者显式放置；由声明了多个引脚的节点引出的执行边标注所用的引脚名，例如 `true` 或 `false`。阶段表示依赖深度，而不是执行批次：每个节点在自身前驱全部结束后立即开始，因此一个长节点不会拖住与它无关的分支。运行列表会显示一次运行跳过了多少节点，因此悄悄走了分支的运行与全部执行的运行可以区分。保存和运行操作通过 Host 的 `workflowStudio` Remote 完成，解析和图校验仍由 Host 统一负责。
 
 **运行** 会保存工作流、启动运行而不等待其结束，并打开 **运行** 标签页。该标签页列出当前工作流或全部工作流的运行，并分为 **进行中**（未结束或等待结果）和 **历史**。选中运行后可以看到其状态、开始时间、耗时和错误；适用时的 **暂停**、**恢复** 和 **取消运行**；每个等待中的请求，由为其 `kind` 注册的组件渲染；按运行时工作流快照绘制并标出节点状态的执行顺序图；以及节点状态、调用次数、输出和错误的表格。工具栏显示进行中的运行数量和等待结果的请求数量，点击任一数量会打开运行标签页。面板每两秒刷新一次运行状态；当选中的运行属于当前打开的工作流时，画布显示该运行的节点状态。
 
@@ -146,11 +146,11 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 <details>
 <summary>实现细节</summary>
 
-`WorkflowNodeRegistry` 管理节点类型注册。`DagEngineProvider` 将已校验定义存入 `workflow_studio` domain，使用 Kahn 算法计算拓扑层，并并行执行每一层。该 domain 使用 `per-record` 布局，因此 JSON 后端会将每个 ID 写入 `<storage-root>/workflow_studio/workflows/<id>.json`。名称查找和写入共用一个引擎变更队列，因此并发保存同名工作流时会复用同一个 ID。节点失败后，引擎等待当前层结束，再将工作流标记为失败，并取消尚未启动的下游节点。
+`WorkflowNodeRegistry` 管理节点类型注册。`DagEngineProvider` 将已校验定义存入 `workflow_studio` domain，并在每个节点自身的前驱全部结束后立即执行它，而不是一层一层推进，因此长时间运行的节点只会拖住真正依赖它的节点。该 domain 使用 `per-record` 布局，因此 JSON 后端会将每个 ID 写入 `<storage-root>/workflow_studio/workflows/<id>.json`。名称查找和写入共用一个引擎变更队列，因此并发保存同名工作流时会复用同一个 ID。节点失败后，调度器不再启动新节点；已开始的节点跑完后工作流才标记为失败，未启动的节点被取消，因此带副作用的工作不会被半途丢下。
 
 当上游输出对象包含选定 key 时，该输入端口存在。任何必需输入缺失都会使节点失败，并指出端口和本应产生它的节点——节点执行就意味着它断言必需数据存在。缺少可选输入不阻止执行。
 
-`pauseRun()` 在拓扑层之间生效。`cancelRun()` 会中止运行，并结束所有暂停和所有等待中的 `awaitSignal()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `signal`。
+`pauseRun()` 不再启动新节点，并在已开始的节点全部结束后生效，因此 paused 的运行没有节点在执行。`cancelRun()` 会中止运行，并结束所有暂停和所有等待中的 `awaitSignal()` 调用。执行器接收同一个 `AbortSignal`，在自身异步工作期间需要配合取消。`workflowStudio` Remote 按运行 ID 提供 `start`、`listRuns`、`getRun`、`pause`、`resume`、`cancel` 和 `signal`。
 
 `get()` 返回的定义、`getRun()` 返回的运行记录和最终结果都是独立快照。调用方修改这些值不会改变引擎内部状态。
 
@@ -159,7 +159,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/registry.ts`](src/registry.ts) | 节点执行器注册表 |
 | [`src/engine.ts`](src/engine.ts) | `ctx.dagEngine` 服务 API 和事件 |
 | [`src/engine-provider.ts`](src/engine-provider.ts) | 定义存储、运行控制、结果送达、运行记录写入和恢复 |
-| [`src/run-executor.ts`](src/run-executor.ts) | 按层级调度节点、暂停点、等待中的请求和节点结果 |
+| [`src/run-executor.ts`](src/run-executor.ts) | 就绪即执行的调度、暂停点、等待中的请求和节点结果 |
 | [`src/validation.ts`](src/validation.ts) | 按注册表校验定义，以及拓扑顺序 |
 | [`src/run-state.ts`](src/run-state.ts) | 运行的内存状态与运行记录转换 |
 | [`src/persistence.ts`](src/persistence.ts) | 定义与运行的 per-record storage domain |
@@ -171,7 +171,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/controller.ts`](src/controller.ts) | 浏览器快照、保存和运行控制所用的 Host Remote |
 | [`src/shared/types.ts`](src/shared/types.ts) | Host 与浏览器共享的类型 |
 | [`src/shared/workflow-schema.ts`](src/shared/workflow-schema.ts) | 定义、运行记录、运行摘要和编辑器快照的 JSON schema |
-| [`src/shared/graph.ts`](src/shared/graph.ts) | 拓扑层级、端口兼容性和输入端口解析 |
+| [`src/shared/graph.ts`](src/shared/graph.ts) | 拓扑层级、入边索引、执行引脚规则和端口规则 |
 | [`src/client/index.tsx`](src/client/index.tsx) | `main` 面板和侧边栏注册，以及 Remote 挂载 |
 | [`src/client/locale.ts`](src/client/locale.ts) | `workflowStudio` 本地化命名空间的中英文文案 |
 | [`src/client/remote.ts`](src/client/remote.ts) | Remote 方法描述和 `callRemote` 错误处理函数 |

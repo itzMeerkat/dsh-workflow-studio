@@ -41,7 +41,7 @@ export interface DagEngineConfig {
 /**
  * 默认 DAG 引擎实现。
  * - 工作流定义和运行记录通过 storage-domain 持久化
- * - 每次调度由 {@link RunExecutor} 按拓扑层级执行，同级节点并行
+ * - 每次调度由 {@link RunExecutor} 驱动，节点在自身前驱全部结束后立即执行
  * - 支持暂停/恢复/取消，并把人工输入答案交给等待中的节点
  * - Host 启动时恢复未结束的运行
  */
@@ -285,6 +285,7 @@ export class DagEngineProvider extends DagEngine {
         interrupted.push(nodeRecord.nodeId)
         nodeRecord.status = 'pending'
         delete nodeRecord.outputs
+        delete nodeRecord.fired
         delete nodeRecord.error
         delete nodeRecord.completedAt
       }

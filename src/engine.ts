@@ -141,7 +141,7 @@ export abstract class DagEngine extends Service {
   abstract listRuns(): WorkflowRunSummary[]
 
   /**
-   * 请求在当前层级结束后暂停运行。非 running 状态的运行不受影响。
+   * 请求暂停运行：不再启动新节点，已开始的节点跑完后运行进入 paused。非 running 状态的运行不受影响。
    * @param runId - 运行 ID。
    */
   abstract pauseRun(runId: RunId): void

@@ -4,7 +4,7 @@
  */
 
 import type {
-  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, JsonValue, NodeId, NodeRunRecord, RunId, WorkflowId,
+  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, JsonValue, NodeId, NodeRunRecord, NodeRunStatus, RunId, WorkflowId,
   WorkflowNodeExecutor, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from './shared/types.ts'
 
@@ -42,6 +42,13 @@ export interface RunState {
 
 /** 运行的结束状态。 */
 export const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
+
+/**
+ * 节点的结束状态。等待外部结果的节点仍为 running，因此不在其中：它的下游还不能开始。
+ */
+export const TERMINAL_NODE_STATUSES: ReadonlySet<NodeRunStatus> = new Set([
+  'completed', 'skipped', 'failed', 'cancelled',
+])
 
 /**
  * 从运行记录创建内存状态；节点记录被复制。

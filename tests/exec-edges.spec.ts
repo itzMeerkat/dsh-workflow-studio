@@ -4,7 +4,7 @@
 
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { TestHosts, runEnded } from './host.ts'
+import { TestHosts, runEnded, signalRequested } from './host.ts'
 import { topologicalSort } from '../src/validation.ts'
 import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { EdgeId, NodeId } from '../src/shared/types.ts'
@@ -49,6 +49,19 @@ class SinkNode extends WorkflowNode<{ output: unknown }> {
   }
 }
 
+/** 等待一个永不送达的外部结果的节点，用来把一个节点稳定地停在 running。 */
+const waiter: WorkflowNodeExecutor = {
+  type: 'waiter',
+  label: 'Waiter',
+  description: 'Waits for an external result that never arrives',
+  inputs: [],
+  outputs: [{ name: 'output', type: 'any' }],
+  execute: async (context) => {
+    await context.awaitSignal('go', { kind: 'go' })
+    return { status: 'completed', outputs: { output: null } }
+  },
+}
+
 /** 一次 Host 中 `block` 节点的阻塞与放行；重启用例据此制造中断。 */
 let blockRelease: (() => void) | undefined
 
@@ -86,7 +99,7 @@ const decline: WorkflowNodeExecutor = {
   execute: () => ({ status: 'completed', outputs: { output: null }, next: [] }),
 }
 
-const executors = [new MarkNode(), new SinkNode(), decline, flag, blocker]
+const executors = [new MarkNode(), new SinkNode(), decline, flag, blocker, waiter]
 
 function sink(id: string) {
   return { id: NodeId(id), type: 'sink', config: {} }
@@ -419,5 +432,97 @@ describe('分支、合并与输出完整性', () => {
     assert.equal(record.nodes.find(node => node.nodeId === 'hold')?.status, 'completed')
     assert.equal(record.nodes.find(node => node.nodeId === 'yes')?.status, 'skipped')
     assert.deepEqual(calls, [])
+  })
+
+  it('与长节点无关的链路不等待它，逐个节点就绪即执行', async () => {
+    const { ctx, engine } = await host()
+    const id = await engine.save({
+      name: 'ready-queue',
+      nodes: [
+        { id: NodeId('slow'), type: 'waiter', config: {} },
+        mark('f0'),
+        mark('f1'),
+        mark('f2'),
+      ],
+      edges: [
+        { id: EdgeId('a'), kind: 'exec', source: NodeId('f0'), target: NodeId('f1') },
+        { id: EdgeId('b'), kind: 'exec', source: NodeId('f1'), target: NodeId('f2') },
+      ],
+    })
+
+    const runId = engine.start(id).runId
+    const chainDone = new Promise<void>((resolve) => {
+      const dispose = ctx.on('dag/node-end', (info, node) => {
+        if (info.runId !== runId || node.nodeId !== 'f2') return
+        dispose()
+        resolve()
+      })
+    })
+    await chainDone
+
+    // Under a level barrier f1 and f2 sit in later levels and could not finish while `slow` runs.
+    const record = engine.getRun(runId)!
+    assert.equal(record.nodes.find(item => item.nodeId === 'slow')?.status, 'running')
+    assert.deepEqual(
+      record.nodes.filter(item => item.nodeId.startsWith('f')).map(item => item.status),
+      ['completed', 'completed', 'completed'],
+    )
+    engine.cancelRun(runId, 'done')
+    await runEnded(ctx, runId)
+  })
+
+  it('取消运行时已开始的节点先结束，结束的运行没有节点停在 running', async () => {
+    const { ctx, engine } = await host()
+    const id = await engine.save({
+      name: 'cancel-drains',
+      nodes: [
+        { id: NodeId('slow'), type: 'waiter', config: {} },
+        { id: NodeId('other'), type: 'waiter', config: {} },
+      ],
+      edges: [],
+    })
+    const runId = engine.start(id).runId
+    await signalRequested(ctx, 'slow')
+    await signalRequested(ctx, 'other')
+
+    engine.cancelRun(runId, '人工取消')
+    const record = await runEnded(ctx, runId)
+
+    assert.equal(record.status, 'cancelled')
+    // The scheduler waits for the nodes it started, so none is left mid-flight in the final record.
+    assert.deepEqual(record.nodes.map(node => node.status), ['cancelled', 'cancelled'])
+  })
+
+  it('暂停后不再启动已就绪的节点，恢复后继续', async () => {
+    const { ctx, engine } = await host()
+    const id = await engine.save({
+      name: 'pause-holds',
+      nodes: [
+        { id: NodeId('slow'), type: 'waiter', config: {} },
+        mark('after'),
+      ],
+      // `after` becomes ready only when `slow` completes, which happens while the run is pausing.
+      edges: [{ id: EdgeId('o'), kind: 'exec', source: NodeId('slow'), target: NodeId('after') }],
+    })
+    const runId = engine.start(id).runId
+    await signalRequested(ctx, 'slow')
+    engine.pauseRun(runId)
+    await engine.signal(runId, NodeId('slow'), 'go', 'done')
+
+    const paused = await new Promise<void>((resolve) => {
+      const dispose = ctx.on('dag/paused', (info) => {
+        if (info.runId !== runId) return
+        dispose()
+        resolve()
+      })
+    }).then(() => engine.getRun(runId)!)
+    assert.equal(paused.status, 'paused')
+    assert.equal(paused.nodes.find(node => node.nodeId === 'after')?.status, 'pending')
+    assert.deepEqual(calls, [])
+
+    engine.resumeRun(runId)
+    const record = await runEnded(ctx, runId)
+    assert.equal(record.status, 'completed')
+    assert.equal(record.nodes.find(node => node.nodeId === 'after')?.status, 'completed')
   })
 })
