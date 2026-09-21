@@ -50,6 +50,19 @@ Option B gives up three things instead. A sub-workflow has no run history of its
 4. `tools.ts`: `run_workflow` accepts input values and `get_workflow_run` reports the outputs, which makes a saved workflow callable by a model as a parameterized operation.
 5. Client: the caller node's ports follow the selected child, and the node library offers saved workflows alongside registered node types.
 
+## What a first implementation revealed
+
+Option B was built once and set aside as premature; the work is on the unmerged `sub-workflows` branch. These are the findings worth keeping, because each one cost a failing test to discover and none of them is visible from the design above.
+
+- **A `workflow-input` node with a configured default is an optional port at the call site; one without a default is required.** Projecting every input as required makes a call unusable: every caller has to wire every input, and a default value can never apply. This rule is what makes a defaulted port mean anything.
+- **Validation has to resolve the definition being saved under its own ID.** Otherwise a self-call reads the definition it is about to replace, finds no call in it, and the cycle is only caught when the workflow runs — after the landmine is stored. This also means validation belongs inside the mutation queue, where the allocated ID is known.
+- **A call expands to two generated frame nodes, not one.** The entry frame takes the call site's inbound edges, the exit frame supplies its outbound edges, and the entry frame must gate *both* the exit frame and every child node that has no execution predecessor of its own. Without that gating a dead execution edge at the call site leaves the child's nodes running and failing on missing inputs, because a skip travels only along execution edges — the boundary nodes alone do not carry it.
+- **A called workflow's `workflow-output` node cannot sit behind a branch.** The exit frame requires every declared output, so `assertNoStarvedInputs` rejects the expansion. Joining the branches with `merge` first is the fix, and the rejection is the right behavior: a call must always produce its declared outputs.
+- **Deleting `DagWorkflowDefinition.inputs` and `outputs` is part of the change, not a separate cleanup.** Keeping them beside the boundary-node projection creates a second source of truth for the same fact.
+- **Node IDs must exclude `/` and `#`**, which expansion reserves to tell a workflow's own nodes from a called workflow's.
+- **The browser needs no changes at all** once a call is a node of type `sub-workflow:<workflowId>` and the controller synthesizes one catalog entry per saved workflow. Storing the target in `config` instead would have forced the canvas to learn what a sub-workflow is, and would have let a call keep stale ports after its target changed interface.
+- **Renaming a workflow must retarget its callers in the same mutation**, because a workflow ID is now derived from its name.
+
 ## Alternatives considered
 
 **Binding workflow ports to `{nodeId, port}` pairs recorded in the definition**, with no boundary nodes. Rejected: the canvas would need a second way to draw a relation it can already draw, while a boundary node is positioned, connected, and skipped like every other node.
