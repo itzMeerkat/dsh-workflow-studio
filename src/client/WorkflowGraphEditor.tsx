@@ -136,7 +136,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div className={css.canvas}>
-        <NodeCardContext.Provider value={{ updateConfig }}>
+        <NodeCardContext.Provider value={{ t, updateConfig }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}
@@ -176,7 +176,7 @@ export function WorkflowGraphEditor({
             onPaneClick={() => { setSelectedNodeId(undefined) }}
             fitView
             fitViewOptions={{ padding: 0.2 }}
-            minZoom={0.25}
+            minZoom={0.4}
             maxZoom={2}
             connectionRadius={24}
             reconnectRadius={18}

@@ -156,12 +156,54 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
   const activeRuns = runs.runs.filter(row => isActiveRun(row)).length
   const waitingRequests = runs.runs.reduce((count, row) => count + row.pendingRequests, 0)
   return (
-    <main className={css.page}>
+    <main className={css.page} aria-label={t('title')}>
       <header className={css.header}>
-        <div>
-          <h1>{t('title')}</h1>
+        <div className={css.editorTools}>
+          <input
+            className={css.workflowName}
+            aria-label={t('workflows.name')}
+            value={definition.name}
+            readOnly={view !== 'canvas'}
+            onChange={(event) => {
+              setDefinition({ ...definition, name: event.currentTarget.value })
+            }}
+          />
+          <WorkflowPicker
+            disabled={busy}
+            workflows={snapshot.workflows}
+            selectedId={selectedId}
+            t={t}
+            onCreate={() => {
+              setSelectedId(undefined)
+              replaceDefinition(emptyDefinition(nextWorkflowName(snapshot.workflows)))
+            }}
+            onSelect={select}
+          />
+          <div className={css.viewTabs} role="tablist" aria-label={t('view.label')}>
+            {VIEWS.map(({ view: tab, Icon }) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={view === tab}
+                onClick={() => { setView(tab) }}
+              >
+                <Icon size={14} />
+                {t(`view.${tab}`)}
+              </button>
+            ))}
+          </div>
+          {view === 'canvas' && (
+            <NodeLibraryMenu
+              disabled={busy}
+              nodeTypes={snapshot.nodeTypes}
+              t={t}
+              onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType)) }}
+            />
+          )}
         </div>
         <div className={css.actions}>
+          {phase === 'loading' && <span className={css.headerStatus}>{t('status.loading')}</span>}
           {activeRuns > 0 && (
             <button type="button" className={css.runBadge} onClick={showAllRuns}>
               {activeRuns} {t('runs.activeCount')}
@@ -228,55 +270,6 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
 
       <div className={css.workspace}>
         <section className={css.editor}>
-          <div className={css.editorHead}>
-            <div className={css.editorTools}>
-              <WorkflowPicker
-                disabled={busy}
-                workflows={snapshot.workflows}
-                selectedId={selectedId}
-                t={t}
-                onCreate={() => {
-                  setSelectedId(undefined)
-                  replaceDefinition(emptyDefinition(nextWorkflowName(snapshot.workflows)))
-                }}
-                onSelect={select}
-              />
-              <label className={css.workflowName}>
-                <span>{t('workflows.name')}</span>
-                <input
-                  value={definition.name}
-                  readOnly={view !== 'canvas'}
-                  onChange={(event) => {
-                    setDefinition({ ...definition, name: event.currentTarget.value })
-                  }}
-                />
-              </label>
-              <div className={css.viewTabs} role="tablist" aria-label={t('view.label')}>
-                {VIEWS.map(({ view: tab, Icon }) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    role="tab"
-                    aria-selected={view === tab}
-                    onClick={() => { setView(tab) }}
-                  >
-                    <Icon size={14} />
-                    {t(`view.${tab}`)}
-                  </button>
-                ))}
-              </div>
-              {view === 'canvas' && (
-                <NodeLibraryMenu
-                  disabled={busy}
-                  nodeTypes={snapshot.nodeTypes}
-                  t={t}
-                  onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType)) }}
-                />
-              )}
-            </div>
-            <span>{phase === 'loading' ? t('status.loading') : t('status.ready')}</span>
-          </div>
-
           {view === 'runs' && (
             <RunsView
               t={t}

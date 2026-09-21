@@ -45,6 +45,10 @@ export function NodeInspector({
       <div className={css.detailsContent}>
         <section>
           <div className={css.inspectorForm}>
+            <div className={css.inspectorIdentity}>
+              <span>{t('inspector.nodeId')}</span>
+              <code>{node.data.definition.id}</code>
+            </div>
             <label>
               <span>{t('inspector.label')}</span>
               <input
@@ -73,7 +77,7 @@ export function NodeInspector({
           </div>
         </section>
         <section className={css.resultPanel}>
-          <h2>{t('result.title')}</h2>
+          <h2>{t('node.output')}</h2>
           {runResult === undefined ? <p>{t('result.empty')}</p> : <pre>{runResult}</pre>}
         </section>
       </div>

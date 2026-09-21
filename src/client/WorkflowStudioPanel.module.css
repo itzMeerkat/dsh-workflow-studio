@@ -9,22 +9,18 @@
 
 .header {
   display: flex;
-  align-items: flex-start;
+  min-height: 46px;
+  box-sizing: border-box;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 16px 20px 12px;
+  gap: 16px;
+  padding: 7px 16px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l3);
 }
 
-.header h1 {
-  margin: 0;
-  letter-spacing: 0;
-}
-
-.header h1 {
-  font-size: 20px;
-  font-weight: 500;
-  line-height: 28px;
+.headerStatus {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
 }
 
 .detailsPanel p {
@@ -160,12 +156,6 @@
   font-size: 12px;
 }
 
-.workflowName input[readonly] {
-  background: var(--dsw-alias-bg-layer-2);
-  color: var(--dsw-alias-label-secondary);
-  cursor: default;
-}
-
 .nodeMenuList {
   display: flex;
   min-height: 0;
@@ -229,48 +219,39 @@
   flex-direction: column;
 }
 
-.editorHead {
-  display: flex;
-  min-height: 42px;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 12px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
-}
-
-.editorHead > span {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-}
-
 .editorTools {
   display: flex;
   min-width: 0;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .workflowName {
-  display: flex;
+  width: clamp(150px, 24vw, 320px);
   min-width: 0;
-  align-items: center;
-  gap: 6px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 3px 8px;
+  border: 0.5px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 26px;
+  text-overflow: ellipsis;
 }
 
-.workflowName input {
-  width: clamp(140px, 22vw, 260px);
-  height: 30px;
-  box-sizing: border-box;
-  padding: 5px 8px;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: 5px;
+.workflowName:hover:not([readonly]),
+.workflowName:focus {
+  border-color: var(--dsw-alias-border-l3);
   background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
+}
+
+.workflowName[readonly] {
+  cursor: default;
 }
 
 .viewTabs {
@@ -398,16 +379,10 @@
 }
 
 .canvas :global(.react-flow__edgeupdater) {
-  fill: var(--dsw-alias-bg-layer-1);
-  stroke: var(--dsw-alias-brand-primary);
-  stroke-width: 1.5;
-  pointer-events: all;
-  cursor: move;
-}
-
-.canvas :global(.react-flow__edge:not(.selected):not(:hover) .react-flow__edgeupdater) {
   fill: transparent;
   stroke: transparent;
+  pointer-events: all;
+  cursor: move;
 }
 
 .canvas :global(.react-flow__nodes) {
@@ -520,6 +495,7 @@
 .canvas :global(.react-flow__edge-path) {
   stroke: var(--dsw-alias-label-tertiary);
   stroke-width: 1.5;
+  transition: stroke 120ms ease, stroke-width 120ms ease;
 }
 
 .canvas :global(.react-flow__edge.selected .react-flow__edge-path) {
@@ -527,7 +503,17 @@
   stroke-width: 2;
 }
 
+.canvas :global(.react-flow__edge:not(.selected):hover .react-flow__edge-path) {
+  stroke: var(--dsw-alias-label-secondary);
+  stroke-width: 2.5;
+}
+
+.canvas :global(.react-flow__edge.selected:hover .react-flow__edge-path) {
+  stroke-width: 3;
+}
+
 .canvasNode {
+  position: relative;
   box-sizing: border-box;
   width: 220px;
   min-height: 92px;
@@ -553,22 +539,41 @@
 
 .nodeHeader strong {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.canvasNode > code {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+.nodeMeta {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
   line-height: 16px;
+}
+
+.nodeMeta code,
+.nodeMeta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeSection {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 15px;
 }
 
 .nodeStatus {
   flex: 0 0 auto;
   color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .nodeStatus[data-status='completed'] {
@@ -596,8 +601,8 @@
   min-height: 18px;
   align-items: center;
   gap: 4px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
   line-height: 18px;
 }
 
@@ -611,8 +616,8 @@
 }
 
 .port small {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 9px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
 }
 
 .requiredPort {
@@ -655,8 +660,8 @@
   display: flex;
   position: relative;
   align-items: center;
-  color: #4a5a86;
-  font-size: 10px;
+  color: #3f5185;
+  font-size: 11px;
   font-weight: 600;
   line-height: 16px;
 }
@@ -667,6 +672,28 @@
 
 .execPinOutput {
   padding-right: 3px;
+}
+
+.execPin[data-pin='true'] {
+  color: #217a49;
+}
+
+.execPin[data-pin='false'] {
+  color: #b83232;
+}
+
+.execBranchHandle {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--dsw-alias-bg-layer-1);
+}
+
+.execPin[data-pin='true'] .execBranchHandle {
+  background: #217a49;
+}
+
+.execPin[data-pin='false'] .execBranchHandle {
+  background: #b83232;
 }
 
 .execPin :global(.react-flow__handle) {
@@ -685,6 +712,11 @@
 .canvas :global(.workflow-exec-edge) :global(.react-flow__edge-path) {
   stroke: #4a5a86;
   stroke-width: 2.5;
+}
+
+.canvas :global(.workflow-exec-edge:not(.selected):hover) :global(.react-flow__edge-path) {
+  stroke: #3f5185;
+  stroke-width: 3.5;
 }
 
 .canvas :global(.workflow-exec-edge) :global(.react-flow__arrowhead) polyline {
@@ -708,7 +740,17 @@
   align-items: center;
   gap: 7px;
   color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+  font-size: 11px;
+}
+
+.nodeControl input[type='number'] {
+  appearance: textfield;
+}
+
+.nodeControl input[type='number']::-webkit-inner-spin-button,
+.nodeControl input[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
 }
 
 .nodeControl input[type='number'],
@@ -735,11 +777,11 @@
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   align-items: start;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .nodeOutput > span {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .nodeOutput output {
@@ -857,6 +899,23 @@
   resize: vertical;
 }
 
+.inspectorIdentity {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.inspectorIdentity code {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inspectorActions {
   display: flex;
   gap: 8px;
@@ -883,25 +942,13 @@
 }
 
 .executionSummary {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.executionSummary h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 500;
-  letter-spacing: 0;
-  line-height: 24px;
-}
-
-.executionSummary > span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 9px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
 }
@@ -909,7 +956,6 @@
 .executionSummary b {
   font-weight: 400;
 }
-
 .executionCanvas {
   min-height: 360px;
   overflow: hidden;
@@ -917,100 +963,21 @@
   border-radius: 7px;
 }
 
-.executionNode {
-  position: relative;
-  width: 220px;
+.executionStage {
+  width: 100%;
+  height: 100%;
   box-sizing: border-box;
-  padding: 11px 12px;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: 7px;
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
+  padding: 6px 10px;
+  border: 0.5px dashed var(--dsw-alias-border-l3);
+  border-radius: 10px;
+  background: rgb(120 130 150 / 6%);
 }
 
-.executionNode > header {
-  display: grid;
-  min-width: 0;
-  align-items: start;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
-.executionNode header div {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.executionNode strong,
-.executionNode code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.executionNode strong {
-  font-size: 12px;
-  line-height: 17px;
-}
-
-.executionNode header code,
-.executionNodeMeta {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
-  line-height: 15px;
-}
-
-.executionNodeMeta {
-  display: flex;
-  min-width: 0;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 9px;
-  padding-top: 8px;
-  border-top: 0.5px solid var(--dsw-alias-border-l3);
-}
-
-.executionNodeMeta span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.executionNodeStage {
-  display: block;
-  margin-top: 8px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
-  line-height: 15px;
-}
-
-.executionBranchPorts {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  margin-top: 8px;
-  padding-top: 7px;
-  border-top: 0.5px solid var(--dsw-alias-border-l3);
-  flex-direction: column;
-}
-
-.executionBranchPorts > span {
-  position: relative;
-  min-width: 34px;
-  padding-right: 7px;
+.executionStage > span {
   color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 14px;
-}
-
-.executionBranchPorts > span[data-port='true'] {
-  color: #217a49;
-}
-
-.executionBranchPorts > span[data-port='false'] {
-  color: #b83232;
+  line-height: 18px;
 }
 
 .executionCanvas :global(.react-flow__edge-path) {
@@ -1025,20 +992,8 @@
   pointer-events: none;
 }
 
-.executionCanvas .executionBranchHandle {
-  right: -13px;
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--dsw-alias-bg-layer-1);
+.executionCanvas .execBranchHandle {
   opacity: 1;
-}
-
-.executionBranchPorts > span[data-port='true'] .executionBranchHandle {
-  background: #217a49;
-}
-
-.executionBranchPorts > span[data-port='false'] .executionBranchHandle {
-  background: #b83232;
 }
 
 .executionCycle {
@@ -1075,7 +1030,7 @@
 .nodeType:focus-visible,
 .workflowMenuRow:focus-visible,
 .viewTabs button:focus-visible,
-.workflowName input:focus-visible,
+.workflowName:focus-visible,
 .menuSearch input:focus-visible,
 .detailsClose:focus-visible,
 .inspectorForm input:focus-visible,
@@ -1093,12 +1048,9 @@
 
 @media (max-width: 720px) {
   .header {
+    align-items: flex-start;
     flex-direction: column;
-    padding: 12px;
-  }
-
-  .editorHead > span {
-    display: none;
+    padding: 10px 12px;
   }
 
   .actions {
@@ -1106,17 +1058,8 @@
     justify-content: flex-start;
   }
 
-  .editorHead {
-    align-items: flex-start;
-  }
-
-  .editorTools {
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .workflowName input {
-    width: min(260px, calc(100vw - 110px));
+  .workflowName {
+    width: min(280px, calc(100vw - 40px));
   }
 
   .editor {
@@ -1140,12 +1083,6 @@
 
   .executionView {
     padding: 14px 12px;
-  }
-
-  .executionSummary {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 3px;
   }
 
   .executionCanvas {

@@ -17,8 +17,8 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/client/index.tsx` registers the `main` panel and `sidebar.panellist` entry; `src/client/locale.ts` owns all panel copy.
 - `src/client/WorkflowStudioPanel.tsx` owns workflow selection, save, and run; `src/client/use-runs.ts` owns run polling and run controls; `src/client/Menus.tsx` owns the picker menus.
 - `src/client/transfer.ts` owns exporting one definition to a file and reading one back.
-- `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering; `src/client/graph-model.ts` owns canvas conversion and connection rules; `NodeCard.tsx` and `NodeInspector.tsx` render one node and the selected node's settings.
-- `src/client/ExecutionOrderView.tsx` owns the read-only execution dependency graph.
+- `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering; `src/client/graph-model.ts` owns canvas conversion and connection rules; `NodeCard.tsx` renders the one node card both graphs draw, and `NodeInspector.tsx` the selected node's ID and settings.
+- `src/client/ExecutionOrderView.tsx` owns the read-only execution dependency graph; `src/client/execution-layout.ts` owns its stage bands and the card geometry inside them.
 - `src/client/RunsView.tsx` owns the Runs tab; `src/client/runs-model.ts` owns run parsing, grouping, and answer building.
 - `.agents/skills/` owns reusable workflow-operation and custom-node development procedures.
 
@@ -69,6 +69,8 @@ Do not describe Session persistence, retries, Skills, or approval-service integr
 
 - Treat tool arguments as untrusted JSON. Parse required fields explicitly; never invent IDs, node types, or endpoints with defaults.
 - Keep visible browser text in the typed `workflowStudio` locale dictionary.
+- Both graphs render `NodeCard`. A card names the node, then its type beside the plugin that registered it, then ports, pins, controls, and the latest run's outputs; a read-only graph passes no `updateConfig` instead of copying the card.
+- A node ID belongs in the details panel, and a stage number on the band behind the cards. Either one on a card repeats itself once per node and crowds out what only the card can show.
 - Use the shared UI primitive icons and the official `main` and `sidebar.panellist` slots.
 
 ## Verification

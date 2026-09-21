@@ -1,36 +1,33 @@
-/** Read-only graph of the scheduler's node execution dependencies. */
+/** Read-only graph of the scheduler's node execution dependencies, grouped into stage columns. */
 
 import {
   Background,
   BackgroundVariant,
   Controls,
-  Handle,
   MarkerType,
+  Panel,
   Position,
   ReactFlow,
 } from '@xyflow/react'
 import type { Edge, Node, NodeProps } from '@xyflow/react'
 import { useMemo } from 'react'
-import type { DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
+import type { DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
+import type { WorkflowNodeData } from './graph-model.ts'
 import type { ExecutionDependency, ExecutionPlan } from './model.ts'
 import {
   createExecutionPlan,
   reduceExecutionDependencies,
 } from './model.ts'
+import { executionLayout } from './execution-layout.ts'
 import type { Translate } from './locale.ts'
+import { NodeCard, NodeCardContext } from './NodeCard.tsx'
 import css from './WorkflowStudioPanel.module.css'
 
-type ExecutionNodeData = {
-  definition: DagNodeDefinition
-  catalog?: NodeTypeSummary
-  runRecord?: NodeRunRecord
-  stage: number
-  stageLabel: string
-  branchPorts: readonly string[]
-} & Record<string, unknown>
+type ExecutionNodeData = WorkflowNodeData & { branchPins: readonly string[] }
+type StageNodeData = { label: string } & Record<string, unknown>
 
-type ExecutionFlowNode = Node<ExecutionNodeData, 'execution'>
-const executionNodeTypes = { execution: ExecutionNodeCard }
+type ExecutionFlowNode = Node<ExecutionNodeData, 'execution'> | Node<StageNodeData, 'stage'>
+const executionNodeTypes = { execution: ExecutionNodeCard, stage: StageBand }
 
 interface ExecutionOrderViewProps {
   readonly definition: DagWorkflowDefinition
@@ -55,42 +52,40 @@ export function ExecutionOrderView({
     () => reduceExecutionDependencies(plan),
     [plan],
   )
-  const branchPorts = useMemo(() => branchPinsBySource(dependencies, catalog), [catalog, dependencies])
+  const branchPins = useMemo(() => branchPinsBySource(dependencies, catalog), [catalog, dependencies])
   const nodes = useMemo(
-    () => executionNodes(plan, branchPorts, catalog, runRecords, t('execution.stage')),
-    [branchPorts, catalog, plan, runRecords, t],
+    () => executionNodes(plan, branchPins, catalog, runRecords, t('execution.stage')),
+    [branchPins, catalog, plan, runRecords, t],
   )
-  const edges = useMemo(() => executionEdges(dependencies, branchPorts), [branchPorts, dependencies])
+  const edges = useMemo(() => executionEdges(dependencies, branchPins), [branchPins, dependencies])
 
   return (
     <section className={css.executionView} aria-label={t('execution.title')}>
-      <header className={css.executionSummary}>
-        <h2>{t('execution.title')}</h2>
-        <span>
-          {plan.stages.length} {t('execution.stages')}
-          <b aria-hidden="true">·</b>
-          {definition.nodes.length} {t('execution.nodes')}
-        </span>
-      </header>
-
       <div className={`${css.canvas} ${css.executionCanvas}`}>
-        <ReactFlow<ExecutionFlowNode, Edge>
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={executionNodeTypes}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          edgesReconnectable={false}
-          deleteKeyCode={null}
-          fitView
-          fitViewOptions={{ padding: 0.24 }}
-          minZoom={0.35}
-          maxZoom={1.5}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-          <Controls showInteractive={false} />
-        </ReactFlow>
+        <NodeCardContext.Provider value={{ t }}>
+          <ReactFlow<ExecutionFlowNode, Edge>
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={executionNodeTypes}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable={false}
+            edgesReconnectable={false}
+            deleteKeyCode={null}
+            fitView
+            fitViewOptions={{ padding: 0.16 }}
+            minZoom={0.4}
+            maxZoom={1.5}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+            <Controls showInteractive={false} />
+            <Panel position="top-right" className={css.executionSummary}>
+              {plan.stages.length} {t('execution.stages')}
+              <b aria-hidden="true">·</b>
+              {definition.nodes.length} {t('execution.nodes')}
+            </Panel>
+          </ReactFlow>
+        </NodeCardContext.Provider>
       </div>
 
       {plan.cyclicNodeIds.length > 0 && (
@@ -102,59 +97,17 @@ export function ExecutionOrderView({
   )
 }
 
-function ExecutionNodeCard({ data }: NodeProps<ExecutionFlowNode>) {
+function ExecutionNodeCard({ data }: NodeProps<Node<ExecutionNodeData, 'execution'>>) {
   return (
-    <article className={css.executionNode} data-testid={`execution-node-${data.definition.id}`}>
-      <Handle
-        id="dependency"
-        type="target"
-        position={Position.Left}
-        isConnectable={false}
-      />
-      <header>
-        <div>
-          <strong>
-            {data.definition.label ?? data.catalog?.label ?? data.definition.type}
-          </strong>
-          <code>{data.definition.id}</code>
-        </div>
-        {data.runRecord !== undefined && (
-          <span className={css.nodeStatus} data-status={data.runRecord.status}>
-            {data.runRecord.status}
-          </span>
-        )}
-      </header>
-      <div className={css.executionNodeMeta}>
-        <code>{data.definition.type}</code>
-        {data.catalog !== undefined && <span>{data.catalog.sourcePlugin}</span>}
-      </div>
-      <span className={css.executionNodeStage}>
-        {data.stageLabel} {data.stage}
-      </span>
-      {data.branchPorts.length > 0 && (
-        <div className={css.executionBranchPorts}>
-          {data.branchPorts.map(port => (
-            <span key={port} data-port={port}>
-              {port}
-              <Handle
-                id={`branch:${port}`}
-                className={css.executionBranchHandle}
-                type="source"
-                position={Position.Right}
-                isConnectable={false}
-              />
-            </span>
-          ))}
-        </div>
-      )}
-      <Handle
-        id="dependency"
-        type="source"
-        position={Position.Right}
-        isConnectable={false}
-      />
-    </article>
+    <div data-testid={`execution-node-${data.definition.id}`}>
+      <NodeCard data={data} graph="execution" branchPins={data.branchPins} />
+    </div>
   )
+}
+
+/** The band a stage's cards sit in; it names the stage instead of every card repeating it. */
+function StageBand({ data }: NodeProps<Node<StageNodeData, 'stage'>>) {
+  return <div className={css.executionStage}><span>{data.label}</span></div>
 }
 
 /**
@@ -168,56 +121,78 @@ function branchPinsBySource(
   dependencies: readonly ExecutionDependency[],
   catalog: ReadonlyMap<string, NodeTypeSummary>,
 ): ReadonlyMap<string, ReadonlySet<string>> {
-  const branchPorts = new Map<string, Set<string>>()
+  const branchPins = new Map<string, Set<string>>()
   for (const dependency of dependencies) {
     const pin = dependency.execSourcePin
     if (pin === undefined || (catalog.get(dependency.source.type)?.execOutputs.length ?? 1) < 2) continue
-    const ports = branchPorts.get(dependency.source.id) ?? new Set<string>()
-    ports.add(pin)
-    branchPorts.set(dependency.source.id, ports)
+    const pins = branchPins.get(dependency.source.id) ?? new Set<string>()
+    pins.add(pin)
+    branchPins.set(dependency.source.id, pins)
   }
-  return branchPorts
+  return branchPins
 }
 
+/**
+ * Stage bands, each followed by the cards it holds.
+ *
+ * React Flow draws a parent before its children and positions a child relative to it, so a band
+ * both labels its stage and holds its column together.
+ * @param plan - The stages to lay out.
+ * @param branchPins - Labelled execution pins by source node ID.
+ * @param catalog - Registered node types by type.
+ * @param runRecords - Latest run records by node ID.
+ * @param stageLabel - Localized word naming one stage.
+ */
 function executionNodes(
   plan: ExecutionPlan,
-  branchPorts: ReadonlyMap<string, ReadonlySet<string>>,
+  branchPins: ReadonlyMap<string, ReadonlySet<string>>,
   catalog: ReadonlyMap<string, NodeTypeSummary>,
   runRecords: ReadonlyMap<string, NodeRunRecord>,
   stageLabel: string,
 ): ExecutionFlowNode[] {
-  return plan.stages.flatMap(stage => stage.nodes.map((item, index) => {
+  const cards = new Map(plan.stages.flatMap(stage => stage.nodes.map((item) => {
     const nodeType = catalog.get(item.node.type)
     const runRecord = runRecords.get(item.node.id)
-    return {
-      id: item.node.id,
+    return [item.node.id, {
+      definition: item.node,
+      ...(nodeType === undefined ? {} : { catalog: nodeType }),
+      ...(runRecord === undefined ? {} : { runRecord }),
+      branchPins: [...(branchPins.get(item.node.id) ?? [])].sort(compareBranchPins),
+    } satisfies ExecutionNodeData] as const
+  })))
+  const layout = executionLayout(
+    plan.stages.map(stage => stage.nodes.map(item => cards.get(item.node.id)!)),
+    stageLabel,
+  )
+  return [
+    ...layout.bands.map((band): ExecutionFlowNode => ({
+      id: band.id,
+      type: 'stage',
+      position: { x: band.x, y: band.y },
+      data: { label: band.label },
+      style: { width: band.width, height: band.height },
+      draggable: false,
+      selectable: false,
+    })),
+    ...layout.cards.map((card): ExecutionFlowNode => ({
+      id: card.nodeId,
       type: 'execution',
-      position: {
-        x: (stage.index - 1) * 300,
-        y: index * 180,
-      },
-      data: {
-        definition: item.node,
-        ...(nodeType === undefined ? {} : { catalog: nodeType }),
-        ...(runRecord === undefined ? {} : { runRecord }),
-        stage: stage.index,
-        stageLabel,
-        branchPorts: [...(branchPorts.get(item.node.id) ?? [])]
-          .sort(compareBranchPorts),
-      },
+      parentId: card.bandId,
+      position: { x: card.x, y: card.y },
+      data: cards.get(card.nodeId)!,
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
-    }
-  }))
+    })),
+  ]
 }
 
 function executionEdges(
   dependencies: readonly ExecutionDependency[],
-  branchPorts: ReadonlyMap<string, ReadonlySet<string>>,
+  branchPins: ReadonlyMap<string, ReadonlySet<string>>,
 ): Edge[] {
   return dependencies.map((dependency) => {
     const pin = dependency.execSourcePin
-    const branch = pin !== undefined && branchPorts.get(dependency.source.id)?.has(pin) === true
+    const branch = pin !== undefined && branchPins.get(dependency.source.id)?.has(pin) === true
     return {
       id: `execution:${dependency.source.id}:${dependency.target.id}`,
       source: dependency.source.id,
@@ -230,7 +205,7 @@ function executionEdges(
   })
 }
 
-function compareBranchPorts(left: string, right: string): number {
+function compareBranchPins(left: string, right: string): number {
   const order = ['true', 'false']
   const leftIndex = order.indexOf(left)
   const rightIndex = order.indexOf(right)

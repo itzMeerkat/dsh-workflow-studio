@@ -15,12 +15,14 @@ import {
   parseEditorDefinition,
   reduceExecutionDependencies,
 } from '../src/client/model.ts'
+import { estimateNodeCardHeight, executionLayout } from '../src/client/execution-layout.ts'
+import type { WorkflowNodeData } from '../src/client/graph-model.ts'
 import {
   importedWorkflowName,
   parseImportedWorkflow,
   workflowFileName,
 } from '../src/client/transfer.ts'
-import { WorkflowId, type NodeTypeSummary } from '../src/shared/types.ts'
+import { NodeId, WorkflowId, type NodeTypeSummary, type PortDefinition } from '../src/shared/types.ts'
 import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
 
 describe('workflow editor model', () => {
@@ -282,5 +284,50 @@ describe('workflow import and export', () => {
 
     assert.equal(importedWorkflowName('Daily Report v2', saved), 'Daily Report v2 (3)')
     assert.equal(importedWorkflowName('Weekly Report', saved), 'Weekly Report')
+  })
+})
+
+describe('execution stage layout', () => {
+  const card = (id: string, ports: readonly PortDefinition[] = []): WorkflowNodeData => ({
+    definition: { id: NodeId(id), type: 'demo', config: {} },
+    catalog: {
+      type: 'demo',
+      label: 'Demo',
+      description: '',
+      sourcePlugin: 'dsh-workflow-demo-node',
+      inputs: ports,
+      outputs: [],
+      execOutputs: ['then'],
+      controls: [],
+    },
+  })
+
+  it('每个阶段一条泳道，卡片按估算高度在泳道内依次堆叠', () => {
+    const first = card('a')
+    const second = card('b')
+    const layout = executionLayout([[first, second], [card('c')]], 'Stage')
+
+    assert.deepEqual(layout.bands.map(band => band.label), ['Stage 1', 'Stage 2'])
+    assert.ok(layout.bands[1]!.x >= layout.bands[0]!.x + layout.bands[0]!.width)
+    assert.deepEqual(
+      layout.cards.map(item => [item.nodeId, item.bandId]),
+      [['a', 'stage:1'], ['b', 'stage:1'], ['c', 'stage:2']],
+    )
+    assert.ok(layout.cards[1]!.y >= layout.cards[0]!.y + estimateNodeCardHeight(first))
+    assert.equal(layout.cards[2]!.y, layout.cards[0]!.y)
+  })
+
+  it('泳道高度随其中最高的卡片增长', () => {
+    const ports: readonly PortDefinition[] = [
+      { name: 'left', type: 'number' },
+      { name: 'right', type: 'number' },
+      { name: 'extra', type: 'number' },
+    ]
+    const bare = executionLayout([[card('a')]], 'Stage')
+    const wide = executionLayout([[card('a', ports)]], 'Stage')
+
+    assert.ok(estimateNodeCardHeight(card('a', ports)) > estimateNodeCardHeight(card('a')))
+    assert.ok(wide.bands[0]!.height > bare.bands[0]!.height)
+    assert.equal(wide.bands[0]!.width, bare.bands[0]!.width)
   })
 })
