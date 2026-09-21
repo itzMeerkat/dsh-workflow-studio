@@ -6,7 +6,7 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 
 - `src/registry.ts` owns `ctx.workflowNodeRegistry`.
 - `src/engine.ts` defines `ctx.dagEngine` and DAG lifecycle events.
-- `src/shared/` holds the modules the Host and the browser both load: types, JSON schemas, graph and port rules, execution-pin names and edge-kind predicates, and error messages. Keep them free of Host-only imports.
+- `src/shared/` holds the modules the Host and the browser both load: types, JSON schemas, graph and port rules, execution-pin names and edge-kind predicates, record-key naming, and error messages. Keep them free of Host-only imports.
 - `src/persistence.ts` owns the `workflow_studio` and `workflow_studio_runs` per-record domains; `src/shared/json.ts` owns JSON checks for persisted node values; `src/shared/questions.ts` owns the `questions` request format.
 - `src/validation.ts` owns definition validation against the registry; `src/run-state.ts` owns in-memory run state and its conversion to run records.
 - `src/engine-provider.ts` owns durable definitions, run control, answers, run-record writes, and recovery.
@@ -16,6 +16,7 @@ Read [README.md](README.md) before changing this plugin. The repository root [AG
 - `src/tools.ts` owns `create_workflow`, `run_workflow`, and `get_workflow_run`.
 - `src/client/index.tsx` registers the `main` panel and `sidebar.panellist` entry; `src/client/locale.ts` owns all panel copy.
 - `src/client/WorkflowStudioPanel.tsx` owns workflow selection, save, and run; `src/client/use-runs.ts` owns run polling and run controls; `src/client/Menus.tsx` owns the picker menus.
+- `src/client/transfer.ts` owns exporting one definition to a file and reading one back.
 - `src/client/WorkflowGraphEditor.tsx` owns editable data-flow rendering; `src/client/graph-model.ts` owns canvas conversion and connection rules; `NodeCard.tsx` and `NodeInspector.tsx` render one node and the selected node's settings.
 - `src/client/ExecutionOrderView.tsx` owns the read-only execution dependency graph.
 - `src/client/RunsView.tsx` owns the Runs tab; `src/client/runs-model.ts` owns run parsing, grouping, and answer building.
@@ -34,6 +35,8 @@ Do not describe Session persistence, retries, Skills, or approval-service integr
 ## Workflow rules
 
 - Validate definitions completely in `save()` before storing them.
+- A workflow's ID is its record file name, so `src/shared/slug.ts` derives it from the workflow name and `update()` re-keys a renamed workflow: it writes the new record before deleting the old one, because an interrupted rename must leave a duplicate rather than lose the definition. An unchanged name keeps its ID, so a record saved under an older naming rule moves only when it is renamed.
+- Importing a workflow whose name is taken renames it. Saving reuses the ID of a same-named workflow, so an import that kept the name would replace that workflow on the next save.
 - Serialize name lookup and writes so concurrent same-name saves reuse one workflow ID.
 - Reject empty or duplicate IDs, unknown node types, unknown ports, duplicate target-port edges, missing required input edges, unknown execution pins, duplicate execution edges, and cycles formed by data and execution edges together.
 - Store and return independent snapshots; callers must not mutate engine state through retained references.

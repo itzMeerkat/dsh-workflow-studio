@@ -103,7 +103,7 @@ export abstract class DagEngine extends Service {
   /**
    * 创建或按名称替换一个工作流定义。
    * @param definition - 完整定义；同名定义复用已有 ID。
-   * @returns 持久化完成后的工作流 ID。
+   * @returns 持久化完成后的工作流 ID；新工作流的 ID 由名称派生。
    */
   abstract save(definition: DagWorkflowDefinition): Promise<WorkflowId>
 
@@ -111,7 +111,7 @@ export abstract class DagEngine extends Service {
    * 按 ID 替换一个现有工作流定义。
    * @param id - 必须已存在的工作流 ID。
    * @param definition - 完整的新定义；名称不得与其他工作流重复。
-   * @returns 持久化完成后的工作流 ID。
+   * @returns 持久化完成后的工作流 ID；改名后为新名称派生的 ID，调用方必须改用返回值。
    */
   abstract update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId>
 

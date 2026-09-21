@@ -60,10 +60,10 @@ export class WorkflowStudioController extends TypertRemoteService {
   }
 
   /**
-   * Replace one existing browser-authored definition while preserving its ID.
+   * Replace one existing browser-authored definition, re-keying it when its name changed.
    * @param workflowId - Existing workflow ID returned by {@link save}.
    * @param source - Complete replacement definition encoded as JSON.
-   * @returns The updated workflow ID.
+   * @returns The workflow ID after the save; renaming a workflow returns a new ID.
    */
   @Remote
   async update(workflowId: string, source: string): Promise<string> {

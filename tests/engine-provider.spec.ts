@@ -260,7 +260,7 @@ describe('DagEngineProvider', () => {
     assert.equal(result.nodes[0]?.status, 'completed')
   })
 
-  it('保存和读取使用独立快照', async () => {
+  it('定义和运行记录都以独立快照返回，调用方改不到引擎内部状态', async () => {
     const { engine } = await setup()
     const definition = linearWorkflow('snapshot')
     const id = await engine.save(definition)
@@ -270,6 +270,15 @@ describe('DagEngineProvider', () => {
     assert.equal(first?.nodes[0]?.config.value, 1)
     first!.nodes[0]!.config.value = 100
     assert.equal(engine.get(id)?.nodes[0]?.config.value, 1)
+
+    const run = engine.start(id)
+    const result = await run.result
+    result.nodes[0]!.status = 'failed'
+
+    const firstRead = engine.getRun(run.runId)
+    assert.equal(firstRead?.nodes[0]?.status, 'completed')
+    firstRead!.nodes[0]!.status = 'failed'
+    assert.equal(engine.getRun(run.runId)?.nodes[0]?.status, 'completed')
   })
 
   it('每个定义写入独立文件并在重启后恢复', async () => {
@@ -277,13 +286,12 @@ describe('DagEngineProvider', () => {
     const alpha = linearWorkflow('alpha')
     alpha.nodes[0]!.position = { x: 24, y: 48 }
     const alphaId = await first.engine.save(alpha)
-    const betaId = await first.engine.save(linearWorkflow('beta'))
+    await first.engine.save(linearWorkflow('beta'))
 
+    // 记录文件名就是工作流 ID，因此存储目录可直接阅读。
     const directory = join(first.root, 'workflow_studio', 'workflows')
-    assert.deepEqual(
-      (await readdir(directory)).sort(),
-      [`${alphaId}.json`, `${betaId}.json`].sort(),
-    )
+    assert.equal(alphaId, 'alpha')
+    assert.deepEqual((await readdir(directory)).sort(), ['alpha.json', 'beta.json'])
     const stored = JSON.parse(await readFile(join(directory, `${alphaId}.json`), 'utf8')) as {
       version: number
       record: DagWorkflowDefinition
@@ -329,17 +337,35 @@ describe('DagEngineProvider', () => {
     assert.equal(engine.get(first)?.description, 'new')
   })
 
-  it('按 ID 更新允许重命名并拒绝占用其他工作流名称', async () => {
+  it('工作流 ID 由名称派生，派生名相同时递增分配', async () => {
     const { engine } = await setup()
+
+    assert.equal(await engine.save(linearWorkflow('Daily Report v2')), 'daily-report-v2')
+    assert.equal(await engine.save(linearWorkflow('daily report V2')), 'daily-report-v2-2')
+    // 后端只接受 [A-Za-z0-9_-]，所以全非 ASCII 名称只能共用同一个基名。
+    assert.equal(await engine.save(linearWorkflow('数据处理')), 'workflow')
+    assert.equal(await engine.save(linearWorkflow('数据清洗')), 'workflow-2')
+  })
+
+  it('按 ID 更新同名时保留 ID，改名时换到新名称派生的 ID', async () => {
+    const { engine, root } = await setup()
     const first = await engine.save(linearWorkflow('first'))
     await engine.save(linearWorkflow('second'))
-    const renamed = linearWorkflow('renamed')
 
-    assert.equal(await engine.update(first, renamed), first)
-    assert.equal(engine.get(first)?.name, 'renamed')
-    await assert.rejects(engine.update(first, linearWorkflow('second')), /名称 "second" 已存在/)
+    assert.equal(await engine.update(first, linearWorkflow('first')), first)
+
+    const renamedId = await engine.update(first, linearWorkflow('renamed'))
+    assert.equal(renamedId, 'renamed')
+    assert.equal(engine.get(first), undefined)
+    assert.equal(engine.get(renamedId)?.name, 'renamed')
+    assert.deepEqual(
+      (await readdir(join(root, 'workflow_studio', 'workflows'))).sort(),
+      ['renamed.json', 'second.json'],
+    )
+
+    await assert.rejects(engine.update(renamedId, linearWorkflow('second')), /名称 "second" 已存在/)
     await assert.rejects(
-      engine.update(WorkflowId('missing'), renamed),
+      engine.update(WorkflowId('missing'), linearWorkflow('renamed')),
       /工作流 "missing" 不存在/,
     )
   })
@@ -364,50 +390,6 @@ describe('DagEngineProvider', () => {
     assert.deepEqual(result.nodes.map(record => record.status), ['failed', 'cancelled'])
   })
 
-  it('分支未触发的执行引脚使下游节点被跳过', async () => {
-    const { engine } = await setup()
-    const id = await engine.save({
-      name: 'skip',
-      nodes: [
-        { id: NodeId('flag'), type: 'source', config: { value: false } },
-        { id: NodeId('gate'), type: 'branch', config: {} },
-        { id: NodeId('sink'), type: 'source', config: { value: 'unused' } },
-      ],
-      edges: [
-        { id: EdgeId('flag'), kind: 'data', source: NodeId('flag'), target: NodeId('gate'), targetPort: 'condition' },
-        { id: EdgeId('true-edge'), kind: 'exec', source: NodeId('gate'), sourcePort: 'true', target: NodeId('sink') },
-      ],
-    })
-
-    const result = await engine.start(id).result
-
-    assert.equal(result.status, 'completed')
-    assert.equal(result.nodes.find(record => record.nodeId === NodeId('gate'))?.fired?.[0], 'false')
-    assert.equal(result.nodes.find(record => record.nodeId === NodeId('sink'))?.status, 'skipped')
-  })
-  it('被跳过的节点不被调用，调用次数保持为 0', async () => {
-    const { engine } = await setup()
-    const id = await engine.save({
-      name: 'not-invoked',
-      nodes: [
-        { id: NodeId('flag'), type: 'source', config: { value: false } },
-        { id: NodeId('gate'), type: 'branch', config: {} },
-        { id: NodeId('probe'), type: 'plain', config: {} },
-      ],
-      edges: [
-        { id: EdgeId('flag'), kind: 'data', source: NodeId('flag'), target: NodeId('gate'), targetPort: 'condition' },
-        { id: EdgeId('true-edge'), kind: 'exec', source: NodeId('gate'), sourcePort: 'true', target: NodeId('probe') },
-      ],
-    })
-
-    const result = await engine.start(id).result
-    const probe = result.nodes.find(record => record.nodeId === NodeId('probe'))
-
-    assert.equal(result.status, 'completed')
-    assert.equal(probe?.status, 'skipped')
-    assert.equal(probe?.attempts, 0)
-    assert.equal(probe?.outputs, undefined)
-  })
   it('branch 的 condition 非布尔值时节点和工作流失败', async () => {
     const { engine } = await setup()
     const id = await engine.save({
@@ -448,20 +430,6 @@ describe('DagEngineProvider', () => {
       invocationKey: `${result.runId}/probe`,
       inputs: { input: 7 },
     })
-  })
-  it('不触发任何引脚的节点使其执行后继被跳过', async () => {
-    const { engine } = await setup()
-    const id = await engine.save({
-      name: 'declined',
-      nodes: [
-        { id: NodeId('decline'), type: 'decline', config: {} },
-        { id: NodeId('sink'), type: 'source', config: { value: 'unused' } },
-      ],
-      edges: [{ id: EdgeId('edge'), kind: 'exec', source: NodeId('decline'), target: NodeId('sink') }],
-    })
-    const result = await engine.start(id).result
-    assert.equal(result.status, 'completed')
-    assert.deepEqual(result.nodes.map(record => record.status), ['completed', 'skipped'])
   })
   it('被执行边跳过的等待节点不声明请求', { timeout: 1000 }, async () => {
     const { engine } = await setup()
@@ -653,19 +621,6 @@ describe('DagEngineProvider', () => {
       ['approval-a', 'completed', undefined],
       ['approval-b', 'failed', '外部结果为拒绝'],
     ])
-  })
-
-  it('完成结果和 getRun 返回值不能修改内部记录', async () => {
-    const { engine } = await setup()
-    const id = await engine.save(linearWorkflow('result-snapshot'))
-    const run = engine.start(id)
-    const result = await run.result
-    result.nodes[0]!.status = 'failed'
-
-    const firstRead = engine.getRun(run.runId)
-    assert.equal(firstRead?.nodes[0]?.status, 'completed')
-    firstRead!.nodes[0]!.status = 'failed'
-    assert.equal(engine.getRun(run.runId)?.nodes[0]?.status, 'completed')
   })
 
   it('未知工作流和运行 ID 返回明确结果', async () => {

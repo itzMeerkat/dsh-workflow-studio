@@ -9,7 +9,7 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 
 // ---- Branded IDs ----
 
-/** 工作流定义 ID。 */
+/** 工作流定义 ID，由工作流名称派生，同时是它的记录文件名。 */
 export type WorkflowId = Branded<'WorkflowId'>
 export function WorkflowId(id: string): WorkflowId { return id as WorkflowId }
 

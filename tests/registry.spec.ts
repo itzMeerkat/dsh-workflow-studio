@@ -27,6 +27,7 @@ describe('WorkflowNodeRegistry', () => {
     }
     reg.register(executor, 'test-plugin')
     assert.equal(reg.get('test-node'), executor)
+    assert.equal(reg.get('nonexistent'), undefined)
   })
 
   it('register() 重复类型应抛出', () => {
@@ -69,12 +70,6 @@ describe('WorkflowNodeRegistry', () => {
     assert.ok(reg.get('disposable') !== undefined)
     dispose()
     assert.equal(reg.get('disposable'), undefined)
-  })
-
-  it('get() 未注册类型应返回 undefined', () => {
-    ctx = new Context()
-    const reg = new WorkflowNodeRegistry(ctx)
-    assert.equal(reg.get('nonexistent'), undefined)
   })
 
   it('listTypes() 应返回所有已注册节点的摘要', () => {

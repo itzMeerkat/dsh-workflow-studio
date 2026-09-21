@@ -177,6 +177,7 @@ describe('执行边', () => {
     ])
     assert.deepEqual(calls, [])
     assert.equal(record.nodes.find(node => node.nodeId === 'middle')?.attempts, 0)
+    assert.equal(record.nodes.find(node => node.nodeId === 'middle')?.outputs, undefined)
   })
 
   it('执行边不进入下游节点的输入，也不占用其输入端口', async () => {

@@ -51,19 +51,24 @@ class ProbeNode extends WorkflowNode {
   }
 }
 
-describe('WorkflowNode 端口', () => {
+describe('WorkflowNode', () => {
   it('输入和输出端口就是子类声明的端口', () => {
     assert.deepEqual(new ProbeNode().inputs, [{ name: 'value', type: 'any', required: false }])
     assert.deepEqual(new ProbeNode().outputs, [{ name: 'output', type: 'any' }])
   })
-})
 
-describe('WorkflowNode execute', () => {
-  it('同步 run 返回 completed，且 run 收到全部输入', async () => {
+  it('同步和异步 run 都返回 completed，且 run 收到全部输入', async () => {
     const node = new ProbeNode()
-    const result = await node.execute(context({ inputs: { value: 3 } }))
-    assert.deepEqual(result, { status: 'completed', outputs: { output: 3 } })
+
+    assert.deepEqual(
+      await node.execute(context({ inputs: { value: 3 } })),
+      { status: 'completed', outputs: { output: 3 } },
+    )
     assert.deepEqual(node.seen, { value: 3 })
+    assert.deepEqual(
+      await node.execute(context({ config: { mode: 'async' } })),
+      { status: 'completed', outputs: { output: 'later' } },
+    )
   })
 
   it('NodeFailure 转换为带诊断输出的失败结果', async () => {
@@ -75,13 +80,6 @@ describe('WorkflowNode execute', () => {
     assert.deepEqual(
       await node.execute(context({ config: { mode: 'async-fail' } })),
       { status: 'failed', error: 'async planned' },
-    )
-  })
-
-  it('异步 run 返回 completed', async () => {
-    assert.deepEqual(
-      await new ProbeNode().execute(context({ config: { mode: 'async' } })),
-      { status: 'completed', outputs: { output: 'later' } },
     )
   })
 

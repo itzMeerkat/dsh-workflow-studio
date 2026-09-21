@@ -3,12 +3,14 @@
 import {
   Button,
   IconBranchOutline16,
+  IconDownloadOutline16,
+  IconFolderOpenOutline16,
   IconListPenOutline16,
   IconPlayOutline16,
   IconRefreshOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import type { DagWorkflowDefinition, NodeTypeSummary, WorkflowStudioSnapshot } from '../shared/types.ts'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
@@ -25,6 +27,7 @@ import {
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import { RunsView } from './RunsView.tsx'
 import { isActiveRun, runRecordsByNode } from './runs-model.ts'
+import { downloadWorkflow, importedWorkflowName, parseImportedWorkflow } from './transfer.ts'
 import { useRuns } from './use-runs.ts'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
 import css from './WorkflowStudioPanel.module.css'
@@ -53,6 +56,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
   const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'running'>('loading')
   const [notice, setNotice] = useState<string>()
   const runs = useRuns(remote, setNotice)
+  const importInput = useRef<HTMLInputElement>(null)
 
   const replaceDefinition = (next: DagWorkflowDefinition): void => {
     setDefinition(next)
@@ -127,6 +131,19 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
     setPhase('ready')
   }
 
+  /** Load one picked file into the editor as an unsaved workflow. */
+  const importFile = async (file: File): Promise<void> => {
+    try {
+      const imported = parseImportedWorkflow(await file.text())
+      setSelectedId(undefined)
+      replaceDefinition({ ...imported, name: importedWorkflowName(imported.name, snapshot.workflows) })
+      setView('canvas')
+      setNotice(t('notice.imported'))
+    } catch (error: unknown) {
+      setNotice(messageOf(error))
+    }
+  }
+
   const showAllRuns = (): void => {
     runs.setFilter('all')
     setView('runs')
@@ -163,6 +180,36 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
             onClick={() => { void load() }}
           >
             {t('action.refresh')}
+          </Button>
+          <input
+            ref={importInput}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0]
+              // Clear the picker so choosing the same file again still fires a change.
+              event.currentTarget.value = ''
+              if (file !== undefined) void importFile(file)
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<IconFolderOpenOutline16 size={14} />}
+            disabled={busy}
+            onClick={() => { importInput.current?.click() }}
+          >
+            {t('action.import')}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<IconDownloadOutline16 size={14} />}
+            disabled={busy}
+            onClick={() => { downloadWorkflow(definition) }}
+          >
+            {t('action.export')}
           </Button>
           <Button size="sm" variant="outline" disabled={busy} onClick={() => { void save() }}>
             {phase === 'saving' ? t('action.saving') : t('action.save')}

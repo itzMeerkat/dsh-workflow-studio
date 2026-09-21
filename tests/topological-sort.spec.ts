@@ -29,45 +29,24 @@ function makeWorkflow(edges: Array<[string, string]>): DagWorkflowDefinition {
 }
 
 describe('topologicalSort', () => {
-  it('应该对线性 DAG 正确排序', () => {
-    const wf = makeWorkflow([['a', 'b'], ['b', 'c']])
-    const levels = topologicalSort(wf)
-    const order = levels.flatMap(l => l.map(n => n.id))
-    // a 必须在 b 之前，b 必须在 c 之前
-    assert.ok(order.indexOf(NodeId('a')) < order.indexOf(NodeId('b')))
-    assert.ok(order.indexOf(NodeId('b')) < order.indexOf(NodeId('c')))
-  })
+  it('按数据依赖分层，扇出节点同层，隔离节点在第一层', () => {
+    const chain = topologicalSort(makeWorkflow([['a', 'b'], ['b', 'c']]))
+    assert.deepEqual(chain.map(level => level.map(node => node.id)), [['a'], ['b'], ['c']])
 
-  it('应该对扇出 DAG（一个输入多个下游）正确排序', () => {
-    const wf = makeWorkflow([['a', 'b'], ['a', 'c']])
-    const levels = topologicalSort(wf)
-    assert.equal(levels.length, 2)
-    assert.equal(levels[0]!.length, 1) // a
-    assert.equal(levels[0]![0]!.id, NodeId('a'))
-    assert.equal(levels[1]!.length, 2) // b, c 同级
-  })
+    const fanOut = topologicalSort(makeWorkflow([['a', 'b'], ['a', 'c']]))
+    assert.deepEqual(fanOut.map(level => level.map(node => node.id)), [['a'], ['b', 'c']])
 
-  it('应该检测环并抛出', () => {
-    const wf = makeWorkflow([['a', 'b'], ['b', 'c'], ['c', 'a']])
-    assert.throws(() => topologicalSort(wf), /包含环/)
-  })
-
-  it('空工作流应返回空列表', () => {
-    const wf: DagWorkflowDefinition = { name: 'empty', nodes: [], edges: [] }
-    const levels = topologicalSort(wf)
-    assert.equal(levels.length, 0)
-  })
-
-  it('隔离节点应在第一层', () => {
-    const wf: DagWorkflowDefinition = {
+    const isolated = topologicalSort({
       name: 'isolated',
-      nodes: [
-        { id: NodeId('a'), type: 'input', config: {} },
-      ],
+      nodes: [{ id: NodeId('a'), type: 'input', config: {} }],
       edges: [],
-    }
-    const levels = topologicalSort(wf)
-    assert.equal(levels.length, 1)
-    assert.equal(levels[0]!.length, 1)
+    })
+    assert.deepEqual(isolated.map(level => level.map(node => node.id)), [['a']])
+
+    assert.deepEqual(topologicalSort({ name: 'empty', nodes: [], edges: [] }), [])
+  })
+
+  it('构成环的数据边被拒绝', () => {
+    assert.throws(() => topologicalSort(makeWorkflow([['a', 'b'], ['b', 'c'], ['c', 'a']])), /包含环/)
   })
 })

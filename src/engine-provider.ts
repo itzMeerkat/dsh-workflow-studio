@@ -21,6 +21,7 @@ import { registerFlowControlNodes } from './flow-nodes.ts'
 import { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 import { messageOf } from './shared/errors.ts'
 import { resolveExecutors } from './validation.ts'
+import { uniqueWorkflowSlug } from './shared/slug.ts'
 import {
   TERMINAL_STATUSES, cancelRemaining, createRunState, nodeState, releasePauseWaiters, runInfo,
   summaryOfRecord, toRunRecord, type RunState,
@@ -113,26 +114,48 @@ export class DagEngineProvider extends DagEngine {
 
     return this.enqueueMutation(async () => {
       const existing = this.findByName(snapshot.name)
-      const id = existing !== undefined ? existing.id : WorkflowId(randomUUID())
+      const id = existing !== undefined ? existing.id : this.allocateId(snapshot.name)
       await this.workflows.put(id, snapshot)
       return id
     })
   }
 
+  /**
+   * 替换一个已存在的定义；改名同时把记录换到新名称派生的 ID 下。
+   *
+   * 改名先写新记录再删旧记录，因此两次写入之间停机只会留下一份重复的旧记录，不会丢失定义。
+   * 名称未改时保留原 ID，所以早于此规则保存的随机 ID 记录只在被改名时才换名。
+   */
   async update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
     resolveExecutors(this.registry, snapshot)
     return this.enqueueMutation(async () => {
-      if (this.workflows.get(id) === undefined) {
+      const current = this.workflows.get(id)
+      if (current === undefined) {
         throw new Error(`工作流 "${id}" 不存在`)
       }
       const named = this.findByName(snapshot.name)
       if (named !== undefined && named.id !== id) {
         throw new Error(`工作流名称 "${snapshot.name}" 已存在`)
       }
-      await this.workflows.put(id, snapshot)
-      return id
+      if (current.name === snapshot.name) {
+        await this.workflows.put(id, snapshot)
+        return id
+      }
+      const renamed = this.allocateId(snapshot.name)
+      await this.workflows.put(renamed, snapshot)
+      await this.workflows.delete(id)
+      return renamed
     })
+  }
+
+  /**
+   * 为一个尚未存储的名称分配记录键。
+   * @param name - 工作流名称。
+   * @returns 该名称派生的、未被占用的工作流 ID。
+   */
+  private allocateId(name: string): WorkflowId {
+    return WorkflowId(uniqueWorkflowSlug(name, candidate => this.workflows.get(WorkflowId(candidate)) !== undefined))
   }
 
   get(id: WorkflowId): DagWorkflowDefinition | undefined {

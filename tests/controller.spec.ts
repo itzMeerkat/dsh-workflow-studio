@@ -146,25 +146,24 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(result.nodes[0]?.outputs, { answer: 'yes' })
   })
 
-  it('按 ID 更新定义时保留工作流身份并允许重命名', async () => {
+  it('按 ID 更新返回改名后的新 ID，快照只列出改名后的工作流', async () => {
     const controller = await setup()
     const source = {
       name: 'before',
       nodes: [{ id: 'input', type: 'value', config: { value: 1 } }],
       edges: [],
     }
-    const workflowId = await controller.save(JSON.stringify(source))
+    assert.equal(await controller.save(JSON.stringify(source)), 'before')
 
-    assert.equal(
-      await controller.update(workflowId, JSON.stringify({ ...source, name: 'after' })),
-      workflowId,
-    )
+    const renamed = await controller.update('before', JSON.stringify({ ...source, name: 'after' }))
+
+    assert.equal(renamed, 'after')
     const snapshot = JSON.parse(controller.snapshot()) as {
       workflows: Array<{ id: string; name: string }>
     }
     assert.deepEqual(
       snapshot.workflows.map(({ id, name }) => ({ id, name })),
-      [{ id: workflowId, name: 'after' }],
+      [{ id: 'after', name: 'after' }],
     )
   })
 

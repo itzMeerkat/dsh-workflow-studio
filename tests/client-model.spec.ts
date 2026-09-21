@@ -15,6 +15,11 @@ import {
   parseEditorDefinition,
   reduceExecutionDependencies,
 } from '../src/client/model.ts'
+import {
+  importedWorkflowName,
+  parseImportedWorkflow,
+  workflowFileName,
+} from '../src/client/transfer.ts'
 import { WorkflowId, type NodeTypeSummary } from '../src/shared/types.ts'
 import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
 
@@ -252,5 +257,30 @@ describe('workflow editor model', () => {
       reduceExecutionDependencies(execPlan).map(item => [item.source.id, item.target.id]),
       [['a', 'b'], ['b', 'c'], ['a', 'c']],
     )
+  })
+})
+
+describe('workflow import and export', () => {
+  const definition = { name: 'Daily Report v2', nodes: [], edges: [] }
+
+  it('names the exported file after the workflow, like its record file', () => {
+    assert.equal(workflowFileName(definition), 'daily-report-v2.workflow.json')
+    assert.equal(workflowFileName({ ...definition, name: '\u6570\u636e\u5904\u7406' }), 'workflow.workflow.json')
+  })
+
+  it('imports an exported definition and a record document copied from storage', () => {
+    const exported = formatEditorDefinition(definition)
+
+    assert.deepEqual(parseImportedWorkflow(exported), definition)
+    assert.deepEqual(parseImportedWorkflow(JSON.stringify({ version: 2, record: definition })), definition)
+    assert.throws(() => parseImportedWorkflow('{'), SyntaxError)
+    assert.throws(() => parseImportedWorkflow(JSON.stringify({ name: 'no-graph' })), ZodError)
+  })
+
+  it('renames an imported workflow onto the first free name, so saving never replaces one', () => {
+    const saved = [{ name: 'Daily Report v2' }, { name: 'Daily Report v2 (2)' }]
+
+    assert.equal(importedWorkflowName('Daily Report v2', saved), 'Daily Report v2 (3)')
+    assert.equal(importedWorkflowName('Weekly Report', saved), 'Weekly Report')
   })
 })
