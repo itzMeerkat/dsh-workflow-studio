@@ -9,7 +9,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   DagWorkflowDefinition, WorkflowId, RunId,
   WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
-  DagRunInfo, NodeRunInfo, WorkflowRunStatus, NodeId,
+  DagRunInfo, NodeRunInfo, WorkflowRunStatus, NodeId, JsonObject,
 } from './shared/types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -124,8 +124,13 @@ export abstract class DagEngine extends Service {
   /** 按名称查找工作流。 */
   abstract findByName(name: string): WorkflowSummary | undefined
 
-  /** 启动一个已保存的工作流，返回运行 handle。 */
-  abstract start(workflowId: WorkflowId): DagRun
+  /**
+   * 启动一个已保存的工作流，返回运行 handle。
+   * @param workflowId - 工作流 ID。
+   * @param inputs - 工作流声明输入端口的值；未提供的端口使用声明的默认值。
+   * @returns 运行 handle。
+   */
+  abstract start(workflowId: WorkflowId, inputs?: JsonObject): DagRun
 
   /**
    * 获取运行记录，包括定义快照、节点状态和人工输入请求；已结束并仍保留的运行同样可查。

@@ -12,6 +12,8 @@ import {
   portsAreCompatible,
   resolveInputPorts,
 } from '../shared/graph.ts'
+import { isBoundaryNode } from '../shared/workflow-boundary.ts'
+import type { WorkflowPortEdit } from './workflow-ports.ts'
 import {
   EdgeId,
   NodeId,
@@ -31,8 +33,13 @@ export type WorkflowNodeData = {
   runRecord?: NodeRunRecord
 } & Record<string, unknown>
 
-/** A canvas node. */
-export type WorkflowFlowNode = Node<WorkflowNodeData, 'workflow'>
+/**
+ * A canvas node.
+ *
+ * A boundary node is drawn by its own card, so it carries a different React Flow node type and
+ * the same data as every other node.
+ */
+export type WorkflowFlowNode = Node<WorkflowNodeData, 'workflow' | 'boundary'>
 
 /** Locale key of a rejected connection. */
 export type ConnectionError =
@@ -87,7 +94,7 @@ export function flowNodes(
     const runRecord = runRecords.get(node.id)
     return {
       id: node.id,
-      type: 'workflow',
+      type: isBoundaryNode(node) ? 'boundary' : 'workflow',
       position: node.position ?? {
         x: 80 + (index % 4) * 240,
         y: 80 + Math.floor(index / 4) * 180,
@@ -216,8 +223,42 @@ export function connectionError(
   return occupied ? 'notice.inputConnected' : undefined
 }
 
-/** Node data with its run record replaced; undefined removes it. */
-export function withRunRecord(data: WorkflowNodeData, runRecord: NodeRunRecord | undefined): WorkflowNodeData {
+/**
+ * Card data with its run record replaced; undefined removes it.
+ * @param data - The card's current data.
+ * @param runRecord - The node's latest run record, or undefined when the run has none.
+ * @returns New data of the same kind of card.
+ */
+export function withRunRecord<T extends WorkflowNodeData>(data: T, runRecord: NodeRunRecord | undefined): T {
   const { runRecord: _previous, ...rest } = data
-  return runRecord === undefined ? rest : { ...rest, runRecord }
+  // Rest destructuring widens a generic, so the result is named as the same card data again.
+  return (runRecord === undefined ? rest : { ...rest, runRecord }) as T
+}
+
+/**
+ * Canvas edges after one declared port of a boundary node was renamed or removed.
+ *
+ * An edge names the port it connects, so a renamed port takes its edges along and a removed
+ * port takes them away; leaving them would name a port that no longer exists and fail the save.
+ * @param edges - The canvas edges.
+ * @param nodeId - The boundary node whose ports were edited.
+ * @param edit - What the edit did.
+ * @returns The edges, moved or dropped where they named the edited port.
+ */
+export function applyWorkflowPortEdit(
+  edges: readonly Edge[],
+  nodeId: string,
+  edit: WorkflowPortEdit,
+): Edge[] {
+  if (edit.kind === 'other') return [...edges]
+  const name = edit.kind === 'renamed' ? edit.from : edit.name
+  return edges.flatMap((edge) => {
+    const end = edge.source === nodeId ? 'source' : edge.target === nodeId ? 'target' : undefined
+    if (end === undefined) return [edge]
+    const handle = parseHandle(end === 'source' ? edge.sourceHandle : edge.targetHandle)
+    if (handle?.kind !== 'data' || handle.name !== name) return [edge]
+    if (edit.kind === 'removed') return []
+    const moved = handleId({ kind: 'data', name: edit.to })
+    return [end === 'source' ? { ...edge, sourceHandle: moved } : { ...edge, targetHandle: moved }]
+  })
 }

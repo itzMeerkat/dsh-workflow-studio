@@ -56,6 +56,8 @@ export interface PortDefinition {
   required?: boolean
   /** 在节点卡片中展示输出值的方式。 */
   display?: 'value' | 'json'
+  /** 调用方未提供该值时使用的默认值；只对工作流输入节点声明的端口有意义。 */
+  default?: JsonValue
 }
 
 /** 节点卡片中编辑 config 字段的控件定义。 */
@@ -148,8 +150,6 @@ export interface DagWorkflowDefinition {
   description?: string
   nodes: DagNodeDefinition[]
   edges: DagEdgeDefinition[]
-  inputs?: PortDefinition[]
-  outputs?: PortDefinition[]
 }
 
 /** 工作流摘要（列表用）。 */
@@ -277,6 +277,8 @@ export interface WorkflowRunRecord {
   updatedAt: number
   completedAt?: number
   nodes: NodeRunRecord[]
+  /** 工作流声明的输出端口收到的值；未声明输出时不存在。 */
+  outputs?: Record<string, unknown>
 }
 
 /** 运行列表中的一行。 */

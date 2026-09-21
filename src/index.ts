@@ -52,6 +52,10 @@ export {
 } from './shared/graph.ts'
 export { NodeFailure, WorkflowNode, toFailureResult } from './node.ts'
 export { BRANCH_FALSE_PIN, BRANCH_TRUE_PIN, BranchNode, MergeNode } from './flow-nodes.ts'
+export {
+  WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, boundaryPorts, boundarySide, isBoundaryNode, withBoundaryPorts,
+  withRunInputs, workflowInputNode, workflowInputPorts, workflowOutputNode, workflowOutputPorts,
+} from './shared/workflow-boundary.ts'
 export type { WorkflowNodePorts } from './node.ts'
 export { registerWorkflowTools } from './tools.ts'
 export { WorkflowStudioController } from './controller.ts'

@@ -12,7 +12,9 @@ import {
 import type { Edge, Node, NodeProps } from '@xyflow/react'
 import { useMemo } from 'react'
 import type { DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
+import { isBoundaryNode } from '../shared/workflow-boundary.ts'
 import type { WorkflowNodeData } from './graph-model.ts'
+import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
 import type { ExecutionDependency, ExecutionPlan } from './model.ts'
 import {
   createExecutionPlan,
@@ -26,8 +28,12 @@ import css from './WorkflowStudioPanel.module.css'
 type ExecutionNodeData = WorkflowNodeData & { branchPins: readonly string[] }
 type StageNodeData = { label: string } & Record<string, unknown>
 
-type ExecutionFlowNode = Node<ExecutionNodeData, 'execution'> | Node<StageNodeData, 'stage'>
-const executionNodeTypes = { execution: ExecutionNodeCard, stage: StageBand }
+type ExecutionFlowNode = Node<ExecutionNodeData, 'execution' | 'boundary'> | Node<StageNodeData, 'stage'>
+const executionNodeTypes = {
+  execution: ExecutionNodeCard,
+  boundary: ExecutionBoundaryCard,
+  stage: StageBand,
+}
 
 interface ExecutionOrderViewProps {
   readonly definition: DagWorkflowDefinition
@@ -105,6 +111,15 @@ function ExecutionNodeCard({ data }: NodeProps<Node<ExecutionNodeData, 'executio
   )
 }
 
+/** A boundary node here is the same card the canvas draws, without its editing controls. */
+function ExecutionBoundaryCard(props: NodeProps<Node<ExecutionNodeData, 'boundary'>>) {
+  return (
+    <div data-testid={`execution-node-${props.data.definition.id}`}>
+      <WorkflowBoundaryCard {...props} graph="execution" />
+    </div>
+  )
+}
+
 /** The band a stage's cards sit in; it names the stage instead of every card repeating it. */
 function StageBand({ data }: NodeProps<Node<StageNodeData, 'stage'>>) {
   return <div className={css.executionStage}><span>{data.label}</span></div>
@@ -176,7 +191,7 @@ function executionNodes(
     })),
     ...layout.cards.map((card): ExecutionFlowNode => ({
       id: card.nodeId,
-      type: 'execution',
+      type: isBoundaryNode(cards.get(card.nodeId)!.definition) ? 'boundary' : 'execution',
       parentId: card.bandId,
       position: { x: card.x, y: card.y },
       data: cards.get(card.nodeId)!,

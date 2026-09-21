@@ -18,11 +18,30 @@ import {
 import { estimateNodeCardHeight, executionLayout } from '../src/client/execution-layout.ts'
 import type { WorkflowNodeData } from '../src/client/graph-model.ts'
 import {
+  appendWorkflowPort,
+  formatWorkflowPortDefault,
+  parseWorkflowPortDefault,
+  removeWorkflowPort,
+  setWorkflowPortDefault,
+  updateWorkflowPort,
+  workflowPortFault,
+  workflowResultValues,
+  workflowRunDefaults,
+  workflowRunInputs,
+} from '../src/client/workflow-ports.ts'
+import { applyWorkflowPortEdit, flowNodes, toDefinition } from '../src/client/graph-model.ts'
+import {
+  boundaryPorts, WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, withBoundaryPorts,
+  workflowInputPorts, workflowOutputPorts,
+} from '../src/shared/workflow-boundary.ts'
+import {
   importedWorkflowName,
   parseImportedWorkflow,
   workflowFileName,
 } from '../src/client/transfer.ts'
-import { NodeId, WorkflowId, type NodeTypeSummary, type PortDefinition } from '../src/shared/types.ts'
+import {
+  NodeId, RunId, WorkflowId, type NodeRunRecord, type NodeTypeSummary, type PortDefinition,
+} from '../src/shared/types.ts'
 import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
 
 describe('workflow editor model', () => {
@@ -317,6 +336,20 @@ describe('execution stage layout', () => {
     assert.equal(layout.cards[2]!.y, layout.cards[0]!.y)
   })
 
+  it('边界节点按它自己的卡片估算高度，端口行是一排字段而不是一行标签', () => {
+    const boundary: WorkflowNodeData = {
+      definition: {
+        id: NodeId('out'),
+        type: WORKFLOW_OUTPUT_TYPE,
+        config: {},
+        inputs: [{ name: 'verdict', type: 'any', required: false }],
+      },
+    }
+    const plain = card('a', [{ name: 'verdict', type: 'any' }])
+
+    assert.ok(estimateNodeCardHeight(boundary) > estimateNodeCardHeight(plain))
+  })
+
   it('泳道高度随其中最高的卡片增长', () => {
     const ports: readonly PortDefinition[] = [
       { name: 'left', type: 'number' },
@@ -329,5 +362,201 @@ describe('execution stage layout', () => {
     assert.ok(estimateNodeCardHeight(card('a', ports)) > estimateNodeCardHeight(card('a')))
     assert.ok(wide.bands[0]!.height > bare.bands[0]!.height)
     assert.equal(wide.bands[0]!.width, bare.bands[0]!.width)
+  })
+})
+
+describe('workflow port declarations', () => {
+  const ports: readonly PortDefinition[] = [
+    { name: 'input1', type: 'string', description: 'kept' },
+    { name: 'threshold', type: 'number' },
+  ]
+
+  it('新端口按所在侧命名，跳过已占用的编号，输出端口默认可选', () => {
+    assert.deepEqual(appendWorkflowPort(ports, 'inputs'), [...ports, { name: 'input2', type: 'any' }])
+    // An output is often fed by one branch of several, so requiring it would refuse to save.
+    assert.deepEqual(appendWorkflowPort([], 'outputs'), [{ name: 'output1', type: 'any', required: false }])
+  })
+
+  it('改名和改类型保留端口的其余字段，删除只影响该端口', () => {
+    assert.deepEqual(updateWorkflowPort(ports, 0, { name: 'reason', type: 'boolean' })[0], {
+      name: 'reason',
+      type: 'boolean',
+      description: 'kept',
+    })
+    assert.deepEqual(removeWorkflowPort(ports, 0), [ports[1]])
+  })
+
+  it('空名和重名端口被标记为无法引用', () => {
+    const conflicting: readonly PortDefinition[] = [
+      { name: 'value', type: 'any' },
+      { name: ' value ', type: 'any' },
+      { name: '  ', type: 'any' },
+      { name: 'other', type: 'any' },
+    ]
+    assert.deepEqual(
+      conflicting.map((_port, index) => workflowPortFault(conflicting, index)),
+      ['duplicate', 'duplicate', 'empty', undefined],
+    )
+  })
+
+})
+
+describe('workflow port defaults', () => {
+  it('默认值按端口类型解析，字符串端口直接使用输入的文本', () => {
+    assert.deepEqual(parseWorkflowPortDefault('hello', 'string'), { value: 'hello' })
+    assert.deepEqual(parseWorkflowPortDefault('12.5', 'number'), { value: 12.5 })
+    assert.deepEqual(parseWorkflowPortDefault('true', 'boolean'), { value: true })
+    assert.deepEqual(parseWorkflowPortDefault('{"a":1}', 'any'), { value: { a: 1 } })
+  })
+
+  it('空文本表示没有默认值，尚未成形的文本不覆盖已声明的值', () => {
+    assert.deepEqual(parseWorkflowPortDefault('   ', 'number'), { value: undefined })
+    assert.equal(parseWorkflowPortDefault('-', 'number'), 'invalid')
+    assert.equal(parseWorkflowPortDefault('{"a":', 'any'), 'invalid')
+    assert.equal(parseWorkflowPortDefault('yes', 'boolean'), 'invalid')
+  })
+
+  it('默认值在文本与声明之间往返，清空时移除该字段', () => {
+    const ports: readonly PortDefinition[] = [{ name: 'limit', type: 'number', default: 3 }]
+
+    assert.equal(formatWorkflowPortDefault(ports[0]!.default, 'number'), '3')
+    assert.equal(formatWorkflowPortDefault(undefined, 'number'), '')
+    assert.equal(formatWorkflowPortDefault('plain', 'string'), 'plain')
+    assert.ok(!Object.hasOwn(setWorkflowPortDefault(ports, 0, undefined)[0]!, 'default'))
+    assert.equal(setWorkflowPortDefault(ports, 0, 9)[0]?.default, 9)
+  })
+})
+
+describe('workflow boundary nodes', () => {
+  const definition = parseEditorDefinition(JSON.stringify({
+    name: 'io',
+    nodes: [
+      { id: 'in', type: WORKFLOW_INPUT_TYPE, config: {}, outputs: [{ name: 'left', type: 'number' }] },
+      { id: 'add', type: 'sum', config: {}, position: { x: 400, y: 120 } },
+      { id: 'out', type: WORKFLOW_OUTPUT_TYPE, config: {}, inputs: [{ name: 'total', type: 'number' }] },
+    ],
+    edges: [],
+  }))
+
+  it('工作流的签名从边界节点读出，方向按图中的数据流向', () => {
+    assert.deepEqual(workflowInputPorts(definition).map(port => port.name), ['left'])
+    assert.deepEqual(workflowOutputPorts(definition).map(port => port.name), ['total'])
+    // A declared input is an output of the inputs node, so an edge can leave it.
+    assert.deepEqual(boundaryPorts(definition.nodes[0]!), definition.nodes[0]!.outputs)
+    assert.deepEqual(boundaryPorts(definition.nodes[2]!), definition.nodes[2]!.inputs)
+  })
+
+  it('替换声明端口写回节点自己的那一侧', () => {
+    const ports: readonly PortDefinition[] = [{ name: 'renamed', type: 'string' }]
+
+    assert.deepEqual(withBoundaryPorts(definition.nodes[0]!, ports).outputs, ports)
+    assert.deepEqual(withBoundaryPorts(definition.nodes[2]!, ports).inputs, ports)
+  })
+
+  it('边界节点由自己的卡片绘制，其余节点用普通卡片', () => {
+    const nodes = flowNodes(definition, new Map(), new Map())
+
+    assert.deepEqual(nodes.map(node => node.type), ['boundary', 'workflow', 'boundary'])
+  })
+
+  it('边界节点像普通节点一样保存，坐标随节点一起往返', () => {
+    const nodes = flowNodes(definition, new Map(), new Map())
+    const dragged = nodes.map(node => node.id === 'in' ? { ...node, position: { x: -900, y: 40 } } : node)
+
+    const saved = parseEditorDefinition(formatEditorDefinition(toDefinition(definition, dragged, [])))
+
+    assert.deepEqual(saved.nodes.map(node => node.id), ['in', 'add', 'out'])
+    assert.deepEqual(saved.nodes[0]?.position, { x: -900, y: 40 })
+    assert.deepEqual(workflowInputPorts(saved).map(port => port.name), ['left'])
+  })
+})
+
+describe('workflow port edits move their edges', () => {
+  const edges = [
+    { id: 'in', source: 'inputs', target: 'add', sourceHandle: 'data:left', targetHandle: 'data:left' },
+    { id: 'out', source: 'add', target: 'outputs', sourceHandle: 'data:result', targetHandle: 'data:total' },
+    { id: 'plain', source: 'add', target: 'other', sourceHandle: 'data:result', targetHandle: 'data:input' },
+  ]
+
+  it('改名把边带到新端口，两侧各自只动自己的一端', () => {
+    const renamedInput = applyWorkflowPortEdit(edges, 'inputs', { kind: 'renamed', from: 'left', to: 'amount' })
+    const renamedOutput = applyWorkflowPortEdit(edges, 'outputs', { kind: 'renamed', from: 'total', to: 'sum' })
+
+    assert.equal(renamedInput[0]?.sourceHandle, 'data:amount')
+    assert.deepEqual(renamedInput.slice(1), edges.slice(1))
+    assert.equal(renamedOutput[1]?.targetHandle, 'data:sum')
+    assert.deepEqual(renamedOutput[0], edges[0])
+  })
+
+  it('删除端口带走它的边，其余边和无关编辑不受影响', () => {
+    assert.deepEqual(
+      applyWorkflowPortEdit(edges, 'inputs', { kind: 'removed', name: 'left' }).map(edge => edge.id),
+      ['out', 'plain'],
+    )
+    assert.deepEqual(applyWorkflowPortEdit(edges, 'outputs', { kind: 'other' }), edges)
+    // An edge between two authored nodes never names a declared port, whatever it is called.
+    assert.deepEqual(
+      applyWorkflowPortEdit(edges, 'outputs', { kind: 'removed', name: 'input' }).map(edge => edge.id),
+      ['in', 'out', 'plain'],
+    )
+  })
+
+})
+
+describe('run input values', () => {
+  const ports: readonly PortDefinition[] = [
+    { name: 'threshold', type: 'number', default: 3 },
+    { name: 'label', type: 'string' },
+  ]
+
+  it('每个字段从声明的默认值开始，没有默认值的字段为空', () => {
+    assert.deepEqual(workflowRunDefaults(ports), { threshold: '3', label: '' })
+  })
+
+  it('留空的输入交给默认值，没有默认值时报告缺失', () => {
+    assert.deepEqual(
+      workflowRunInputs(ports, { threshold: '', label: 'ship' }),
+      { values: { label: 'ship' } },
+    )
+    assert.deepEqual(
+      workflowRunInputs(ports, { threshold: '9', label: '' }),
+      { fault: { name: 'label', kind: 'missing' } },
+    )
+  })
+
+  it('与端口类型不符的文本被报告，不会送进运行', () => {
+    assert.deepEqual(
+      workflowRunInputs(ports, { threshold: 'many', label: 'ship' }),
+      { fault: { name: 'threshold', kind: 'invalid' } },
+    )
+  })
+})
+
+describe('workflow result values', () => {
+  const ports: readonly PortDefinition[] = [
+    { name: 'verdict', type: 'string', required: false },
+    { name: 'score', type: 'number', required: false },
+  ]
+  const record = (inputs?: Record<string, unknown>): NodeRunRecord => ({
+    nodeId: NodeId('out'),
+    status: 'completed',
+    attempts: 1,
+    startedAt: 0,
+    runId: RunId('run'),
+    ...(inputs === undefined ? {} : { inputs }),
+  })
+
+  it('按声明顺序列出送达输出端口的值', () => {
+    assert.deepEqual(
+      workflowResultValues(ports, record({ score: 4, verdict: 'ship' })),
+      [{ name: 'verdict', value: 'ship' }, { name: 'score', value: 4 }],
+    )
+  })
+
+  it('没有送达的端口不列出，运行尚未到达输出节点时没有任何值', () => {
+    // A port fed only by a branch that did not run is absent, not null.
+    assert.deepEqual(workflowResultValues(ports, record({ verdict: 'hold' })), [{ name: 'verdict', value: 'hold' }])
+    assert.deepEqual(workflowResultValues(ports, record()), [])
+    assert.deepEqual(workflowResultValues(ports, undefined), [])
   })
 })

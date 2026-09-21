@@ -37,3 +37,18 @@ export function toJsonObject(value: Record<string, unknown>, path: string): Json
   for (const [key, item] of Object.entries(value)) result[key] = toJsonValue(item, `${path}.${key}`)
   return result
 }
+
+/**
+ * 解析一段必须是 JSON 对象的文本。
+ * @param source - JSON 文本。
+ * @param path - 错误信息中使用的值路径。
+ * @returns 新 JSON 对象。
+ * @throws 文本不是合法 JSON，或解析结果不是对象时。
+ */
+export function parseJsonObject(source: string, path: string): JsonObject {
+  const value = JSON.parse(source) as unknown
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${path} 必须是 JSON 对象`)
+  }
+  return toJsonValue(value, path) as JsonObject
+}

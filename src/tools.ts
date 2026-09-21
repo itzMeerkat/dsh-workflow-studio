@@ -5,7 +5,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { RunId } from './shared/types.ts'
+import { RunId, type JsonObject } from './shared/types.ts'
+import { toJsonObject } from './shared/json.ts'
 import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 
 /**
@@ -24,7 +25,10 @@ export function registerWorkflowTools(ctx: Context): void {
       nodes: {
         type: 'array',
         required: true,
-        description: '节点列表。每个节点包含 id, type, label?, config?, inputs?, outputs?',
+        description: '节点列表。每个节点包含 id, type, label?, config?, inputs?, outputs?。'
+          + '工作流自身的输入输出由两个边界节点承担：类型 workflow-input 的节点，其 outputs 就是'
+          + '工作流接受的输入，每个端口可带 default；类型 workflow-output 的节点，其 inputs 就是'
+          + '工作流产出的输出，通常声明为 required: false。每侧最多一个。',
         items: { type: 'json' },
       },
       edges: {
@@ -72,6 +76,10 @@ export function registerWorkflowTools(ctx: Context): void {
     description: '按名称启动一个已定义的工作流执行，返回运行 ID；用 get_workflow_run 查询进度和结果。',
     parameters: {
       name: { type: 'string', required: true, description: '要运行的工作流名称' },
+      inputs: {
+        type: 'json',
+        description: '工作流声明输入端口的值，JSON 对象；省略的端口使用声明的默认值。',
+      },
     },
     output: {
       schema: {
@@ -91,7 +99,7 @@ export function registerWorkflowTools(ctx: Context): void {
       if (summary === undefined) {
         throw new Error(`工作流 "${args.name}" 未找到`)
       }
-      const run = engine.start(summary.id)
+      const run = engine.start(summary.id, workflowInputValues(args.inputs))
       return { runId: run.runId, status: 'running' }
     },
   })), 'workflow-tools:run_workflow')
@@ -110,6 +118,7 @@ export function registerWorkflowTools(ctx: Context): void {
           name: { type: 'string', description: '工作流名称' },
           status: { type: 'string', description: '运行状态' },
           error: { type: 'string', description: '失败、取消或中断原因' },
+          outputs: { type: 'json', description: '工作流声明输出端口收到的值' },
           nodes: {
             type: 'array',
             description: '节点状态',
@@ -139,6 +148,7 @@ export function registerWorkflowTools(ctx: Context): void {
         name: result.definition.name,
         status: result.status,
         ...(result.error === undefined ? {} : { error: result.error }),
+        ...(result.outputs === undefined ? {} : { outputs: toJsonObject(result.outputs, 'outputs') }),
         nodes: result.nodes.map(record => ({
           nodeId: record.nodeId,
           status: record.status,
@@ -148,4 +158,20 @@ export function registerWorkflowTools(ctx: Context): void {
       }
     },
   })), 'workflow-tools:get_workflow_run')
+}
+
+/**
+ * 工具参数中的工作流输入值。
+ *
+ * 工具参数来自模型，因此在这里校验，而不是相信声明的类型。
+ * @param value - `inputs` 参数的原始值。
+ * @returns 每个输入端口一个值；参数缺省时为空对象。
+ * @throws 参数存在但不是 JSON 对象时。
+ */
+function workflowInputValues(value: unknown): JsonObject {
+  if (value === undefined) return {}
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('inputs 必须是 JSON 对象')
+  }
+  return toJsonObject(value as Record<string, unknown>, 'inputs')
 }

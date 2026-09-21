@@ -17,9 +17,11 @@ import {
   topologicalLevels,
 } from './shared/graph.ts'
 import { isAnyJoin } from './flow-nodes.ts'
+import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './shared/workflow-boundary.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type {
-  DagDataEdge, DagExecEdge, DagNodeDefinition, DagWorkflowDefinition, NodeId, PortDefinition, WorkflowNodeExecutor,
+  DagDataEdge, DagExecEdge, DagNodeDefinition, DagWorkflowDefinition, NodeId, PortDefinition,
+  WorkflowNodeExecutor,
 } from './shared/types.ts'
 
 /**
@@ -32,6 +34,35 @@ export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefin
   const { levels, cyclic } = topologicalLevels(definition.nodes, definition.edges)
   if (cyclic.length > 0) throw new Error(`工作流包含环：${cyclic.map(node => node.id).join(', ')}`)
   return levels
+}
+
+/**
+ * 按注册表验证一个作者保存的定义。
+ *
+ * 边界节点是普通节点，因此端口、边和拓扑校验对它们一视同仁；这里只多一条它们独有的规则。
+ * @param registry - 提供节点类型的注册表。
+ * @param definition - 待验证的定义。
+ * @throws 定义违反任一可由注册表确定的不变量时。
+ */
+export function validateWorkflow(registry: WorkflowNodeRegistry, definition: DagWorkflowDefinition): void {
+  assertSingleBoundary(definition, WORKFLOW_INPUT_TYPE, '输入')
+  assertSingleBoundary(definition, WORKFLOW_OUTPUT_TYPE, '输出')
+  resolveExecutors(registry, definition)
+}
+
+/**
+ * 一个工作流最多只有一个该侧的边界节点。
+ *
+ * 工作流的签名就是边界节点声明的端口，两个同侧边界节点会让签名无从谈起。
+ * @param definition - 待验证的定义。
+ * @param type - 边界节点类型。
+ * @param kind - 端口所在的一侧，用于错误信息。
+ * @throws 存在多个该侧边界节点时。
+ */
+function assertSingleBoundary(definition: DagWorkflowDefinition, type: string, kind: string): void {
+  if (definition.nodes.filter(node => node.type === type).length > 1) {
+    throw new Error(`工作流最多只能有一个${kind}边界节点`)
+  }
 }
 
 interface ResolvedNodePorts {

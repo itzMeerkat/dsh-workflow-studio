@@ -7,7 +7,9 @@
 
 import { execOutputPins } from '../shared/graph.ts'
 import type { NodeId } from '../shared/types.ts'
+import { boundaryPorts, isBoundaryNode, WORKFLOW_OUTPUT_TYPE } from '../shared/workflow-boundary.ts'
 import { nodeInputPorts, nodeOutputPorts, type WorkflowNodeData } from './graph-model.ts'
+import { workflowResultValues } from './workflow-ports.ts'
 
 /** Stage column geometry in pixels; the cards are the width the stylesheet gives them. */
 const LAYOUT = {
@@ -27,6 +29,8 @@ const CARD_METRICS = {
   pin: 16,
   pinGap: 4,
   port: 18,
+  /** A boundary card's port is a row of fields, not a label. */
+  boundaryPort: 29,
   control: 32,
   output: 30,
   minimum: 92,
@@ -68,11 +72,12 @@ export interface ExecutionLayout {
 export function estimateNodeCardHeight(data: WorkflowNodeData): number {
   const pins = Math.max(1, execOutputPins(data.catalog ?? {}).length)
   const ports = Math.max(nodeInputPorts(data).length, nodeOutputPorts(data).length)
+  const portRow = isBoundaryNode(data.definition) ? CARD_METRICS.boundaryPort : CARD_METRICS.port
   const controls = data.catalog?.controls.length ?? 0
   const outputs = displayedOutputCount(data)
   const height = CARD_METRICS.frame + CARD_METRICS.header + CARD_METRICS.meta
     + CARD_METRICS.section + pins * CARD_METRICS.pin + (pins - 1) * CARD_METRICS.pinGap
-    + CARD_METRICS.section + ports * CARD_METRICS.port
+    + CARD_METRICS.section + ports * portRow
     + (controls === 0 ? 0 : CARD_METRICS.section + controls * CARD_METRICS.control)
     + (outputs === 0 ? 0 : CARD_METRICS.section + CARD_METRICS.meta + outputs * CARD_METRICS.output)
   return Math.max(CARD_METRICS.minimum, height)
@@ -113,8 +118,12 @@ export function executionLayout(
   return { bands, cards }
 }
 
-/** How many output ports the run produced a displayable value for. */
+/** How many values the card will list for the latest run. */
 function displayedOutputCount(data: WorkflowNodeData): number {
+  // The workflow's output card lists what it received, which is nowhere in its own outputs.
+  if (data.definition.type === WORKFLOW_OUTPUT_TYPE) {
+    return workflowResultValues(boundaryPorts(data.definition), data.runRecord).length
+  }
   const produced = data.runRecord?.outputs
   if (produced === undefined) return 0
   return nodeOutputPorts(data)

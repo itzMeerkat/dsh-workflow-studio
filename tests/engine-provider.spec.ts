@@ -173,7 +173,7 @@ describe('DagEngineProvider', () => {
     assert.ok(ctx.dagEngine instanceof DagEngineProvider)
   })
 
-  it('核心插件只注册流程控制节点，并随卸载移除服务和工具', async () => {
+  it('核心插件只注册流程控制和边界节点，并随卸载移除服务和工具', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     const root = await mkdtemp(join(tmpdir(), 'dsh-workflow-studio-'))
@@ -210,8 +210,12 @@ describe('DagEngineProvider', () => {
     await plugin
     await ready.promise
 
-    // The engine owns branch and merge because their behavior is execution semantics; nothing else.
-    assert.deepEqual(ctx.workflowNodeRegistry.listTypes().map(node => node.type).sort(), ['branch', 'merge'])
+    // The engine owns the node types whose behavior is execution semantics or the workflow's own
+    // boundary; nothing else.
+    assert.deepEqual(
+      ctx.workflowNodeRegistry.listTypes().map(node => node.type).sort(),
+      ['branch', 'merge', 'workflow-input', 'workflow-output'],
+    )
     assert.deepEqual([...tools.keys()].sort(), ['create_workflow', 'get_workflow_run', 'run_workflow'])
     assert.ok(ctx.workflowStudioController instanceof WorkflowStudioController)
 

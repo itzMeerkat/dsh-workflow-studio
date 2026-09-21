@@ -398,6 +398,12 @@
   user-select: none;
 }
 
+/* A node suppresses text selection so dragging it never selects the card; its fields opt back in. */
+.canvas :global(.react-flow__node) input,
+.canvas :global(.react-flow__node) textarea {
+  user-select: text;
+}
+
 .canvas :global(.react-flow__node.draggable) {
   cursor: grab;
 }
@@ -510,6 +516,150 @@
 
 .canvas :global(.react-flow__edge.selected:hover .react-flow__edge-path) {
   stroke-width: 3;
+}
+
+/* ---- Run dialog ---- */
+
+.runForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.runField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.runField > span {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.runField > span small {
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+}
+
+.runField input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+.runField[data-fault] input {
+  border-color: #b83232;
+}
+
+.runField[data-fault] > small {
+  color: #b83232;
+  font-size: 11px;
+}
+
+.runActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- Workflow ports ---- */
+
+.boundaryCard {
+  width: 280px;
+}
+
+.boundaryCard[data-side='inputs'] .boundaryPort {
+  grid-template-columns: minmax(0, 1fr) 58px minmax(0, 66px) 20px;
+}
+
+.boundaryCard[data-side='outputs'] .boundaryPort {
+  grid-template-columns: minmax(0, 1fr) 66px 20px;
+}
+
+.boundaryCard p {
+  margin: 9px 0 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.boundaryPorts {
+  display: flex;
+  margin: 10px 0 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 5px;
+  list-style: none;
+}
+
+.boundaryPort {
+  display: grid;
+  position: relative;
+  align-items: center;
+  gap: 4px;
+}
+
+.boundaryPort input,
+.boundaryPort select {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 2px 5px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.boundaryPort[data-fault] input {
+  border-color: #b83232;
+  color: #b83232;
+}
+
+.boundaryCard[data-side='inputs'] .execPins {
+  justify-content: flex-end;
+}
+
+.boundaryCard[data-side='inputs'] :global(.react-flow__handle-right) {
+  right: -13px;
+}
+
+.boundaryCard[data-side='outputs'] :global(.react-flow__handle-left) {
+  left: -13px;
+}
+
+.workflowPortsAdd,
+.boundaryPort button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.workflowPortsAdd:hover,
+.boundaryPort button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 .canvasNode {
@@ -1029,6 +1179,10 @@
 
 .nodeType:focus-visible,
 .workflowMenuRow:focus-visible,
+.workflowPortsAdd:focus-visible,
+.boundaryPort button:focus-visible,
+.boundaryPort input:focus-visible,
+.boundaryPort select:focus-visible,
 .viewTabs button:focus-visible,
 .workflowName:focus-visible,
 .menuSearch input:focus-visible,

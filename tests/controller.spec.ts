@@ -89,7 +89,7 @@ describe('WorkflowStudioController', () => {
     )
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
-      ['ask', 'branch', 'greater', 'merge', 'sum', 'value'],
+      ['ask', 'branch', 'greater', 'merge', 'sum', 'value', 'workflow-input', 'workflow-output'],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
     assert.equal(sum?.sourcePlugin, 'test-fixtures')
@@ -111,6 +111,36 @@ describe('WorkflowStudioController', () => {
     const result = await runEnded(contexts.at(-1)!, runId)
     assert.equal(result.status, 'completed')
     assert.deepEqual(result.nodes.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
+  })
+
+  it('保存的定义保留边界节点声明的端口和默认值', async () => {
+    const controller = await setup()
+    await controller.save(JSON.stringify({
+      name: 'declared',
+      nodes: [
+        {
+          id: 'in',
+          type: 'workflow-input',
+          config: {},
+          outputs: [{ name: 'threshold', type: 'number', default: 3 }],
+        },
+        {
+          id: 'out',
+          type: 'workflow-output',
+          config: {},
+          inputs: [{ name: 'verdict', type: 'string', required: false }],
+        },
+      ],
+      edges: [],
+    }))
+
+    const saved = JSON.parse(
+      (JSON.parse(controller.snapshot()) as { workflows: Array<{ definition: string }> }).workflows[0]!.definition,
+    ) as { nodes: Array<{ id: string; outputs?: Array<{ name: string; default?: unknown }> }> }
+    // A schema that does not declare `default` drops it, so the round trip is what proves it persists.
+    assert.deepEqual(saved.nodes.find(node => node.id === 'in')?.outputs, [
+      { name: 'threshold', type: 'number', default: 3 },
+    ])
   })
 
   it('等待中的请求经 signal Remote 校验后送达结果', async () => {

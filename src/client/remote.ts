@@ -11,7 +11,7 @@ export interface WorkflowStudioRemoteNamespace {
   snapshot(): Promise<RemoteResult<string>>
   save(source: string): Promise<RemoteResult<string>>
   update(workflowId: string, source: string): Promise<RemoteResult<string>>
-  start(workflowId: string): Promise<RemoteResult<string>>
+  start(workflowId: string, inputs: string): Promise<RemoteResult<string>>
   listRuns(): Promise<RemoteResult<string>>
   getRun(runId: string): Promise<RemoteResult<string>>
   pause(runId: string): Promise<RemoteResult<string>>
@@ -89,7 +89,7 @@ const contribution: TypertRemoteContribution = {
     descriptor('snapshot', []),
     descriptor('save', ['source']),
     descriptor('update', ['workflowId', 'source']),
-    descriptor('start', ['workflowId']),
+    descriptor('start', ['workflowId', 'inputs']),
     descriptor('listRuns', []),
     descriptor('getRun', ['runId']),
     descriptor('pause', ['runId']),

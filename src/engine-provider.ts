@@ -13,15 +13,17 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import DagEngine from './engine.ts'
 import type { DagRun } from './engine.ts'
 import type {
-  DagWorkflowDefinition, NodeId, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord, WorkflowNodeExecutor,
+  DagWorkflowDefinition, JsonObject, NodeId, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
+  WorkflowNodeExecutor,
 } from './shared/types.ts'
 import { WorkflowId, RunId } from './shared/types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import { registerFlowControlNodes } from './flow-nodes.ts'
 import { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 import { messageOf } from './shared/errors.ts'
-import { resolveExecutors } from './validation.ts'
+import { resolveExecutors, validateWorkflow } from './validation.ts'
 import { uniqueWorkflowSlug } from './shared/slug.ts'
+import { withRunInputs } from './shared/workflow-boundary.ts'
 import {
   TERMINAL_STATUSES, cancelRemaining, createRunState, nodeState, releasePauseWaiters, runInfo,
   summaryOfRecord, toRunRecord, type RunState,
@@ -110,7 +112,7 @@ export class DagEngineProvider extends DagEngine {
 
   async save(definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
-    resolveExecutors(this.registry, snapshot)
+    validateWorkflow(this.registry, snapshot)
 
     return this.enqueueMutation(async () => {
       const existing = this.findByName(snapshot.name)
@@ -128,7 +130,7 @@ export class DagEngineProvider extends DagEngine {
    */
   async update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
-    resolveExecutors(this.registry, snapshot)
+    validateWorkflow(this.registry, snapshot)
     return this.enqueueMutation(async () => {
       const current = this.workflows.get(id)
       if (current === undefined) {
@@ -175,10 +177,12 @@ export class DagEngineProvider extends DagEngine {
     return undefined
   }
 
-  start(workflowId: WorkflowId): DagRun {
+  start(workflowId: WorkflowId, inputs: JsonObject = {}): DagRun {
     if (this.closing) throw new Error('工作流引擎正在关闭')
-    const definition = this.get(workflowId)
-    if (definition === undefined) throw new Error(`工作流 ${workflowId} 未找到`)
+    const authored = this.get(workflowId)
+    if (authored === undefined) throw new Error(`工作流 ${workflowId} 未找到`)
+    // 输入值写进边界节点的配置，因此运行快照自带它们，恢复时也不必重新提供。
+    const definition = withRunInputs(authored, inputs)
     const executors = resolveExecutors(this.registry, definition)
     const runId = RunId(randomUUID())
     const now = Date.now()

@@ -10,6 +10,7 @@ import type { DagEngine } from './engine.ts'
 import { NodeId, RunId, WorkflowId, type WorkflowStudioSnapshot } from './shared/types.ts'
 import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 import { messageOf } from './shared/errors.ts'
+import { parseJsonObject } from './shared/json.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -78,12 +79,14 @@ export class WorkflowStudioController extends TypertRemoteService {
   /**
    * Start one saved workflow without waiting for it to settle.
    * @param workflowId - ID returned by {@link save}.
+   * @param inputs - Values for the declared input ports, encoded as a JSON object; omitted ports use their default.
    * @returns The new run ID.
    */
   @Remote
-  start(workflowId: string): string {
+  start(workflowId: string, inputs?: string): string {
     try {
-      return this.engine.start(WorkflowId(workflowId)).runId
+      const values = inputs === undefined ? {} : parseJsonObject(inputs, '工作流输入')
+      return this.engine.start(WorkflowId(workflowId), values).runId
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

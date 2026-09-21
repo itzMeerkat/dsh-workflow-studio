@@ -33,6 +33,7 @@ export const workflowPortSchema = z.object({
   description: nonEmptyString.optional(),
   required: z.boolean().optional(),
   display: z.enum(['value', 'json']).optional(),
+  default: z.json().optional(),
 }) as unknown as z.ZodType<PortDefinition>
 
 const controlIdentity = { name: nonEmptyString, label: nonEmptyString }
@@ -57,6 +58,11 @@ export const nodeControlSchema = z.discriminatedUnion('kind', [
   }),
 ]) as unknown as z.ZodType<NodeControlDefinition>
 
+const editorPosition = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+})
+
 /** 一个工作流节点的 JSON 表示。 */
 export const workflowNodeSchema = z.object({
   id: nonEmptyString,
@@ -64,10 +70,7 @@ export const workflowNodeSchema = z.object({
   label: nonEmptyString.optional(),
   config: z.record(z.string(), z.json()).default({}),
   recovery: z.enum(['rerun', 'hold']).optional(),
-  position: z.object({
-    x: z.number().finite(),
-    y: z.number().finite(),
-  }).optional(),
+  position: editorPosition.optional(),
   outputs: z.array(workflowPortSchema).optional(),
   inputs: z.array(workflowPortSchema).optional(),
 }) as unknown as z.ZodType<DagNodeDefinition>
@@ -92,8 +95,6 @@ export const workflowDefinitionSchema = z.object({
   description: nonEmptyString.optional(),
   nodes: z.array(workflowNodeSchema),
   edges: z.array(workflowEdgeSchema),
-  inputs: z.array(workflowPortSchema).optional(),
-  outputs: z.array(workflowPortSchema).optional(),
 }) as unknown as z.ZodType<DagWorkflowDefinition>
 
 const runStatus = z.enum(['running', 'paused', 'interrupted', 'completed', 'failed', 'cancelled'])

@@ -14,8 +14,12 @@ import {
 import type { Connection, Edge, EdgeChange, NodeChange } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
-import type { DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
+import type {
+  DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary, PortDefinition,
+} from '../shared/types.ts'
+import { withBoundaryPorts } from '../shared/workflow-boundary.ts'
 import {
+  applyWorkflowPortEdit,
   connectionError,
   flowEdges,
   flowNodes,
@@ -26,9 +30,11 @@ import {
 import type { Translate } from './locale.ts'
 import { NodeCardContext, WorkflowNodeCard } from './NodeCard.tsx'
 import { NodeInspector } from './NodeInspector.tsx'
+import type { WorkflowPortEdit } from './workflow-ports.ts'
+import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
 import css from './WorkflowStudioPanel.module.css'
 
-const nodeTypes = { workflow: WorkflowNodeCard }
+const nodeTypes = { workflow: WorkflowNodeCard, boundary: WorkflowBoundaryCard }
 
 interface WorkflowGraphEditorProps {
   readonly definition: DagWorkflowDefinition
@@ -67,7 +73,8 @@ export function WorkflowGraphEditor({
   }, [revision, catalog])
 
   useEffect(() => {
-    setNodes(current => current.map(node => ({ ...node, data: withRunRecord(node.data, runRecords.get(node.id)) })))
+    setNodes(current => current.map(node =>
+      ({ ...node, data: withRunRecord(node.data, runRecords.get(node.id)) })))
   }, [runRecords])
 
   const selectedNode = nodes.find(node => node.id === selectedNodeId)
@@ -123,6 +130,23 @@ export function WorkflowGraphEditor({
     }
   }
 
+  /** Replace the workflow ports one boundary node declares, bringing their edges along. */
+  const setBoundaryPorts = (
+    nodeId: string,
+    ports: readonly PortDefinition[],
+    edit: WorkflowPortEdit,
+  ): void => {
+    const nextEdges = applyWorkflowPortEdit(edges, nodeId, edit)
+    setEdges(nextEdges)
+    setNodes((current) => {
+      const next = current.map(node => node.id === nodeId
+        ? { ...node, data: { ...node.data, definition: withBoundaryPorts(node.data.definition, ports) } }
+        : node)
+      onChange(toDefinition(definition, next, nextEdges))
+      return next
+    })
+  }
+
   const deleteSelected = (): void => {
     if (selectedNodeId === undefined) return
     const nextNodes = nodes.filter(node => node.id !== selectedNodeId)
@@ -136,7 +160,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div className={css.canvas}>
-        <NodeCardContext.Provider value={{ t, updateConfig }}>
+        <NodeCardContext.Provider value={{ t, updateConfig, updatePorts: setBoundaryPorts }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}

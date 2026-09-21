@@ -9,6 +9,9 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from './node.ts'
+import {
+  WORKFLOW_INPUT_TYPE, WORKFLOW_INPUT_VALUES, WORKFLOW_OUTPUT_TYPE,
+} from './shared/workflow-boundary.ts'
 import type {
   NodeExecutionContext, NodeExecutionResult, PortDefinition, WorkflowNodeExecutor,
 } from './shared/types.ts'
@@ -74,6 +77,46 @@ export class MergeNode extends WorkflowNode<{ output: unknown }> {
   }
 }
 
+/**
+ * 把调用方提供的工作流输入送入图中的边界节点。
+ *
+ * 工作流接受哪些输入就是本节点声明了哪些输出端口，因此执行器自身不声明端口。
+ * 运行开始前已解析出每个端口的值，所以本节点只是把它们原样交给下游。
+ */
+export class WorkflowInputNode implements WorkflowNodeExecutor {
+  readonly type = WORKFLOW_INPUT_TYPE
+  readonly label = '工作流输入'
+  readonly description = '把调用方提供的工作流输入送入图中'
+  readonly inputs: readonly PortDefinition[] = []
+  readonly outputs: readonly PortDefinition[] = []
+
+  execute({ config }: NodeExecutionContext): NodeExecutionResult {
+    const values = config[WORKFLOW_INPUT_VALUES]
+    if (typeof values !== 'object' || values === null || Array.isArray(values)) {
+      return { status: 'failed', error: '工作流输入节点缺少本次运行的输入值' }
+    }
+    return { status: 'completed', outputs: { ...values as Record<string, unknown> } }
+  }
+}
+
+/**
+ * 收集工作流输出的边界节点。
+ *
+ * 工作流产出哪些输出就是本节点声明了哪些输入端口。收到的值记录在节点运行记录的 `inputs` 上，
+ * 运行记录再把它们提升为整个运行的输出，因此本节点不声明输出端口，也就不受输出完整性检查约束。
+ */
+export class WorkflowOutputNode implements WorkflowNodeExecutor {
+  readonly type = WORKFLOW_OUTPUT_TYPE
+  readonly label = '工作流输出'
+  readonly description = '收集工作流声明的输出值'
+  readonly inputs: readonly PortDefinition[] = []
+  readonly outputs: readonly PortDefinition[] = []
+
+  execute(): NodeExecutionResult {
+    return { status: 'completed', outputs: {} }
+  }
+}
+
 const branchNode = new BranchNode()
 const mergeNode = new MergeNode()
 
@@ -92,7 +135,9 @@ export function isAnyJoin(executor: WorkflowNodeExecutor): boolean {
  * @param ctx - 已加载 workflowNodeRegistry 服务的 Cordis context。
  */
 export function registerFlowControlNodes(ctx: Context): void {
-  const nodes: readonly WorkflowNodeExecutor[] = [branchNode, mergeNode]
+  const nodes: readonly WorkflowNodeExecutor[] = [
+    branchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(),
+  ]
   for (const node of nodes) {
     ctx.effect(() => ctx.workflowNodeRegistry.register(node, 'dsh-workflow-studio'), `flow-node:${node.type}`)
   }

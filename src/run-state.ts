@@ -3,10 +3,12 @@
  * @module dsh-workflow-studio
  */
 
+import { NodeId } from './shared/types.ts'
 import type {
-  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, JsonValue, NodeId, NodeRunRecord, NodeRunStatus, RunId, WorkflowId,
+  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, JsonValue, NodeRunRecord, NodeRunStatus, RunId, WorkflowId,
   WorkflowNodeExecutor, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from './shared/types.ts'
+import { WORKFLOW_OUTPUT_TYPE } from './shared/workflow-boundary.ts'
 
 /** 节点定义与其运行记录。 */
 export interface NodeExecState {
@@ -93,6 +95,9 @@ export function createRunState(record: WorkflowRunRecord): RunState {
  * @returns 可持久化或返回给调用方的运行记录。
  */
 export function toRunRecord(state: RunState): WorkflowRunRecord {
+  // 输出边界节点不声明输出端口，收集到的值留在它的 inputs 上。
+  const collected = [...state.nodeStates.values()]
+    .find(item => item.node.type === WORKFLOW_OUTPUT_TYPE)?.record.inputs
   return {
     runId: state.runId,
     workflowId: state.workflowId,
@@ -103,6 +108,7 @@ export function toRunRecord(state: RunState): WorkflowRunRecord {
     nodes: structuredClone([...state.nodeStates.values()].map(item => item.record)),
     ...(state.completedAt === undefined ? {} : { completedAt: state.completedAt }),
     ...(state.error === undefined ? {} : { error: state.error }),
+    ...(collected === undefined ? {} : { outputs: structuredClone(collected) }),
   }
 }
 

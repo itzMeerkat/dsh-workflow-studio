@@ -12,7 +12,10 @@ import {
 import type { PropsLocale, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
-import type { DagWorkflowDefinition, NodeTypeSummary, WorkflowStudioSnapshot } from '../shared/types.ts'
+import { NodeId, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowStudioSnapshot } from '../shared/types.ts'
+import {
+  WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, workflowInputPorts,
+} from '../shared/workflow-boundary.ts'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
 import type { NS } from './locale.ts'
 import { NodeLibraryMenu, WorkflowPicker } from './Menus.tsx'
@@ -25,6 +28,7 @@ import {
   type WorkflowRow,
 } from './model.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
+import { RunDialog } from './RunDialog.tsx'
 import { RunsView } from './RunsView.tsx'
 import { isActiveRun, runRecordsByNode } from './runs-model.ts'
 import { downloadWorkflow, importedWorkflowName, parseImportedWorkflow } from './transfer.ts'
@@ -56,6 +60,8 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
   const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'running'>('loading')
   const [notice, setNotice] = useState<string>()
   const runs = useRuns(remote, setNotice)
+  // Set while the run dialog is collecting values for the workflow's declared inputs.
+  const [runPrompt, setRunPrompt] = useState(false)
   const importInput = useRef<HTMLInputElement>(null)
 
   const replaceDefinition = (next: DagWorkflowDefinition): void => {
@@ -116,19 +122,26 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
   }
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
-  const run = async (): Promise<void> => {
+  const startRun = async (inputs: string): Promise<void> => {
+    setRunPrompt(false)
     setPhase('running')
     setNotice(undefined)
     const workflowId = await persist()
     const runId = workflowId === undefined
       ? undefined
-      : await callRemote(() => remote.start(workflowId), id => id, setNotice)
+      : await callRemote(() => remote.start(workflowId, inputs), id => id, setNotice)
     if (runId !== undefined) {
       runs.setFilter('workflow')
       setView('runs')
       runs.select(runId)
     }
     setPhase('ready')
+  }
+
+  /** A workflow that declares inputs asks for their values first; one that declares none just runs. */
+  const run = (): void => {
+    if (workflowInputPorts(definition).length > 0) setRunPrompt(true)
+    else void startRun('{}')
   }
 
   /** Load one picked file into the editor as an unsaved workflow. */
@@ -150,6 +163,10 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
   }
 
   const busy = phase !== 'ready'
+  // A workflow has at most one boundary node per side, so the library stops offering a second.
+  const addableNodeTypes = snapshot.nodeTypes.filter(type =>
+    (type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
+    || !definition.nodes.some(node => node.type === type.type))
   const overlay = runs.record?.workflowId === selectedId ? runs.record : undefined
   const runRecords = overlay === undefined ? new Map() : runRecordsByNode(overlay)
   const runResult = overlay === undefined ? undefined : JSON.stringify(overlay.nodes, null, 2)
@@ -196,7 +213,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
           {view === 'canvas' && (
             <NodeLibraryMenu
               disabled={busy}
-              nodeTypes={snapshot.nodeTypes}
+              nodeTypes={addableNodeTypes}
               t={t}
               onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType)) }}
             />
@@ -261,7 +278,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
             variant="primary"
             icon={<IconPlayOutline16 size={14} />}
             disabled={busy}
-            onClick={() => { void run() }}
+            onClick={run}
           >
             {phase === 'running' ? t('action.running') : t('action.run')}
           </Button>
@@ -308,13 +325,35 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
             />
           )}
           {notice !== undefined && <p className={css.notice} role="alert">{notice}</p>}
+          {runPrompt && (
+            <RunDialog
+              ports={workflowInputPorts(definition)}
+              busy={busy}
+              t={t}
+              onCancel={() => { setRunPrompt(false) }}
+              onRun={(inputs) => { void startRun(inputs) }}
+            />
+          )}
         </section>
       </div>
     </main>
   )
 }
 
-/** A workflow with no nodes; Studio registers no nodes, so the template names none. */
+/**
+ * A new workflow, holding only its two boundary nodes.
+ *
+ * They are ordinary nodes, so a new workflow could start without them; seeding them means the
+ * place to declare an input is on screen from the start instead of hiding in the node library.
+ * @param name - The new workflow's name.
+ */
 function emptyDefinition(name: string): DagWorkflowDefinition {
-  return { name, nodes: [], edges: [] }
+  return {
+    name,
+    nodes: [
+      { id: NodeId(WORKFLOW_INPUT_TYPE), type: WORKFLOW_INPUT_TYPE, config: {}, outputs: [], position: { x: 80, y: 80 } },
+      { id: NodeId(WORKFLOW_OUTPUT_TYPE), type: WORKFLOW_OUTPUT_TYPE, config: {}, inputs: [], position: { x: 720, y: 80 } },
+    ],
+    edges: [],
+  }
 }

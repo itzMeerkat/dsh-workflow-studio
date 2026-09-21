@@ -6,6 +6,7 @@ import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
 import { EXEC_RUN_PIN, execOutputPins } from '../shared/graph.ts'
 import { handleId, nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
 import type { Translate } from './locale.ts'
+import type { WorkflowPortEdit } from './workflow-ports.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 /**
@@ -22,6 +23,12 @@ export interface NodeCardActions {
   readonly t: Translate
   /** Set when the card may edit configuration; absent in a read-only graph. */
   readonly updateConfig?: (nodeId: string, name: string, value: unknown) => void
+  /** Set when a boundary card may edit the ports it declares. */
+  readonly updatePorts?: (
+    nodeId: string,
+    ports: readonly PortDefinition[],
+    edit: WorkflowPortEdit,
+  ) => void
 }
 
 /** Provides {@link NodeCardActions} to the cards React Flow renders. */
@@ -109,17 +116,7 @@ export function NodeCard({
           ))}
         </div>
       )}
-      {runOutputs.length > 0 && (
-        <div className={css.nodeOutputs}>
-          <span className={css.nodeSection}>{t('node.output')}</span>
-          {runOutputs.map(({ port, value }) => (
-            <div key={port.name} className={css.nodeOutput}>
-              <span>{port.name}</span>
-              <output>{formatOutput(value, port.display ?? 'value')}</output>
-            </div>
-          ))}
-        </div>
-      )}
+      <CardRunValues title={t('node.output')} values={runOutputs} />
       {graph === 'execution' && (
         <Handle id="dependency" type="source" position={Position.Right} isConnectable={false} />
       )}
@@ -127,13 +124,48 @@ export function NodeCard({
   )
 }
 
+/** One value a run produced, as a card shows it. */
+export interface CardRunValue {
+  readonly name: string
+  readonly value: unknown
+  /** How to print it; a string prints as itself and anything else as JSON when this is absent. */
+  readonly display?: 'value' | 'json'
+}
+
+/**
+ * What a run produced, as every card shows it.
+ *
+ * Both cards report a run the same way, so the section is one component: a node card lists the
+ * output ports it declared, and the workflow's output card lists what the run returned.
+ * @param title - The section heading.
+ * @param values - The values to list, in the order they should appear.
+ * @returns The section, or nothing when the run produced none.
+ */
+export function CardRunValues({ title, values }: {
+  readonly title: string
+  readonly values: readonly CardRunValue[]
+}) {
+  if (values.length === 0) return null
+  return (
+    <div className={css.nodeOutputs}>
+      <span className={css.nodeSection}>{title}</span>
+      {values.map(({ name, value, display }) => (
+        <div key={name} className={css.nodeOutput}>
+          <span>{name}</span>
+          <output>{formatOutput(value, display ?? (typeof value === 'string' ? 'value' : 'json'))}</output>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** The output ports a run produced a displayable value for, in port order. */
-function displayedOutputs(data: WorkflowNodeData): readonly { port: PortDefinition; value: unknown }[] {
+function displayedOutputs(data: WorkflowNodeData): readonly CardRunValue[] {
   const produced = data.runRecord?.outputs
   if (produced === undefined) return []
   return nodeOutputPorts(data)
     .filter(port => port.display !== undefined && Object.hasOwn(produced, port.name))
-    .map(port => ({ port, value: produced[port.name] }))
+    .map(port => ({ name: port.name, value: produced[port.name], display: port.display ?? 'value' }))
 }
 
 function ExecPin({ pin, side, connectable, branch = false }: {
