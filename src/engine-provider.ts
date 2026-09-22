@@ -18,7 +18,7 @@ import type {
 } from './shared/types.ts'
 import { WorkflowId, RunId } from './shared/types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
-import { registerFlowControlNodes } from './flow-nodes.ts'
+import { registerBuiltinNodes } from './flow-nodes.ts'
 import { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 import { messageOf } from './shared/errors.ts'
 import { resolveExecutors, validateWorkflow } from './validation.ts'
@@ -78,13 +78,13 @@ export class DagEngineProvider extends DagEngine {
   }
 
   /**
-   * 注册流程控制节点，打开定义与运行 Domain，启动恢复，并在服务卸载时停止运行、等待写入完成后关闭。
+   * 注册自有节点，打开定义与运行 Domain，启动恢复，并在服务卸载时停止运行、等待写入完成后关闭。
    *
-   * 流程控制节点随引擎注册而不是随插件入口注册，因此任何加载了引擎的 Host 都能解析它们，
+   * 自有节点随引擎注册而不是随插件入口注册，因此任何加载了引擎的 Host 都能解析它们，
    * 包括恢复已保存的定义时。
    */
   protected async [Service.init](): Promise<void> {
-    registerFlowControlNodes(this.ctx)
+    registerBuiltinNodes(this.ctx)
     const domain = await this.ctx.storageDomain.open(workflowStudioDomainSpec)
     const openedRuns = await this.ctx.storageDomain.open(workflowRunsDomainSpec).catch(async (error: unknown) => {
       await domain.close()
@@ -453,6 +453,7 @@ function workflowSummary(
   return {
     id,
     name: definition.name,
+    kind: definition.kind,
     ...(definition.description === undefined ? {} : { description: definition.description }),
   }
 }

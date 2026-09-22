@@ -1,7 +1,12 @@
 /** Browser-side workflow editing helpers used by the visual editor. */
 
 import { execSourcePin, isExecEdge, topologicalLevels } from '../shared/graph.ts'
-import { NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowStudioSnapshot } from '../shared/types.ts'
+import { CODE_LANGUAGES } from '../shared/language.ts'
+import {
+  NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowKind,
+  type WorkflowStudioSnapshot,
+} from '../shared/types.ts'
+import type { WorkflowStudioKey } from './locale.ts'
 import { workflowDefinitionSchema, workflowStudioSnapshotSchema } from '../shared/workflow-schema.ts'
 
 /** One saved workflow in the editor snapshot. */
@@ -208,6 +213,35 @@ function hasAlternatePath(
     pending.push(...(outgoing.get(nodeId) ?? []))
   }
   return false
+}
+
+/** Why a panel cannot open a definition: the locale key of the reason and what it names. */
+export interface OpenFault {
+  readonly key: Extract<WorkflowStudioKey, `open.${string}`>
+  readonly detail: string
+}
+
+/**
+ * Why the panel for `kind` cannot edit a definition.
+ *
+ * A panel edits one kind of workflow, every view assumes each edge joins two nodes, and a code
+ * workflow's source is written in the language it names; a saved record or an imported file may
+ * break any of these, so the panel refuses it here instead of failing in whichever view reads it.
+ * @param definition - The parsed definition.
+ * @param kind - The kind the panel edits.
+ * @returns The first reason, or undefined when the panel can edit it.
+ */
+export function openFault(definition: DagWorkflowDefinition, kind: WorkflowKind): OpenFault | undefined {
+  if (definition.kind !== kind) return { key: 'open.otherKind', detail: definition.kind }
+  const ids = new Set<string>(definition.nodes.map(node => node.id))
+  const dangling = definition.edges.find(edge => !ids.has(edge.source) || !ids.has(edge.target))
+  if (dangling !== undefined) {
+    return { key: 'open.danglingEdge', detail: `${dangling.id} (${dangling.source} → ${dangling.target})` }
+  }
+  if (kind === 'code' && !CODE_LANGUAGES.some(language => language.name === definition.language)) {
+    return { key: 'open.language', detail: CODE_LANGUAGES.map(language => language.name).join(', ') }
+  }
+  return undefined
 }
 
 /** Parse a workflow with the same schema used by Host persistence. */

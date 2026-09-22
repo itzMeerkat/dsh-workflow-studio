@@ -1,5 +1,6 @@
 /** Conversion between workflow definitions and React Flow nodes and edges, and connection rules for the canvas. */
 
+import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import { MarkerType, type Connection, type Edge, type Node } from '@xyflow/react'
 import {
   EXEC_RUN_PIN,
@@ -10,7 +11,6 @@ import {
   execTargetPin,
   isExecEdge,
   portsAreCompatible,
-  resolveInputPorts,
 } from '../shared/graph.ts'
 import { isBoundaryNode } from '../shared/workflow-boundary.ts'
 import type { WorkflowPortEdit } from './workflow-ports.ts'
@@ -26,11 +26,12 @@ import {
   type PortDefinition,
 } from '../shared/types.ts'
 
-/** Data of one canvas node: its definition, catalog entry, and latest run record. */
+/** Data of one canvas node: its definition, catalog entry, latest run record, and findings. */
 export type WorkflowNodeData = {
   definition: DagNodeDefinition
   catalog?: NodeTypeSummary
   runRecord?: NodeRunRecord
+  diagnostics?: readonly WorkflowDiagnostic[]
 } & Record<string, unknown>
 
 /**
@@ -83,15 +84,18 @@ export function parseHandle(handle: string | null | undefined): HandleRef | unde
  * Canvas nodes for a definition; nodes without a saved position are laid out in rows of four.
  * @param catalog - Registered node types by type.
  * @param runRecords - Latest run records by node ID.
+ * @param diagnostics - Static-analysis findings by node ID.
  */
 export function flowNodes(
   definition: DagWorkflowDefinition,
   catalog: ReadonlyMap<string, NodeTypeSummary>,
   runRecords: ReadonlyMap<string, NodeRunRecord>,
+  diagnostics: ReadonlyMap<string, readonly WorkflowDiagnostic[]>,
 ): WorkflowFlowNode[] {
   return definition.nodes.map((node, index) => {
     const nodeType = catalog.get(node.type)
     const runRecord = runRecords.get(node.id)
+    const found = diagnostics.get(node.id)
     return {
       id: node.id,
       type: isBoundaryNode(node) ? 'boundary' : 'workflow',
@@ -103,6 +107,7 @@ export function flowNodes(
         definition: node,
         ...(nodeType === undefined ? {} : { catalog: nodeType }),
         ...(runRecord === undefined ? {} : { runRecord }),
+        ...(found === undefined ? {} : { diagnostics: found }),
       },
     }
   })
@@ -169,9 +174,9 @@ function edgeDefinition(edge: Edge): DagEdgeDefinition {
   }
 }
 
-/** Input ports of a canvas node: its own ports or the catalog's, plus role ports. */
+/** Input ports of a canvas node: its own ports or the catalog's. */
 export function nodeInputPorts(data: WorkflowNodeData): readonly PortDefinition[] {
-  return resolveInputPorts(data.definition.inputs, data.catalog?.inputs ?? [])
+  return data.definition.inputs ?? data.catalog?.inputs ?? []
 }
 
 /** Output ports of a canvas node: its own ports or the catalog's. */

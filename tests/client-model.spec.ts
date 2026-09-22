@@ -12,6 +12,7 @@ import {
   filterWorkflows,
   formatEditorDefinition,
   nextWorkflowName,
+  openFault,
   parseEditorDefinition,
   reduceExecutionDependencies,
 } from '../src/client/model.ts'
@@ -30,6 +31,7 @@ import {
   workflowRunInputs,
 } from '../src/client/workflow-ports.ts'
 import { applyWorkflowPortEdit, flowNodes, toDefinition } from '../src/client/graph-model.ts'
+import { nodeType, workflow } from './graph-fixtures.ts'
 import {
   boundaryPorts, WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, withBoundaryPorts,
   workflowInputPorts, workflowOutputPorts,
@@ -48,6 +50,7 @@ describe('workflow editor model', () => {
   it('round-trips node positions and explicit ports', () => {
     const source = JSON.stringify({
       name: 'visual',
+      kind: 'run' as const,
       nodes: [{
         id: 'node',
         type: 'input',
@@ -81,6 +84,7 @@ describe('workflow editor model', () => {
     assert.throws(
       () => parseEditorDefinition(JSON.stringify({
         name: 'invalid',
+        kind: 'run' as const,
         nodes: [{ id: 'node', type: 'input', config: {}, position: { x: 'left', y: 0 } }],
         edges: [],
       })),
@@ -94,26 +98,14 @@ describe('workflow editor model', () => {
 
   it('filters node types by metadata and source plugin', () => {
     const nodes: NodeTypeSummary[] = [
-      {
-        type: 'send-email',
-        label: 'Send email',
-        description: 'Deliver one message',
-        sourcePlugin: 'dsh-mail-workflow',
-        execOutputs: ['then'],
-        inputs: [],
-        outputs: [],
-        controls: [],
-      },
-      {
-        type: 'lookup-user',
-        label: 'Lookup user',
-        description: 'Resolve one account',
-        sourcePlugin: 'dsh-directory-workflow',
-        execOutputs: ['then'],
-        inputs: [],
-        outputs: [],
-        controls: [],
-      },
+      nodeType('send-email', {
+        label: 'Send email', description: 'Deliver one message', sourcePlugin: 'dsh-mail-workflow',
+        inputs: [], outputs: [],
+      }),
+      nodeType('lookup-user', {
+        label: 'Lookup user', description: 'Resolve one account', sourcePlugin: 'dsh-directory-workflow',
+        inputs: [], outputs: [],
+      }),
     ]
 
     assert.deepEqual(filterNodeTypes(nodes, 'MAIL').map(node => node.type), ['send-email'])
@@ -123,8 +115,8 @@ describe('workflow editor model', () => {
 
   it('filters workflows by name', () => {
     const workflows = [
-      { id: WorkflowId('first'), name: 'Deploy Release', definition: '{}' },
-      { id: WorkflowId('second'), name: 'Review Changes', definition: '{}' },
+      { id: WorkflowId('first'), name: 'Deploy Release', kind: 'run' as const, definition: '{}' },
+      { id: WorkflowId('second'), name: 'Review Changes', kind: 'run' as const, definition: '{}' },
     ]
 
     assert.deepEqual(filterWorkflows(workflows, 'release').map(row => row.id), ['first'])
@@ -137,24 +129,14 @@ describe('workflow editor model', () => {
   })
 
   it('appends one positioned node per explicit catalog selection', () => {
-    const nodeType: NodeTypeSummary = {
-      type: 'worker',
-      label: 'Worker',
-      description: 'Runs work',
-      sourcePlugin: 'test',
-      execOutputs: ['then'],
+    const worker = nodeType('worker', {
       inputs: [],
       outputs: [],
-      controls: [{
-        name: 'enabled',
-        label: 'Enabled',
-        kind: 'boolean',
-        defaultValue: true,
-      }],
-    }
-    const initial = { name: 'editor', nodes: [], edges: [] }
-    const first = appendEditorNode(initial, nodeType)
-    const second = appendEditorNode(first, nodeType)
+      controls: [{ name: 'enabled', label: 'Enabled', kind: 'boolean', defaultValue: true }],
+    })
+    const initial = { name: 'editor', kind: 'run' as const, nodes: [], edges: [] }
+    const first = appendEditorNode(initial, worker)
+    const second = appendEditorNode(first, worker)
 
     assert.deepEqual(initial.nodes, [])
     assert.deepEqual(first.nodes, [{
@@ -168,121 +150,74 @@ describe('workflow editor model', () => {
     assert.notDeepEqual(second.nodes[1]?.position, first.nodes[0]?.position)
   })
 
+  /** 一个图的执行计划；节点类型只影响展示，因此都用 `input`。 */
+  const plan = (nodes: readonly string[], wires: readonly string[]) => createExecutionPlan(
+    workflowDefinitionSchema.parse(workflow(
+      Object.fromEntries(nodes.map(id => [id, 'input'])),
+      wires,
+    )),
+  )
+  /** 一条依赖的两端与执行引脚。 */
+  const wires = (items: ReturnType<typeof createExecutionPlan>['dependencies']) =>
+    items.map(item => [item.source.id, item.target.id, item.execSourcePin])
+
   it('groups nodes into scheduler-compatible parallel stages', () => {
-    const plan = createExecutionPlan(workflowDefinitionSchema.parse({
-      name: 'branch',
-      nodes: [
-        { id: 'left', type: 'input', config: {} },
-        { id: 'right', type: 'input', config: {} },
-        { id: 'branch', type: 'branch', config: {} },
-        { id: 'accepted', type: 'output', config: {} },
-        { id: 'rejected', type: 'output', config: {} },
-      ],
-      edges: [
-        { id: 'left-branch', kind: 'data', source: 'left', target: 'branch', targetPort: 'left' },
-        { id: 'left-accepted', kind: 'data', source: 'left', target: 'accepted', targetPort: 'value' },
-        { id: 'right-branch', kind: 'data', source: 'right', target: 'branch', targetPort: 'right' },
-        { id: 'accepted-data', kind: 'data', source: 'branch', sourcePort: 'true', target: 'accepted', targetPort: 'value' },
-        { id: 'accepted-exec', kind: 'exec', source: 'branch', sourcePort: 'true', target: 'accepted' },
-        { id: 'rejected-exec', kind: 'exec', source: 'branch', sourcePort: 'false', target: 'rejected' },
-      ],
-    }))
+    const branching = plan(['left', 'right', 'branch', 'accepted', 'rejected'], [
+      'left>branch:left',
+      'left>accepted:value',
+      'right>branch:right',
+      'branch:true>accepted:value',
+      'branch.true>accepted',
+      'branch.false>rejected',
+    ])
 
     assert.deepEqual(
-      plan.stages.map(stage => stage.nodes.map(item => item.node.id)),
+      branching.stages.map(stage => stage.nodes.map(item => item.node.id)),
       [['left', 'right'], ['branch'], ['accepted', 'rejected']],
     )
-    assert.deepEqual(
-      plan.dependencies.map(dependency => [
-        dependency.source.id,
-        dependency.target.id,
-        dependency.execSourcePin,
-      ]),
-      [
-        ['left', 'branch', undefined],
-        ['left', 'accepted', undefined],
-        ['right', 'branch', undefined],
-        ['branch', 'accepted', 'true'],
-        ['branch', 'rejected', 'false'],
-      ],
-    )
-    assert.deepEqual(
-      reduceExecutionDependencies(plan).map(dependency => [
-        dependency.source.id,
-        dependency.target.id,
-        dependency.execSourcePin,
-      ]),
-      [
-        ['left', 'branch', undefined],
-        ['right', 'branch', undefined],
-        ['branch', 'accepted', 'true'],
-        ['branch', 'rejected', 'false'],
-      ],
-    )
-    assert.equal(plan.stages[2]?.nodes[0]?.dependencies.length, 2)
-    assert.deepEqual(plan.cyclicNodeIds, [])
+    assert.deepEqual(wires(branching.dependencies), [
+      ['left', 'branch', undefined],
+      ['left', 'accepted', undefined],
+      ['right', 'branch', undefined],
+      ['branch', 'accepted', 'true'],
+      ['branch', 'rejected', 'false'],
+    ])
+    // The left -> accepted data dependency is implied by the branch, so reduction drops it.
+    assert.deepEqual(wires(reduceExecutionDependencies(branching)), [
+      ['left', 'branch', undefined],
+      ['right', 'branch', undefined],
+      ['branch', 'accepted', 'true'],
+      ['branch', 'rejected', 'false'],
+    ])
+    assert.equal(branching.stages[2]?.nodes[0]?.dependencies.length, 2)
+    assert.deepEqual(branching.cyclicNodeIds, [])
   })
 
   it('reports nodes that cannot be assigned to an execution stage', () => {
-    const plan = createExecutionPlan(workflowDefinitionSchema.parse({
-      name: 'cycle',
-      nodes: [
-        { id: 'a', type: 'input', config: {} },
-        { id: 'b', type: 'output', config: {} },
-      ],
-      edges: [
-        { id: 'a-b', kind: 'data', source: 'a', target: 'b' },
-        { id: 'b-a', kind: 'data', source: 'b', target: 'a' },
-      ],
-    }))
+    const cyclic = plan(['a', 'b'], ['a>b', 'b>a'])
 
-    assert.deepEqual(plan.stages, [])
-    assert.deepEqual(plan.cyclicNodeIds, ['a', 'b'])
-    assert.deepEqual(reduceExecutionDependencies(plan), plan.dependencies)
+    assert.deepEqual(cyclic.stages, [])
+    assert.deepEqual(cyclic.cyclicNodeIds, ['a', 'b'])
+    assert.deepEqual(reduceExecutionDependencies(cyclic), cyclic.dependencies)
   })
 
   it('keeps an execution dependency a data path already implies', () => {
-    const plan = createExecutionPlan(workflowDefinitionSchema.parse({
-      name: 'redundant-exec',
-      nodes: [
-        { id: 'a', type: 'input', config: {} },
-        { id: 'b', type: 'output', config: {} },
-        { id: 'c', type: 'output', config: {} },
-      ],
-      edges: [
-        { id: 'a-b', kind: 'data', source: 'a', target: 'b' },
-        { id: 'b-c', kind: 'data', source: 'b', target: 'c' },
-        { id: 'a-c-data', kind: 'data', source: 'a', target: 'c' },
-      ],
-    }))
+    const chain = ['a>b', 'b>c']
     // The a -> c data dependency is implied by a -> b -> c, so reduction drops it.
     assert.deepEqual(
-      reduceExecutionDependencies(plan).map(item => [item.source.id, item.target.id]),
-      [['a', 'b'], ['b', 'c']],
+      wires(reduceExecutionDependencies(plan(['a', 'b', 'c'], [...chain, 'a>c']))),
+      [['a', 'b', undefined], ['b', 'c', undefined]],
     )
-
-    const execPlan = createExecutionPlan(workflowDefinitionSchema.parse({
-      name: 'redundant-exec',
-      nodes: [
-        { id: 'a', type: 'input', config: {} },
-        { id: 'b', type: 'output', config: {} },
-        { id: 'c', type: 'output', config: {} },
-      ],
-      edges: [
-        { id: 'a-b', kind: 'data', source: 'a', target: 'b' },
-        { id: 'b-c', kind: 'data', source: 'b', target: 'c' },
-        { id: 'a-c-exec', kind: 'exec', source: 'a', target: 'c' },
-      ],
-    }))
+    // An execution edge is the author's ordering choice, so reduction keeps it.
     assert.deepEqual(
-      reduceExecutionDependencies(execPlan).map(item => [item.source.id, item.target.id]),
-      [['a', 'b'], ['b', 'c'], ['a', 'c']],
+      wires(reduceExecutionDependencies(plan(['a', 'b', 'c'], [...chain, 'a.then>c']))),
+      [['a', 'b', undefined], ['b', 'c', undefined], ['a', 'c', 'then']],
     )
   })
 })
 
 describe('workflow import and export', () => {
-  const definition = { name: 'Daily Report v2', nodes: [], edges: [] }
+  const definition = { name: 'Daily Report v2', kind: 'run' as const, nodes: [], edges: [] }
 
   it('names the exported file after the workflow, like its record file', () => {
     assert.equal(workflowFileName(definition), 'daily-report-v2.workflow.json')
@@ -304,21 +239,20 @@ describe('workflow import and export', () => {
     assert.equal(importedWorkflowName('Daily Report v2', saved), 'Daily Report v2 (3)')
     assert.equal(importedWorkflowName('Weekly Report', saved), 'Weekly Report')
   })
+
+  it('refuses a workflow of the other kind, one with an edge to a missing node, and a code workflow without a language', () => {
+    const dangling = workflow({ a: 'value' }, ['a>gone'])
+    assert.deepEqual(openFault(dangling, 'code'), { key: 'open.otherKind', detail: 'run' })
+    assert.deepEqual(openFault(dangling, 'run'), { key: 'open.danglingEdge', detail: 'e0 (a → gone)' })
+    assert.deepEqual(openFault({ ...definition, kind: 'code' }, 'code'), { key: 'open.language', detail: 'python, typescript, go' })
+    assert.equal(openFault({ ...definition, kind: 'code', language: 'go' }, 'code'), undefined)
+  })
 })
 
 describe('execution stage layout', () => {
   const card = (id: string, ports: readonly PortDefinition[] = []): WorkflowNodeData => ({
     definition: { id: NodeId(id), type: 'demo', config: {} },
-    catalog: {
-      type: 'demo',
-      label: 'Demo',
-      description: '',
-      sourcePlugin: 'dsh-workflow-demo-node',
-      inputs: ports,
-      outputs: [],
-      execOutputs: ['then'],
-      controls: [],
-    },
+    catalog: nodeType('demo', { inputs: ports, outputs: [] }),
   })
 
   it('每个阶段一条泳道，卡片按估算高度在泳道内依次堆叠', () => {
@@ -402,14 +336,11 @@ describe('workflow port declarations', () => {
 })
 
 describe('workflow port defaults', () => {
-  it('默认值按端口类型解析，字符串端口直接使用输入的文本', () => {
+  it('默认值按端口类型解析，空文本表示没有默认值，尚未成形的文本不覆盖已声明的值', () => {
     assert.deepEqual(parseWorkflowPortDefault('hello', 'string'), { value: 'hello' })
     assert.deepEqual(parseWorkflowPortDefault('12.5', 'number'), { value: 12.5 })
     assert.deepEqual(parseWorkflowPortDefault('true', 'boolean'), { value: true })
     assert.deepEqual(parseWorkflowPortDefault('{"a":1}', 'any'), { value: { a: 1 } })
-  })
-
-  it('空文本表示没有默认值，尚未成形的文本不覆盖已声明的值', () => {
     assert.deepEqual(parseWorkflowPortDefault('   ', 'number'), { value: undefined })
     assert.equal(parseWorkflowPortDefault('-', 'number'), 'invalid')
     assert.equal(parseWorkflowPortDefault('{"a":', 'any'), 'invalid')
@@ -430,6 +361,7 @@ describe('workflow port defaults', () => {
 describe('workflow boundary nodes', () => {
   const definition = parseEditorDefinition(JSON.stringify({
     name: 'io',
+    kind: 'run' as const,
     nodes: [
       { id: 'in', type: WORKFLOW_INPUT_TYPE, config: {}, outputs: [{ name: 'left', type: 'number' }] },
       { id: 'add', type: 'sum', config: {}, position: { x: 400, y: 120 } },
@@ -453,14 +385,10 @@ describe('workflow boundary nodes', () => {
     assert.deepEqual(withBoundaryPorts(definition.nodes[2]!, ports).inputs, ports)
   })
 
-  it('边界节点由自己的卡片绘制，其余节点用普通卡片', () => {
-    const nodes = flowNodes(definition, new Map(), new Map())
-
+  it('边界节点由自己的卡片绘制，并像普通节点一样保存，坐标随节点一起往返', () => {
+    const nodes = flowNodes(definition, new Map(), new Map(), new Map())
     assert.deepEqual(nodes.map(node => node.type), ['boundary', 'workflow', 'boundary'])
-  })
 
-  it('边界节点像普通节点一样保存，坐标随节点一起往返', () => {
-    const nodes = flowNodes(definition, new Map(), new Map())
     const dragged = nodes.map(node => node.id === 'in' ? { ...node, position: { x: -900, y: 40 } } : node)
 
     const saved = parseEditorDefinition(formatEditorDefinition(toDefinition(definition, dragged, [])))
@@ -513,7 +441,7 @@ describe('run input values', () => {
     assert.deepEqual(workflowRunDefaults(ports), { threshold: '3', label: '' })
   })
 
-  it('留空的输入交给默认值，没有默认值时报告缺失', () => {
+  it('留空的输入交给默认值，缺失和与端口类型不符的文本都被报告', () => {
     assert.deepEqual(
       workflowRunInputs(ports, { threshold: '', label: 'ship' }),
       { values: { label: 'ship' } },
@@ -522,9 +450,6 @@ describe('run input values', () => {
       workflowRunInputs(ports, { threshold: '9', label: '' }),
       { fault: { name: 'label', kind: 'missing' } },
     )
-  })
-
-  it('与端口类型不符的文本被报告，不会送进运行', () => {
     assert.deepEqual(
       workflowRunInputs(ports, { threshold: 'many', label: 'ship' }),
       { fault: { name: 'threshold', kind: 'invalid' } },
@@ -546,14 +471,11 @@ describe('workflow result values', () => {
     ...(inputs === undefined ? {} : { inputs }),
   })
 
-  it('按声明顺序列出送达输出端口的值', () => {
+  it('按声明顺序列出送达输出端口的值，没有送达的端口不列出', () => {
     assert.deepEqual(
       workflowResultValues(ports, record({ score: 4, verdict: 'ship' })),
       [{ name: 'verdict', value: 'ship' }, { name: 'score', value: 4 }],
     )
-  })
-
-  it('没有送达的端口不列出，运行尚未到达输出节点时没有任何值', () => {
     // A port fed only by a branch that did not run is absent, not null.
     assert.deepEqual(workflowResultValues(ports, record({ verdict: 'hold' })), [{ name: 'verdict', value: 'hold' }])
     assert.deepEqual(workflowResultValues(ports, record()), [])

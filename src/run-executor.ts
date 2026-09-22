@@ -9,8 +9,8 @@ import type {
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { messageOf } from './shared/errors.ts'
-import { execOutputPins, execSourcePin, inboundEdges, resolveInputPorts, type InboundEdges } from './shared/graph.ts'
-import { isAnyJoin } from './flow-nodes.ts'
+import { execOutputPins, execSourcePin, inboundEdges, type InboundEdges } from './shared/graph.ts'
+import { execKindOf } from './flow-nodes.ts'
 import { TERMINAL_NODE_STATUSES, cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
 
 /** 一次调度结束时的运行状态与原因。 */
@@ -204,7 +204,7 @@ export class RunExecutor {
    * 按执行边决定节点是否被跳过，跳过时就地结束其记录。
    *
    * 源节点未完成或未触发该引脚时执行边失效。普通节点是 AND 连接，任一入边失效即跳过；
-   * OR 连接点（{@link isAnyJoin}）只在全部入边失效时跳过。跳过的节点不触发任何引脚，
+   * OR 连接点（{@link execKindOf} 为 `join`）只在全部入边失效时跳过。跳过的节点不触发任何引脚，
    * 因此跳过沿执行边传递。
    * @param node - 前驱已全部结束、待执行的节点。
    * @returns 节点因执行边失效而跳过时为 true。
@@ -216,7 +216,7 @@ export class RunExecutor {
       const source = nodeState(this.state, edge.source).record
       return source.status === 'completed' && (source.fired ?? []).includes(execSourcePin(edge))
     })
-    const dead = isAnyJoin(this.executorFor(node))
+    const dead = execKindOf(this.executorFor(node)) === 'join'
       ? live.length === 0
       : live.length < inbound.length
     if (!dead) return false
@@ -322,7 +322,7 @@ export class RunExecutor {
     executor: WorkflowNodeExecutor,
     inputs: Record<string, unknown>,
   ): NodeEnd | undefined {
-    const inputPorts = resolveInputPorts(node.inputs, executor.inputs ?? [])
+    const inputPorts = node.inputs ?? executor.inputs ?? []
     const missing = inputPorts
       .filter(port => port.required !== false && !Object.hasOwn(inputs, port.name))
       .map((port) => {

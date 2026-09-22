@@ -32,6 +32,21 @@ export class TestHosts {
   }
 
   /**
+   * 在存储根目录上启动一个只挂载存储的 Host，供直接加载插件的用例使用。
+   * @param root - 存储根目录。
+   */
+  async context(root: string): Promise<Context> {
+    const ctx = new Context()
+    this.contexts.push(ctx)
+    await ctx.plugin(Storage)
+    await ctx.plugin({ name: storageJsonName, inject: storageJsonInject, apply: storageJsonApply, Config: storageJsonConfig }, { root })
+    await ctx.plugin({
+      name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig,
+    }, { backend: 'json' })
+    return ctx
+  }
+
+  /**
    * 在存储根目录上启动 Host，注册节点并等待启动恢复完成。
    * @param root - 存储根目录；同一目录上的新 Host 模拟重启。
    * @param executors - 注册的节点执行器。
@@ -42,13 +57,7 @@ export class TestHosts {
     executors: readonly WorkflowNodeExecutor[],
     config?: Partial<DagEngineConfig>,
   ): Promise<{ ctx: Context; engine: DagEngineProvider }> {
-    const ctx = new Context()
-    this.contexts.push(ctx)
-    await ctx.plugin(Storage)
-    await ctx.plugin({ name: storageJsonName, inject: storageJsonInject, apply: storageJsonApply, Config: storageJsonConfig }, { root })
-    await ctx.plugin({
-      name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig,
-    }, { backend: 'json' })
+    const ctx = await this.context(root)
     await ctx.plugin(WorkflowNodeRegistry)
     for (const executor of executors) ctx.workflowNodeRegistry.register(executor, 'engine-tests')
     if (config === undefined) await ctx.plugin(DagEngineProvider)
@@ -57,6 +66,12 @@ export class TestHosts {
     const engine = ctx.dagEngine as DagEngineProvider
     await engine.recovered
     return { ctx, engine }
+  }
+
+  /** 停止一个 Host，使同一目录上的下一个 Host 成为重启。 */
+  async stop(ctx: Context): Promise<void> {
+    this.contexts.splice(this.contexts.indexOf(ctx), 1)
+    await ctx.fiber.dispose()
   }
 
   /** 停止所有 Host 并删除临时目录。 */

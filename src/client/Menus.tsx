@@ -2,11 +2,11 @@
 
 import {
   Button,
-  IconCheckOutline16,
-  IconChevronDownOutline14,
-  IconFolderClose16,
-  IconPlusOutline16,
-  IconSearchOutline16,
+  IconCheckOutlineRegular,
+  IconChevronDownOutlineRegular,
+  IconFolderCloseRegular,
+  IconPlusOutlineRegular,
+  IconSearchOutlineRegular,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useRef, useState } from 'react'
@@ -41,7 +41,7 @@ export function WorkflowPicker({
         <Button
           size="sm"
           variant="outline"
-          icon={<IconFolderClose16 size={14} />}
+          icon={<IconFolderCloseRegular size={14} />}
           disabled={disabled}
           aria-label={t('workflows.switch')}
           aria-haspopup="dialog"
@@ -58,9 +58,9 @@ export function WorkflowPicker({
               className={rowClass(selectedId === undefined)}
               onClick={() => { onCreate(); menu.close() }}
             >
-              <IconPlusOutline16 size={14} />
+              <IconPlusOutlineRegular size={14} />
               <span>{t('workflows.new')}</span>
-              {selectedId === undefined && <IconCheckOutline16 size={14} />}
+              {selectedId === undefined && <IconCheckOutlineRegular size={14} />}
             </button>
             {matches.length === 0
               ? <p className={css.menuEmpty}>{t('workflows.empty')}</p>
@@ -72,7 +72,7 @@ export function WorkflowPicker({
                     onClick={() => { onSelect(workflow); menu.close() }}
                   >
                     <strong>{workflow.name}</strong>
-                    {selectedId === workflow.id && <IconCheckOutline16 size={14} />}
+                    {selectedId === workflow.id && <IconCheckOutlineRegular size={14} />}
                   </button>
                 ))}
           </div>
@@ -102,14 +102,14 @@ export function NodeLibraryMenu({
       <Button
         size="sm"
         variant="outline"
-        icon={<IconPlusOutline16 size={14} />}
+        icon={<IconPlusOutlineRegular size={14} />}
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={menu.open}
         onClick={menu.toggle}
       >
         <span>{t('nodes.add')}</span>
-        <IconChevronDownOutline14 size={12} />
+        <IconChevronDownOutlineRegular size={12} />
       </Button>
       {menu.open && (
         <div className={css.nodeMenu} role="dialog" aria-label={t('nodes.title')}>
@@ -185,7 +185,7 @@ function useMenu() {
 function MenuSearch({ menu, label }: { readonly menu: Menu; readonly label: string }) {
   return (
     <label className={css.menuSearch}>
-      <IconSearchOutline16 size={14} />
+      <IconSearchOutlineRegular size={14} />
       <input
         ref={menu.searchRef}
         aria-label={label}

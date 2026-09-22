@@ -2,64 +2,80 @@
 
 import {
   Button,
-  IconBranchOutline16,
-  IconDownloadOutline16,
-  IconFolderOpenOutline16,
-  IconListPenOutline16,
-  IconPlayOutline16,
-  IconRefreshOutline16,
+  IconBranchOutlineRegular,
+  IconCodeOutlineRegular,
+  IconDownloadOutlineRegular,
+  IconFolderOpenOutlineRegular,
+  IconListPenOutlineRegular,
+  IconPlayOutlineRegular,
+  IconRefreshOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsLocale, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import { useEffect, useRef, useState } from 'react'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
-import { NodeId, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowStudioSnapshot } from '../shared/types.ts'
+import {
+  NodeId, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowKind,
+  type WorkflowStudioSnapshot,
+} from '../shared/types.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, workflowInputPorts,
 } from '../shared/workflow-boundary.ts'
+import { CODE_LANGUAGES, languageOf, withSignatures } from '../shared/language.ts'
+import { analyzeEditorGraph } from './analysis-model.ts'
+import { DiagnosticsView } from './DiagnosticsView.tsx'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
+import { SourceView } from './SourceView.tsx'
 import type { NS } from './locale.ts'
 import { NodeLibraryMenu, WorkflowPicker } from './Menus.tsx'
 import {
   appendEditorNode,
   formatEditorDefinition,
   nextWorkflowName,
+  openFault,
   parseEditorDefinition,
   parseSnapshot,
   type WorkflowRow,
 } from './model.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import { RunDialog } from './RunDialog.tsx'
-import { RunsView } from './RunsView.tsx'
+import { RunsView, type RequestRenderer } from './RunsView.tsx'
 import { isActiveRun, runRecordsByNode } from './runs-model.ts'
 import { downloadWorkflow, importedWorkflowName, parseImportedWorkflow } from './transfer.ts'
 import { useRuns } from './use-runs.ts'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
 import css from './WorkflowStudioPanel.module.css'
 
-type View = 'canvas' | 'execution' | 'runs'
+type View = 'canvas' | 'execution' | 'source' | 'runs'
 
 const VIEWS = [
-  { view: 'canvas', Icon: IconBranchOutline16 },
-  { view: 'execution', Icon: IconListPenOutline16 },
-  { view: 'runs', Icon: IconPlayOutline16 },
-] as const satisfies readonly { view: View; Icon: unknown }[]
+  { view: 'canvas', Icon: IconBranchOutlineRegular, kinds: ['run', 'code'] },
+  { view: 'execution', Icon: IconListPenOutlineRegular, kinds: ['run', 'code'] },
+  { view: 'source', Icon: IconCodeOutlineRegular, kinds: ['run', 'code'] },
+  { view: 'runs', Icon: IconPlayOutlineRegular, kinds: ['run'] },
+] as const satisfies readonly { view: View; Icon: unknown; kinds: readonly WorkflowKind[] }[]
 
 /** Props the `main` slot passes to the panel. */
-export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS>, PropsRenderSlots<'workflowStudio.request'> {
+export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
   remote: WorkflowStudioRemoteNamespace
+  /** Which kind of workflow this panel lists, creates and edits. */
+  kind: WorkflowKind
+  /** Renders a paused node's signal form; `code` workflows never run, so that panel passes undefined. */
+  renderRequest: RequestRenderer | undefined
 }
 
 /** Main workflow authoring surface. */
-export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPanelProps) {
+export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: WorkflowStudioPanelProps) {
   const [snapshot, setSnapshot] = useState<WorkflowStudioSnapshot>({ workflows: [], nodeTypes: [] })
   const [selectedId, setSelectedId] = useState<string>()
-  const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1'))
+  const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1', kind))
   // Incremented when the canvas must discard its local graph and reload `definition`.
   const [revision, setRevision] = useState(0)
   const [view, setView] = useState<View>('canvas')
   const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'running'>('loading')
   const [notice, setNotice] = useState<string>()
-  const runs = useRuns(remote, setNotice)
+  // Code workflows compile instead of running, so their panel has no runs to poll or start.
+  const runnable = kind === 'run'
+  const runs = useRuns(remote, setNotice, runnable)
   // Set while the run dialog is collecting values for the workflow's declared inputs.
   const [runPrompt, setRunPrompt] = useState(false)
   const importInput = useRef<HTMLInputElement>(null)
@@ -70,9 +86,16 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
     setNotice(undefined)
   }
 
+  /** The definition, or an error naming why this panel cannot edit it. */
+  const editable = (next: DagWorkflowDefinition): DagWorkflowDefinition => {
+    const fault = openFault(next, kind)
+    if (fault !== undefined) throw new Error(`${t(fault.key)} ${fault.detail}`)
+    return next
+  }
+
   const select = (workflow: WorkflowRow): void => {
     try {
-      replaceDefinition(parseEditorDefinition(workflow.definition))
+      replaceDefinition(editable(parseEditorDefinition(workflow.definition)))
       setSelectedId(workflow.id)
     } catch (error: unknown) {
       setNotice(messageOf(error))
@@ -85,9 +108,10 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
     const next = await callRemote(() => remote.snapshot(), parseSnapshot, setNotice)
     if (next !== undefined) {
       setSnapshot(next)
-      const selected = next.workflows.find(row => row.id === preferredId)
-        ?? next.workflows.find(row => row.id === selectedId)
-        ?? next.workflows[0]
+      const own = next.workflows.filter(row => row.kind === kind)
+      const selected = own.find(row => row.id === preferredId)
+        ?? own.find(row => row.id === selectedId)
+        ?? own[0]
       if (selected !== undefined) select(selected)
     }
     setPhase('ready')
@@ -147,9 +171,9 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
   /** Load one picked file into the editor as an unsaved workflow. */
   const importFile = async (file: File): Promise<void> => {
     try {
-      const imported = parseImportedWorkflow(await file.text())
+      const imported = editable(parseImportedWorkflow(await file.text()))
       setSelectedId(undefined)
-      replaceDefinition({ ...imported, name: importedWorkflowName(imported.name, snapshot.workflows) })
+      replaceDefinition({ ...imported, name: importedWorkflowName(imported.name, workflows) })
       setView('canvas')
       setNotice(t('notice.imported'))
     } catch (error: unknown) {
@@ -163,13 +187,22 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
   }
 
   const busy = phase !== 'ready'
-  // A workflow has at most one boundary node per side, so the library stops offering a second.
+  // Each panel owns one kind of workflow, so it lists, creates and offers nodes for that kind only.
+  const workflows = snapshot.workflows.filter(row => row.kind === kind)
+  const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
   const addableNodeTypes = snapshot.nodeTypes.filter(type =>
-    (type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
-    || !definition.nodes.some(node => node.type === type.type))
+    type.kinds.includes(kind)
+    // A workflow has at most one boundary node per side, so the library stops offering a second.
+    && ((type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
+      || !definition.nodes.some(node => node.type === type.type)))
   const overlay = runs.record?.workflowId === selectedId ? runs.record : undefined
   const runRecords = overlay === undefined ? new Map() : runRecordsByNode(overlay)
   const runResult = overlay === undefined ? undefined : JSON.stringify(overlay.nodes, null, 2)
+  // The analysis reads only the definition and the catalog, so it reruns exactly when they change.
+  const analysis = useMemo(
+    () => analyzeEditorGraph(definition, snapshot.nodeTypes),
+    [definition, snapshot.nodeTypes],
+  )
   const activeRuns = runs.runs.filter(row => isActiveRun(row)).length
   const waitingRequests = runs.runs.reduce((count, row) => count + row.pendingRequests, 0)
   return (
@@ -187,17 +220,30 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
           />
           <WorkflowPicker
             disabled={busy}
-            workflows={snapshot.workflows}
+            workflows={workflows}
             selectedId={selectedId}
             t={t}
             onCreate={() => {
               setSelectedId(undefined)
-              replaceDefinition(emptyDefinition(nextWorkflowName(snapshot.workflows)))
+              replaceDefinition(emptyDefinition(nextWorkflowName(workflows), kind))
             }}
             onSelect={select}
           />
+          {kind === 'code' && (
+            <select
+              className={css.languagePicker}
+              aria-label={t('source.language')}
+              value={definition.language}
+              disabled={busy}
+              onChange={(event) => {
+                replaceDefinition(withSignatures({ ...definition, language: event.currentTarget.value }))
+              }}
+            >
+              {CODE_LANGUAGES.map(({ name }) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          )}
           <div className={css.viewTabs} role="tablist" aria-label={t('view.label')}>
-            {VIEWS.map(({ view: tab, Icon }) => (
+            {views.map(({ view: tab, Icon }) => (
               <button
                 key={tab}
                 type="button"
@@ -234,7 +280,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
           <Button
             size="sm"
             variant="outline"
-            icon={<IconRefreshOutline16 size={14} />}
+            icon={<IconRefreshOutlineRegular size={14} />}
             disabled={busy}
             onClick={() => { void load() }}
           >
@@ -255,7 +301,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
           <Button
             size="sm"
             variant="outline"
-            icon={<IconFolderOpenOutline16 size={14} />}
+            icon={<IconFolderOpenOutlineRegular size={14} />}
             disabled={busy}
             onClick={() => { importInput.current?.click() }}
           >
@@ -264,7 +310,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
           <Button
             size="sm"
             variant="outline"
-            icon={<IconDownloadOutline16 size={14} />}
+            icon={<IconDownloadOutlineRegular size={14} />}
             disabled={busy}
             onClick={() => { downloadWorkflow(definition) }}
           >
@@ -273,15 +319,17 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
           <Button size="sm" variant="outline" disabled={busy} onClick={() => { void save() }}>
             {phase === 'saving' ? t('action.saving') : t('action.save')}
           </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            icon={<IconPlayOutline16 size={14} />}
-            disabled={busy}
-            onClick={run}
-          >
-            {phase === 'running' ? t('action.running') : t('action.run')}
-          </Button>
+          {runnable && (
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<IconPlayOutlineRegular size={14} />}
+              disabled={busy}
+              onClick={run}
+            >
+              {phase === 'running' ? t('action.running') : t('action.run')}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -301,7 +349,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
               onSelect={runs.select}
               onAction={runs.act}
               onSignal={runs.signal}
-              renderSlot={renderSlot}
+              renderRequest={renderRequest}
             />
           )}
           {view === 'canvas' && (
@@ -310,6 +358,7 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
               revision={revision}
               nodeTypes={snapshot.nodeTypes}
               runRecords={runRecords}
+              diagnostics={analysis?.byNode ?? new Map()}
               t={t}
               onChange={setDefinition}
               onError={setNotice}
@@ -324,6 +373,10 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
               t={t}
             />
           )}
+          {view === 'source' && (
+            <SourceView ir={analysis?.ir} language={languageOf(definition)} t={t} />
+          )}
+          {view === 'canvas' && <DiagnosticsView diagnostics={analysis?.diagnostics} t={t} />}
           {notice !== undefined && <p className={css.notice} role="alert">{notice}</p>}
           {runPrompt && (
             <RunDialog
@@ -346,10 +399,13 @@ export function WorkflowStudioPanel({ t, remote, renderSlot }: WorkflowStudioPan
  * They are ordinary nodes, so a new workflow could start without them; seeding them means the
  * place to declare an input is on screen from the start instead of hiding in the node library.
  * @param name - The new workflow's name.
+ * @param kind - The panel's kind; a code workflow starts in the first code language.
  */
-function emptyDefinition(name: string): DagWorkflowDefinition {
+function emptyDefinition(name: string, kind: WorkflowKind): DagWorkflowDefinition {
   return {
     name,
+    kind,
+    ...(kind === 'code' ? { language: CODE_LANGUAGES[0]!.name } : {}),
     nodes: [
       { id: NodeId(WORKFLOW_INPUT_TYPE), type: WORKFLOW_INPUT_TYPE, config: {}, outputs: [], position: { x: 80, y: 80 } },
       { id: NodeId(WORKFLOW_OUTPUT_TYPE), type: WORKFLOW_OUTPUT_TYPE, config: {}, inputs: [], position: { x: 720, y: 80 } },

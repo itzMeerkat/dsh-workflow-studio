@@ -1,6 +1,6 @@
 /** Details panel for the selected canvas node: label, configuration JSON, and the latest run result. */
 
-import { Button, IconCloseOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconCloseOutlineRegular, IconTrashOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkflowFlowNode } from './graph-model.ts'
 import type { Translate } from './locale.ts'
 import css from './WorkflowStudioPanel.module.css'
@@ -39,7 +39,7 @@ export function NodeInspector({
           title={t('inspector.close')}
           onClick={onClose}
         >
-          <IconCloseOutline16 size={14} />
+          <IconCloseOutlineRegular size={14} />
         </button>
       </div>
       <div className={css.detailsContent}>
@@ -70,7 +70,7 @@ export function NodeInspector({
               <Button size="sm" variant="outline" onClick={onApplyConfig}>
                 {t('action.apply')}
               </Button>
-              <Button size="sm" variant="outline" icon={<IconTrashOutline16 size={14} />} onClick={onDelete}>
+              <Button size="sm" variant="outline" icon={<IconTrashOutlineRegular size={14} />} onClick={onDelete}>
                 {t('action.delete')}
               </Button>
             </div>

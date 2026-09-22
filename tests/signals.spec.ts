@@ -10,6 +10,7 @@ import { NodeId, type RunId } from '../src/shared/types.ts'
 import type { DagEngineProvider } from '../src/engine-provider.ts'
 import type { JsonValue, NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor } from '../src/shared/types.ts'
 import { TestHosts, runEnded, signalRequested } from './host.ts'
+import { workflow } from './graph-fixtures.ts'
 
 const QUESTIONS: AskUserQuestionItem[] = [
   { id: 'color', question: 'Pick a color', options: [{ label: 'red' }, { label: 'blue' }] },
@@ -111,12 +112,16 @@ describe('节点等待外部结果', () => {
   afterEach(async () => { await hosts.cleanup() })
 
   async function saveAsker(engine: DagEngineProvider): Promise<RunId> {
-    const workflowId = await engine.save({
-      name: 'ask',
-      nodes: [{ id: NodeId('ask'), type: 'asker', config: {} }],
-      edges: [],
-    })
-    return engine.start(workflowId).runId
+    return engine.start(await engine.save(workflow({ ask: 'asker' }, [], { name: 'ask' }))).runId
+  }
+
+  /** 启动一个 Host 上的 asker 运行并等到它提问；调用方决定何时停止这个 Host。 */
+  async function asked(root: string, options: Parameters<typeof executors>[1] = {}) {
+    const first = await hosts.start(root, executors({ asks: 0 }, options))
+    const requested = signalRequested(first.ctx, 'ask')
+    const runId = await saveAsker(first.engine)
+    await requested
+    return { ...first, runId }
   }
 
   it('节点等待结果；结果经节点校验后写入运行记录并交给节点', async () => {
@@ -150,12 +155,7 @@ describe('节点等待外部结果', () => {
   it('没有声明 validateSignal 的节点接受任何 JSON 结果', async () => {
     const { ctx, engine } = await hosts.start(await hosts.root(), executors({ asks: 0 }))
     const requested = signalRequested(ctx, 'w')
-    const workflowId = await engine.save({
-      name: 'job',
-      nodes: [{ id: NodeId('w'), type: 'waiter', config: {} }],
-      edges: [],
-    })
-    const run = engine.start(workflowId)
+    const run = engine.start(await engine.save(workflow({ w: 'waiter' }, [], { name: 'job' })))
     const { requestId } = await requested
     assert.equal(requestId, 'job')
     assert.deepEqual(engine.getRun(run.runId)!.nodes[0]?.requests?.[0]?.request, { kind: 'job', jobId: '7' })
@@ -167,11 +167,9 @@ describe('节点等待外部结果', () => {
 
   it('等待中的请求在重启后保留，重新调用的节点不会重复声明', async () => {
     const root = await hosts.root()
-    const first = await hosts.start(root, executors({ asks: 0 }))
-    const requested = signalRequested(first.ctx, 'ask')
-    const runId = await saveAsker(first.engine)
-    await requested
-    await first.ctx.fiber.dispose()
+    const first = await asked(root)
+    const runId = first.runId
+    await hosts.stop(first.ctx)
 
     const calls = { asks: 0 }
     const second = await hosts.start(root, executors(calls))
@@ -188,12 +186,10 @@ describe('节点等待外部结果', () => {
 
   it('重启前已送达的结果在重新调用时直接返回', async () => {
     const root = await hosts.root()
-    const first = await hosts.start(root, executors({ asks: 0 }, { block: true }))
-    const requested = signalRequested(first.ctx, 'ask')
-    const runId = await saveAsker(first.engine)
-    await requested
+    const first = await asked(root, { block: true })
+    const runId = first.runId
     await first.engine.signal(runId, NodeId('ask'), 'pick', ANSWER)
-    await first.ctx.fiber.dispose()
+    await hosts.stop(first.ctx)
 
     const second = await hosts.start(root, executors({ asks: 0 }))
     const result = await runEnded(second.ctx, runId)
@@ -204,11 +200,8 @@ describe('节点等待外部结果', () => {
 
   it('interrupted 运行也可送达结果，恢复后节点直接得到它', async () => {
     const root = await hosts.root()
-    const first = await hosts.start(root, executors({ asks: 0 }))
-    const requested = signalRequested(first.ctx, 'ask')
-    const runId = await saveAsker(first.engine)
-    await requested
-    await first.ctx.fiber.dispose()
+    const { ctx, runId } = await asked(root)
+    await hosts.stop(ctx)
 
     const second = await hosts.start(root, executors({ asks: 0 }), { autoRestart: false })
     assert.equal(second.engine.getRun(runId)?.status, 'interrupted')
@@ -223,11 +216,8 @@ describe('节点等待外部结果', () => {
 
   it('recovery: hold 的等待节点在重启后需要人工恢复', async () => {
     const root = await hosts.root()
-    const first = await hosts.start(root, executors({ asks: 0 }, { recovery: 'hold' }))
-    const requested = signalRequested(first.ctx, 'ask')
-    const runId = await saveAsker(first.engine)
-    await requested
-    await first.ctx.fiber.dispose()
+    const { ctx, runId } = await asked(root, { recovery: 'hold' })
+    await hosts.stop(ctx)
 
     const second = await hosts.start(root, executors({ asks: 0 }, { recovery: 'hold' }))
     await until(() => second.engine.getRun(runId)?.status === 'interrupted')

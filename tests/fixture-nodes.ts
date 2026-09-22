@@ -2,7 +2,6 @@
  * 测试用节点：覆盖引擎需要的普通节点、流程控制节点和可变输入节点。
  */
 
-import type { Context } from '@deepseek-ai/cordis'
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { askUser, validateQuestionsSignal } from '../src/shared/questions.ts'
 import type { NodeControlDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/shared/types.ts'
@@ -85,12 +84,4 @@ export class AskNode extends WorkflowNode<{ answer: string }> {
 /** 所有测试用节点的新实例。 */
 export function createFixtureNodes(): WorkflowNodeExecutor[] {
   return [new ValueNode(), new SumNode(), new GreaterNode(), new AskNode()]
-}
-
-/**
- * 在上下文的注册表中注册所有测试用节点。
- * @param ctx - 带有 workflowNodeRegistry 的上下文。
- */
-export function registerFixtureNodes(ctx: Context): void {
-  for (const node of createFixtureNodes()) ctx.workflowNodeRegistry.register(node, 'test-fixtures')
 }

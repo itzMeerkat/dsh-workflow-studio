@@ -9,6 +9,10 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { registerWorkflowTools } from '../src/tools.ts'
 import { WorkflowId } from '../src/shared/types.ts'
 import type { DagWorkflowDefinition } from '../src/shared/types.ts'
+import { nodeType, workflow } from './graph-fixtures.ts'
+
+/** 已保存的唯一一个工作流：一个空的 Go 工作流。 */
+const CODE_FLOW = workflow({}, [], { name: 'code-flow', kind: 'code', language: 'go' })
 
 interface CallableTool {
   execute(args: Record<string, unknown>, execution: unknown): unknown
@@ -25,7 +29,14 @@ function setup() {
         saved = definition
         return WorkflowId('workflow-id')
       },
-      findByName: () => undefined,
+      findByName: (name: string) => name === CODE_FLOW.name ? { id: WorkflowId('code-flow') } : undefined,
+      get: () => CODE_FLOW,
+    },
+    workflowNodeRegistry: {
+      listTypes: () => [
+        nodeType('hitl', { kinds: ['code'], outputs: [{ name: 'output', type: 'any' }] }),
+        nodeType('code-function', { kinds: ['code'] }),
+      ],
     },
     tools: {
       register(definition: ToolDefinition) {
@@ -42,13 +53,14 @@ function setup() {
 }
 
 describe('workflow tools', () => {
-  it('create_workflow 拒绝伪造缺失字段并保留 HITL 标记', async () => {
+  it('create_workflow 拒绝伪造缺失字段，保留工作流种类，并按签名写出函数节点的端口', async () => {
     const fixture = setup()
     const create = fixture.definitions.get('create_workflow') as unknown as CallableTool
 
     await assert.rejects(
       async () => create.execute({
         name: 'invalid',
+        kind: 'run' as const,
         nodes: [{ type: 'source' }],
         edges: [],
       }, {}),
@@ -57,17 +69,38 @@ describe('workflow tools', () => {
 
     await create.execute({
       name: 'valid',
+      kind: 'code',
+      language: 'go',
       nodes: [{
         id: 'approval',
         type: 'hitl',
         config: {},
         inputs: [],
         outputs: [{ name: 'output', type: 'any' }],
+      }, {
+        id: 'fn',
+        type: 'code-function',
+        config: { code: 'func(limit *int) {}' },
       }],
       edges: [],
     }, {})
 
     assert.deepEqual(fixture.saved()?.nodes[0]?.outputs, [{ name: 'output', type: 'any' }])
+    assert.equal(fixture.saved()?.kind, 'code')
+    assert.equal(fixture.saved()?.language, 'go')
+    assert.deepEqual(fixture.saved()?.nodes[1]?.inputs, [{ name: 'limit', type: 'number', required: false }])
+  })
+
+  it('describe_workflow 写成工作流指定的语言', async () => {
+    const fixture = setup()
+    const describeTool = fixture.definitions.get('describe_workflow') as unknown as CallableTool
+
+    assert.deepEqual(await describeTool.execute({ name: 'code-flow' }, {}), {
+      name: 'code-flow',
+      language: 'go',
+      source: '// Generated from workflow "code-flow". Edit the workflow, not this file.\n\nfunc code_flow() {\n}\n',
+      warnings: [],
+    })
   })
 
   it('run_workflow 对未知名称抛错，卸载 context 时移除全部工具', async () => {

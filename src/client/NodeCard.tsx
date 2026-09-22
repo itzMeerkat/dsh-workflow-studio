@@ -1,9 +1,13 @@
 /** The node card both graphs render: identity, ports, inline controls, and displayed run outputs. */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { createContext, useContext } from 'react'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { createContext, useContext, useRef } from 'react'
+import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
+import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
 import { EXEC_RUN_PIN, execOutputPins } from '../shared/graph.ts'
+import { diagnosticDetails } from './DiagnosticsView.tsx'
 import { handleId, nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
 import type { Translate } from './locale.ts'
 import type { WorkflowPortEdit } from './workflow-ports.ts'
@@ -77,6 +81,7 @@ export function NodeCard({
             {data.runRecord.status}
           </span>
         )}
+        {data.diagnostics !== undefined && <DiagnosticBadge diagnostics={data.diagnostics} t={t} />}
       </div>
       <div className={css.nodeMeta}>
         <code>{data.definition.type}</code>
@@ -218,7 +223,8 @@ function PortRow({ port, side, connectable }: {
         {port.name}
         {isInput && port.required !== false && <b className={css.requiredPort}>*</b>}
       </span>
-      <small>{port.type}</small>
+      {/* An optional output, such as a Go pointer result, may carry no value. */}
+      <small>{port.type}{!isInput && port.required === false && '?'}</small>
     </div>
   )
 }
@@ -299,14 +305,98 @@ function NodeControl({ control, value, onChange, readOnly }: NodeControlProps) {
           />
         </label>
       )
+    case 'file':
+      return <FileControl label={control.label} text={typeof value === 'string' ? value : ''} onPick={readOnly ? undefined : commit} />
+    case 'textarea':
+      return (
+        <label className={`${css.nodeControl} ${css.nodeControlBlock} nodrag`}>
+          <span>{control.label}</span>
+          <textarea
+            className="nowheel"
+            value={typeof value === 'string' ? value : control.defaultValue}
+            rows={control.rows ?? DEFAULT_TEXTAREA_ROWS}
+            spellCheck={false}
+            disabled={disabled}
+            {...(control.placeholder === undefined ? {} : { placeholder: control.placeholder })}
+            onChange={event => { commit(event.currentTarget.value) }}
+          />
+        </label>
+      )
     default:
       return assertNever(control)
   }
 }
 
+/**
+ * A config value holding a whole text file. The card shows its first line and its length rather
+ * than the text, and the button replaces it with another file's text.
+ * @param onPick - Stores the chosen file's text; absent in a read-only graph.
+ */
+function FileControl({ label, text, onPick }: {
+  readonly label: string
+  readonly text: string
+  readonly onPick: ((text: string) => void) | undefined
+}) {
+  const { t } = useContext(NodeCardContext)!
+  const picker = useRef<HTMLInputElement>(null)
+  const lines = text === '' ? [] : text.split('\n')
+  const first = lines.find(line => line.trim() !== '')?.trim()
+  return (
+    <div className={`${css.nodeControl} nodrag`}>
+      <span>{label}</span>
+      <div className={css.fileControl}>
+        <code title={first}>{first ?? t('node.noFile')}</code>
+        {lines.length > 0 && <small>{lines.length} {t('node.lines')}</small>}
+        {onPick !== undefined && (
+          <>
+            <input
+              ref={picker}
+              type="file"
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0]
+                // Clear the picker so choosing the same file again, after editing it, still fires a change.
+                event.currentTarget.value = ''
+                if (file !== undefined) void file.text().then(onPick)
+              }}
+            />
+            <Button size="sm" variant="outline" onClick={() => { picker.current?.click() }}>{t('node.chooseFile')}</Button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Visible rows of a `textarea` control that does not ask for a height. */
+const DEFAULT_TEXTAREA_ROWS = 6
+
 function formatOutput(value: unknown, display: 'value' | 'json'): string {
   if (display === 'json') return JSON.stringify(value, null, 2) ?? 'undefined'
   return typeof value === 'string' ? value : String(value)
+}
+
+/**
+ * What the static analysis found about this node, as a marker on its card.
+ *
+ * The card has room for a count and a severity; the findings themselves read in the checks list,
+ * so the marker carries their text as its tooltip rather than growing the card.
+ * @param diagnostics - The node's findings; never empty.
+ * @param t - Translate.
+ */
+function DiagnosticBadge({ diagnostics, t }: {
+  readonly diagnostics: readonly WorkflowDiagnostic[]
+  readonly t: Translate
+}) {
+  const severity = diagnostics.some(item => DIAGNOSTIC_SEVERITY[item.code] === 'error') ? 'error' : 'warning'
+  const title = diagnostics
+    .map(item => [t(`diagnostics.${item.code}`), ...diagnosticDetails(item, t)].join(' · '))
+    .join('\n')
+  return (
+    <span className={css.nodeDiagnostics} data-severity={severity} title={title}>
+      {t(`diagnostics.${severity}`)} {diagnostics.length}
+    </span>
+  )
 }
 
 function assertNever(value: never): never {

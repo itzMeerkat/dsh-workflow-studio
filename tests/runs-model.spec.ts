@@ -43,6 +43,7 @@ function recordSource(status: string, requests: unknown[]): string {
     updatedAt: 2,
     definition: {
       name: 'flow',
+      kind: 'run' as const,
       nodes: [{ id: 'ask', type: 'asker', label: 'Ask me', config: {} }, { id: 'out', type: 'output', config: {} }],
       edges: [],
     },

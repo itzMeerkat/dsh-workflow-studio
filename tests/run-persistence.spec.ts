@@ -9,8 +9,9 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { DagEngineConfig, DagEngineProvider } from '../src/engine-provider.ts'
 import { TestHosts, runEnded, signalRequested } from './host.ts'
+import { workflow } from './graph-fixtures.ts'
 import { askUser, validateQuestionsSignal } from '../src/shared/questions.ts'
-import { EdgeId, NodeId, type RunId, type WorkflowId, type WorkflowRunRecord } from '../src/shared/types.ts'
+import { NodeId, type RunId, type WorkflowId, type WorkflowRunRecord } from '../src/shared/types.ts'
 import type {
   NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor,
 } from '../src/shared/types.ts'
@@ -88,23 +89,21 @@ describe('运行持久化与恢复', () => {
     return { ctx, engine, stepStarted: started.promise }
   }
 
-  async function newRoot(): Promise<string> {
-    return hosts.root()
-  }
-
   function freshCalls(): Calls {
     return { source: 0, step: 0, stepNotepads: [] }
   }
 
   async function saveChain(engine: DagEngineProvider, overrides: { recovery?: NodeRecoveryPolicy } = {}): Promise<WorkflowId> {
-    return engine.save({
-      name: 'chain',
-      nodes: [
-        { id: NodeId('source'), type: 'source', config: { value: 7 } },
-        { id: NodeId('step'), type: 'step', config: {}, ...overrides },
-      ],
-      edges: [{ id: EdgeId('edge'), kind: 'data', source: NodeId('source'), target: NodeId('step') }],
-    })
+    return engine.save(workflow(
+      { source: { type: 'source', config: { value: 7 } }, step: { type: 'step', ...overrides } },
+      ['source>step'],
+      { name: 'chain' },
+    ))
+  }
+
+  /** 保存只有一个节点的工作流。 */
+  async function saveSingle(engine: DagEngineProvider, type: string): Promise<WorkflowId> {
+    return engine.save(workflow({ n: type }, [], { name: type }))
   }
 
   /** 在第一个 Host 中启动运行，等待 step 阻塞后停止 Host，返回运行 ID。 */
@@ -112,14 +111,12 @@ describe('运行持久化与恢复', () => {
     const first = await host(root, freshCalls(), { block: true })
     const run = first.engine.start(await saveChain(first.engine, overrides))
     await first.stepStarted
-    await first.ctx.fiber.dispose()
+    await hosts.stop(first.ctx)
     return run.runId
   }
 
-  const ended = runEnded
-
   it('运行记录独立写入文件，结束后仍可查询和列出', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const { engine } = await host(root, freshCalls(), { block: false })
     const result = await engine.start(await saveChain(engine)).result
     assert.equal(result.status, 'completed')
@@ -134,14 +131,12 @@ describe('运行持久化与恢复', () => {
   })
 
   it('Host 停止不写入结束状态；重启后自动重新调用未完成节点，已完成节点不重复执行', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const runId = await interruptedRun(root)
 
     const calls = freshCalls()
     const second = await host(root, calls, { block: false })
-    const done = second.engine.getRun(runId)?.status === 'completed'
-      ? second.engine.getRun(runId)!
-      : await ended(second.ctx, runId)
+    const done = await runEnded(second.ctx, runId)
 
     assert.equal(done.status, 'completed')
     assert.equal(calls.source, 0)
@@ -153,7 +148,7 @@ describe('运行持久化与恢复', () => {
   })
 
   it('autoRestart 关闭时运行进入 interrupted，人工恢复后完成', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const runId = await interruptedRun(root)
 
     const second = await host(root, freshCalls(), { block: false }, { autoRestart: false })
@@ -162,29 +157,26 @@ describe('运行持久化与恢复', () => {
     assert.match(interrupted?.error ?? '', /autoRestart/)
     assert.equal(interrupted?.nodes.find(record => record.nodeId === NodeId('step'))?.status, 'pending')
 
-    const done = ended(second.ctx, runId)
+    const done = runEnded(second.ctx, runId)
     second.engine.resumeRun(runId)
     assert.equal((await done).status, 'completed')
   })
 
   it('节点声明 recovery: hold 时等待人工恢复；工作流节点可覆盖为 rerun', async () => {
-    const heldRoot = await newRoot()
+    const heldRoot = await hosts.root()
     const heldRun = await interruptedRun(heldRoot)
     const held = await host(heldRoot, freshCalls(), { block: false, stepRecovery: 'hold' })
     assert.equal(held.engine.getRun(heldRun)?.status, 'interrupted')
     assert.match(held.engine.getRun(heldRun)?.error ?? '', /节点 step 需要人工恢复/)
 
-    const overrideRoot = await newRoot()
+    const overrideRoot = await hosts.root()
     const overrideRun = await interruptedRun(overrideRoot, { recovery: 'rerun' })
     const overridden = await host(overrideRoot, freshCalls(), { block: false, stepRecovery: 'hold' })
-    const result = overridden.engine.getRun(overrideRun)?.status === 'completed'
-      ? overridden.engine.getRun(overrideRun)!
-      : await ended(overridden.ctx, overrideRun)
-    assert.equal(result.status, 'completed')
+    assert.equal((await runEnded(overridden.ctx, overrideRun)).status, 'completed')
   })
 
   it('恢复时缺少节点类型则中断，注册后可人工恢复', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const runId = await interruptedRun(root)
 
     const second = await host(root, freshCalls(), { block: false, registerStep: false })
@@ -195,43 +187,36 @@ describe('运行持久化与恢复', () => {
     const calls = freshCalls()
     const [, step] = executors(calls, { block: false }, () => {})
     second.ctx.workflowNodeRegistry.register(step!, 'late-plugin')
-    const done = ended(second.ctx, runId)
+    const done = runEnded(second.ctx, runId)
     second.engine.resumeRun(runId)
     assert.equal((await done).status, 'completed')
     assert.equal(calls.step, 1)
   })
 
   it('暂停的运行在重启后保持暂停，恢复后完成', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const first = await host(root, freshCalls(), { block: false })
-    const workflowId = await first.engine.save({
-      name: 'paused',
-      nodes: [
-        { id: NodeId('a'), type: 'source', config: { value: 1 } },
-        { id: NodeId('b'), type: 'step', config: {} },
-      ],
-      edges: [{ id: EdgeId('ab'), kind: 'data', source: NodeId('a'), target: NodeId('b') }],
-    })
+    const workflowId = await saveChain(first.engine)
     const paused = new Promise<void>((resolve) => { first.ctx.on('dag/paused', () => { resolve() }) })
     const run = first.engine.start(workflowId)
     first.engine.pauseRun(run.runId)
     await paused
-    await first.ctx.fiber.dispose()
+    await hosts.stop(first.ctx)
 
     const calls = freshCalls()
     const second = await host(root, calls, { block: false })
     assert.equal(second.engine.getRun(run.runId)?.status, 'paused')
     assert.equal(calls.step, 0)
-    const done = ended(second.ctx, run.runId)
+    const done = runEnded(second.ctx, run.runId)
     second.engine.resumeRun(run.runId)
     assert.equal((await done).status, 'completed')
   })
 
   it('取消等待恢复的运行会取消剩余节点并写入结束状态', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const runId = await interruptedRun(root)
     const second = await host(root, freshCalls(), { block: false }, { autoRestart: false })
-    const done = ended(second.ctx, runId)
+    const done = runEnded(second.ctx, runId)
     second.engine.cancelRun(runId, 'no longer needed')
     const result = await done
     assert.equal(result.status, 'cancelled')
@@ -240,7 +225,7 @@ describe('运行持久化与恢复', () => {
   })
 
   it('只保留配置数量的已结束运行', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const { engine } = await host(root, freshCalls(), { block: false }, { retainRuns: 2 })
     const workflowId = await saveChain(engine)
     const runIds: RunId[] = []
@@ -256,16 +241,11 @@ describe('运行持久化与恢复', () => {
   })
 
   it('非 JSON 输出使节点失败；notepad 拒绝非 JSON 值', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const { ctx, engine } = await host(root, freshCalls(), { block: false })
-    const workflowId = await engine.save({
-      name: 'bad-output',
-      nodes: [{ id: NodeId('bad'), type: 'bad-output', config: {} }],
-      edges: [],
-    })
-    const result = await engine.start(workflowId).result
+    const result = await engine.start(await saveSingle(engine, 'bad-output')).result
     assert.equal(result.status, 'failed')
-    assert.match(result.error ?? '', /节点 bad 的输出\.output 不是普通 JSON 对象/)
+    assert.match(result.error ?? '', /节点 n 的输出\.output 不是普通 JSON 对象/)
 
     const context = {
       notepad: undefined as unknown as NodeExecutionContext['notepad'],
@@ -280,11 +260,7 @@ describe('运行持久化与恢复', () => {
       },
     }
     ctx.workflowNodeRegistry.register(probe, 'run-persistence-tests')
-    await engine.start(await engine.save({
-      name: 'probe',
-      nodes: [{ id: NodeId('probe'), type: 'notepad-probe', config: {} }],
-      edges: [],
-    })).result
+    await engine.start(await saveSingle(engine, 'notepad-probe')).result
     await assert.rejects(context.notepad.save(undefined as never), /notepad 不是 JSON 值/)
   })
 
@@ -299,7 +275,7 @@ describe('运行持久化与恢复', () => {
   }
 
   it('无法恢复的运行记录写为 failed 并保留原因', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const runId = await interruptedRun(root)
     const file = join(root, 'workflow_studio_runs', 'runs', `${runId}.json`)
     const stored = JSON.parse(await readFile(file, 'utf8')) as { record: { nodes: Array<{ nodeId: string }> } }
@@ -314,7 +290,7 @@ describe('运行持久化与恢复', () => {
   })
 
   it('最终状态写入失败时运行仍按最终状态查询，且不再接受控制', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const { engine } = await host(root, freshCalls(), { block: false })
     const workflowId = await saveChain(engine)
     failWrites(engine, record => record.status === 'completed')
@@ -330,7 +306,7 @@ describe('运行持久化与恢复', () => {
   })
 
   it('Host 停止后 notepad 写入被拒绝', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const { ctx, engine } = await host(root, freshCalls(), { block: false })
     const started = Promise.withResolvers<void>()
     const saveAfterStop = Promise.withResolvers<unknown>()
@@ -345,14 +321,14 @@ describe('运行持久化与恢复', () => {
         return { status: 'completed', outputs: {} }
       },
     }, 'run-persistence-tests')
-    engine.start(await engine.save({ name: 'late', nodes: [{ id: NodeId('n'), type: 'late-save', config: {} }], edges: [] }))
+    engine.start(await saveSingle(engine, 'late-save'))
     await started.promise
     await ctx.fiber.dispose()
     assert.match(String(await saveAfterStop.promise), /工作流引擎正在关闭/)
   })
 
   it('取消时节点抛出的错误记为 cancelled', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const { ctx, engine } = await host(root, freshCalls(), { block: false })
     const started = Promise.withResolvers<void>()
     ctx.workflowNodeRegistry.register({
@@ -367,7 +343,7 @@ describe('运行持久化与恢复', () => {
         return { status: 'completed', outputs: {} }
       },
     }, 'run-persistence-tests')
-    const run = engine.start(await engine.save({ name: 'abort', nodes: [{ id: NodeId('n'), type: 'throw-on-abort', config: {} }], edges: [] }))
+    const run = engine.start(await saveSingle(engine, 'throw-on-abort'))
     await started.promise
     engine.cancelRun(run.runId, 'stop')
     const result = await run.result
@@ -376,7 +352,7 @@ describe('运行持久化与恢复', () => {
   })
 
   it('结果写入失败时请求保持等待，可再次送达', async () => {
-    const root = await newRoot()
+    const root = await hosts.root()
     const { ctx, engine } = await host(root, freshCalls(), { block: false })
     ctx.workflowNodeRegistry.register({
       type: 'ask',
@@ -390,7 +366,7 @@ describe('运行持久化与恢复', () => {
       },
     }, 'run-persistence-tests')
     const asked = signalRequested(ctx)
-    const run = engine.start(await engine.save({ name: 'ask', nodes: [{ id: NodeId('n'), type: 'ask', config: {} }], edges: [] }))
+    const run = engine.start(await saveSingle(engine, 'ask'))
     await asked
     let failNext = true
     failWrites(engine, () => failNext)

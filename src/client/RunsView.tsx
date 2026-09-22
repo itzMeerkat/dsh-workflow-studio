@@ -18,6 +18,9 @@ import type {} from './slot-contract.ts'
 import css from './WorkflowStudioPanel.module.css'
 import type { Translate, WorkflowStudioKey } from './locale.ts'
 
+/** Renders a waiting request through the component registered for its kind. */
+export type RequestRenderer = PropsRenderSlots<'workflowStudio.request'>['renderSlot']
+
 /** Which runs the rail lists. */
 export type RunsFilter = 'workflow' | 'all'
 
@@ -38,7 +41,7 @@ interface RunsViewProps {
   readonly onAction: (action: RunAction) => void
   readonly onSignal: (nodeId: string, requestId: string, result: JsonValue) => void
   /** Renders a waiting request through the component registered for its kind. */
-  readonly renderSlot: PropsRenderSlots<'workflowStudio.request'>['renderSlot']
+  readonly renderRequest: RequestRenderer | undefined
 }
 
 /** List runs beside the selected run's details. */
@@ -107,7 +110,7 @@ function RunGroup({ title, rows, selectedRunId, showName, t, onSelect }: {
   )
 }
 
-function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal, renderSlot }: RunsViewProps & { readonly record: WorkflowRunRecord }) {
+function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal, renderRequest }: RunsViewProps & { readonly record: WorkflowRunRecord }) {
   const actions = runActions(record.status)
   const pending = pendingRequests(record)
   const labels = new Map(record.definition.nodes.map(node => [node.id, node.label ?? node.id]))
@@ -133,7 +136,7 @@ function RunDetail({ t, record, nodeTypes, busy, onAction, onSignal, renderSlot 
         </div>
       </header>
 
-      {pending.map(item => renderSlot('workflowStudio.request', {
+      {pending.map(item => renderRequest?.('workflowStudio.request', {
         runId: record.runId,
         nodeId: item.nodeId,
         nodeLabel: item.nodeLabel,

@@ -160,19 +160,6 @@ export function portsAreCompatible(source: PortDefinition, target: PortDefinitio
 }
 
 /**
- * 节点实例的有效输入端口；实例声明的端口替换执行器声明的端口。
- * @param instance - 节点实例声明的输入端口，未声明时为 undefined。
- * @param declared - 执行器声明的输入端口。
- * @returns 有效输入端口。
- */
-export function resolveInputPorts(
-  instance: readonly PortDefinition[] | undefined,
-  declared: readonly PortDefinition[],
-): readonly PortDefinition[] {
-  return instance ?? declared
-}
-
-/**
  * 检查端口名不重复。
  * @param owner - 错误信息中的端口所有者。
  * @param kind - 错误信息中的端口方向。

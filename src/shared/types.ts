@@ -38,6 +38,16 @@ export interface JsonObject {
 // ---- 工作流定义 ----
 
 /**
+ * 工作流的种类。两种工作流用同一套图、同一个编辑器，去向不同。
+ * - `run`：由引擎调度执行，节点做真正的工作。
+ * - `code`：由语言后端编译为目标语言的源码，从不执行；节点携带的是代码，不是工作。
+ */
+export type WorkflowKind = 'run' | 'code'
+
+/** 未声明种类的定义按 `run` 处理，因为引擎在有第二种工作流之前只有这一种。 */
+export const DEFAULT_WORKFLOW_KIND: WorkflowKind = 'run'
+
+/**
  * 运行因 Host 停止而中断后，节点如何恢复。
  * - `rerun`：自动重新调用节点（至少一次语义）。
  * - `hold`：运行进入 interrupted，等待人工恢复后再重新调用。
@@ -77,6 +87,22 @@ export type NodeControlDefinition =
     readonly kind: 'text'
     readonly defaultValue: string
     readonly placeholder?: string
+  }
+  | {
+    readonly name: string
+    readonly label: string
+    readonly kind: 'textarea'
+    readonly defaultValue: string
+    readonly placeholder?: string
+    /** 编辑框的可见行数；省略时为 6 行。 */
+    readonly rows?: number
+  }
+  | {
+    readonly name: string
+    readonly label: string
+    /** 选择一个本机文本文件，字段保存它的全文；用于放不进卡片的长文本。 */
+    readonly kind: 'file'
+    readonly defaultValue: string
   }
   | {
     readonly name: string
@@ -147,6 +173,10 @@ export type DagEdgeDefinition = DagDataEdge | DagExecEdge
 /** 可 JSON 导入导出的完整工作流定义。 */
 export interface DagWorkflowDefinition {
   name: string
+  /** 工作流的种类，决定它能用哪些节点类型，以及它是被执行还是被编译。 */
+  kind: WorkflowKind
+  /** `code` 工作流写成的语言，节点携带的代码也是该语言；`run` 工作流没有。 */
+  language?: string
   description?: string
   nodes: DagNodeDefinition[]
   edges: DagEdgeDefinition[]
@@ -156,6 +186,7 @@ export interface DagWorkflowDefinition {
 export interface WorkflowSummary {
   id: WorkflowId
   name: string
+  kind: WorkflowKind
   description?: string
 }
 
@@ -335,6 +366,8 @@ export interface WorkflowNodeExecutor {
     readonly min: number
     readonly outputType?: 'same'
   }
+  /** 节点可以出现在哪些种类的工作流里；省略时只有 `run`。 */
+  readonly kinds?: readonly WorkflowKind[]
   /** 中断后的恢复策略；省略时为 `rerun`。工作流节点的 `recovery` 覆盖此值。 */
   readonly recovery?: NodeRecoveryPolicy
   /**
@@ -353,6 +386,16 @@ export interface WorkflowNodeExecutor {
   execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult>
 }
 
+/**
+ * 节点类型的执行语义。
+ * - `plain`：AND 连接，完成时触发全部已声明引脚。
+ * - `decision`：AND 连接，完成时只触发已声明引脚中的一个，因此这些引脚互斥。
+ * - `join`：OR 连接，任一入执行边触发即执行。
+ *
+ * 该值由引擎按执行器实例身份判定并写入目录，节点插件无法自行声明。
+ */
+export type NodeExecKind = 'plain' | 'decision' | 'join'
+
 /** 节点目录中的一个节点类型。 */
 export interface NodeTypeSummary {
   type: string
@@ -360,6 +403,10 @@ export interface NodeTypeSummary {
   description: string
   /** 注册该节点类型的 Cordis 插件名。 */
   sourcePlugin: string
+  /** 调度与静态分析依据的执行语义。 */
+  execKind: NodeExecKind
+  /** 节点可以出现在哪些种类的工作流里。 */
+  kinds: readonly WorkflowKind[]
   inputs: readonly PortDefinition[]
   outputs: readonly PortDefinition[]
   /** 节点类型的执行输出引脚，浏览器据此渲染执行引脚。 */
@@ -373,6 +420,7 @@ export interface WorkflowStudioSnapshot {
   readonly workflows: ReadonlyArray<{
     readonly id: WorkflowId
     readonly name: string
+    readonly kind: WorkflowKind
     readonly description?: string
     /** 格式化的定义 JSON。 */
     readonly definition: string

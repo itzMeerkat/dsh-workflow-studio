@@ -1,6 +1,6 @@
 /** The cards standing for a workflow's declared input and output ports, editable on the canvas. */
 
-import { IconCloseOutline16, IconPlusOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutlineRegular, IconPlusOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { useContext, useState } from 'react'
 import { EXEC_RUN_PIN, EXEC_THEN_PIN } from '../shared/graph.ts'
@@ -75,7 +75,7 @@ export function WorkflowBoundaryCard({ data, selected, graph = 'data' }: NodePro
             title={t('workflowPorts.add')}
             onClick={() => { commit(appendWorkflowPort(ports, side)) }}
           >
-            <IconPlusOutline16 size={13} />
+            <IconPlusOutlineRegular size={13} />
           </button>
         )}
       </div>
@@ -135,7 +135,7 @@ export function WorkflowBoundaryCard({ data, selected, graph = 'data' }: NodePro
                     commit(removeWorkflowPort(ports, index), { kind: 'removed', name: port.name })
                   }}
                 >
-                  <IconCloseOutline16 size={12} />
+                  <IconCloseOutlineRegular size={12} />
                 </button>
               )}
             </li>

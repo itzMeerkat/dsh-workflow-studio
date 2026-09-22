@@ -14,9 +14,14 @@ const RUNS_REFRESH_MS = 2000
  * Poll the run list and the selected run while mounted.
  * @param remote - The `workflowStudio` Remote.
  * @param setNotice - Shows a failure message; undefined clears it.
+ * @param enabled - Whether this panel shows runs; a panel that does not never polls.
  * @returns Run state and the callbacks that change it.
  */
-export function useRuns(remote: WorkflowStudioRemoteNamespace, setNotice: (message: string | undefined) => void) {
+export function useRuns(
+  remote: WorkflowStudioRemoteNamespace,
+  setNotice: (message: string | undefined) => void,
+  enabled: boolean,
+) {
   const [runs, setRuns] = useState<readonly WorkflowRunSummary[]>([])
   const [filter, setFilter] = useState<RunsFilter>('workflow')
   const [selectedRunId, setSelectedRunId] = useState<string>()
@@ -37,10 +42,11 @@ export function useRuns(remote: WorkflowStudioRemoteNamespace, setNotice: (messa
   }
 
   useEffect(() => {
+    if (!enabled) return undefined
     void refresh()
     const timer = setInterval(() => { void refresh() }, RUNS_REFRESH_MS)
     return () => { clearInterval(timer) }
-  }, [])
+  }, [enabled])
 
   const select = (runId: string): void => {
     selectedRunRef.current = runId

@@ -6,44 +6,39 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { connectionError, flowEdges, flowNodes, handleId, toDefinition } from '../src/client/graph-model.ts'
 import { EXEC_RUN_PIN, EXEC_THEN_PIN } from '../src/shared/graph.ts'
-import type { NodeTypeSummary } from '../src/shared/types.ts'
+import { indexNodeTypes } from '../src/shared/analysis.ts'
+import { nodeType, workflow } from './graph-fixtures.ts'
 import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
 
-const CATALOG = new Map<string, NodeTypeSummary>([
-  ['num', {
-    type: 'num', label: 'Number', description: '', sourcePlugin: 'test', execOutputs: ['then'], controls: [],
+const CATALOG = indexNodeTypes([
+  nodeType('num', {
     inputs: [{ name: 'input', type: 'number' }],
     outputs: [{ name: 'output', type: 'number' }],
-  }],
-  ['text', {
-    type: 'text', label: 'Text', description: '', sourcePlugin: 'test', execOutputs: ['then'], controls: [],
+  }),
+  nodeType('text', {
     inputs: [{ name: 'input', type: 'string' }],
     outputs: [{ name: 'output', type: 'string' }],
-  }],
-  ['fork', {
-    type: 'fork', label: 'Fork', description: '', sourcePlugin: 'test', execOutputs: ['true', 'false'], controls: [],
+  }),
+  nodeType('fork', {
+    execKind: 'decision',
+    execOutputs: ['true', 'false'],
     inputs: [{ name: 'condition', type: 'boolean' }],
     outputs: [],
-  }],
+  }),
 ])
 
-const DEFINITION = workflowDefinitionSchema.parse({
-  name: 'graph',
-  nodes: [
-    { id: 'a', type: 'num', config: {}, position: { x: 1, y: 2 } },
-    { id: 'b', type: 'num', config: {} },
-    { id: 'c', type: 'text', config: {} },
-  ],
-  edges: [{ id: 'e1', kind: 'data', source: 'a', target: 'b' }],
-})
+const DEFINITION = workflowDefinitionSchema.parse(workflow(
+  { a: { type: 'num', position: { x: 1, y: 2 } }, b: 'num', c: 'text' },
+  ['a>b'],
+))
 
 describe('canvas graph model', () => {
-  const nodes = flowNodes(DEFINITION, CATALOG, new Map())
+  const nodes = flowNodes(DEFINITION, CATALOG, new Map(), new Map())
   const edges = flowEdges(DEFINITION)
 
   it('writes default ports and canvas positions back to the definition', () => {
     const definition = toDefinition(DEFINITION, nodes, edges)
-    assert.deepEqual(definition.edges, [{ id: 'e1', kind: 'data', source: 'a', target: 'b', sourcePort: 'output', targetPort: 'input' }])
+    assert.deepEqual(definition.edges, [{ id: 'e0', kind: 'data', source: 'a', target: 'b', sourcePort: 'output', targetPort: 'input' }])
     assert.deepEqual(definition.nodes.map(node => node.position), [{ x: 1, y: 2 }, { x: 320, y: 80 }, { x: 560, y: 80 }])
   })
 
@@ -60,28 +55,23 @@ describe('canvas graph model', () => {
     assert.equal(connectionError(connect('a', 'c'), nodes, edges), 'notice.incompatiblePorts')
     assert.equal(connectionError(connect('c', 'b'), nodes, edges), 'notice.incompatiblePorts')
     assert.equal(connectionError(connect('a', 'b'), nodes, edges), 'notice.inputConnected')
-    assert.equal(connectionError(connect('a', 'b'), nodes, edges, 'e1'), undefined)
+    assert.equal(connectionError(connect('a', 'b'), nodes, edges, 'e0'), undefined)
   })
 
-  const EXEC_DEFINITION = workflowDefinitionSchema.parse({
-    name: 'graph',
-    nodes: [
-      { id: 'a', type: 'num', config: {} },
-      { id: 'b', type: 'num', config: {} },
-      { id: 'c', type: 'num', config: {} },
-    ],
-    edges: [{ id: 'x1', kind: 'exec', source: 'a', target: 'b' }],
-  })
+  const EXEC_DEFINITION = workflowDefinitionSchema.parse(workflow(
+    { a: 'num', b: 'num', c: 'num' },
+    ['a.then>b'],
+  ))
 
   it('round-trips an execution edge through the canvas', () => {
-    const execNodes = flowNodes(EXEC_DEFINITION, CATALOG, new Map())
+    const execNodes = flowNodes(EXEC_DEFINITION, CATALOG, new Map(), new Map())
     const execEdges = flowEdges(EXEC_DEFINITION)
     assert.deepEqual(
       execEdges.map(edge => [edge.sourceHandle, edge.targetHandle]),
       [[handleId({ kind: 'exec', name: EXEC_THEN_PIN }), handleId({ kind: 'exec', name: EXEC_RUN_PIN })]],
     )
     assert.deepEqual(toDefinition(EXEC_DEFINITION, execNodes, execEdges).edges, [{
-      id: 'x1',
+      id: 'e0',
       kind: 'exec',
       source: 'a',
       target: 'b',
@@ -93,16 +83,17 @@ describe('canvas graph model', () => {
   it('keeps a data port whose name looks like an execution pin on the data graph', () => {
     const catalog = new Map(CATALOG)
     catalog.set('odd', {
-      type: 'odd', label: 'Odd', description: '', sourcePlugin: 'test', execOutputs: ['then'], controls: [],
+      type: 'odd', label: 'Odd', description: '', sourcePlugin: 'test', execKind: 'plain', kinds: ['run'] as const, execOutputs: ['then'], controls: [],
       inputs: [{ name: 'exec:run', type: 'number' }],
       outputs: [{ name: 'exec:then', type: 'number' }],
     })
     const definition = workflowDefinitionSchema.parse({
       name: 'graph',
+      kind: 'run' as const,
       nodes: [{ id: 'a', type: 'odd', config: {} }, { id: 'b', type: 'odd', config: {} }],
       edges: [{ id: 'e', kind: 'data', source: 'a', sourcePort: 'exec:then', target: 'b', targetPort: 'exec:run' }],
     })
-    const oddNodes = flowNodes(definition, catalog, new Map())
+    const oddNodes = flowNodes(definition, catalog, new Map(), new Map())
     const oddEdges = flowEdges(definition)
 
     // Both handle kinds are prefixed, so the port name is carried verbatim rather than parsed as a pin.
@@ -119,13 +110,14 @@ describe('canvas graph model', () => {
   it('connects a branch node\'s declared pins to another node\'s run pin', () => {
     const definition = workflowDefinitionSchema.parse({
       name: 'graph',
+      kind: 'run' as const,
       nodes: [
         { id: 'fork', type: 'fork', config: {} },
         { id: 'b', type: 'num', config: {} },
       ],
       edges: [],
     })
-    const forkNodes = flowNodes(definition, CATALOG, new Map())
+    const forkNodes = flowNodes(definition, CATALOG, new Map(), new Map())
     const link = (sourceHandle: string) =>
       ({ source: 'fork', target: 'b', sourceHandle, targetHandle: handleId({ kind: 'exec', name: EXEC_RUN_PIN }) })
 
@@ -144,7 +136,7 @@ describe('canvas graph model', () => {
   })
 
   it('pairs execution pins only with execution pins, and never occupies one', () => {
-    const execNodes = flowNodes(EXEC_DEFINITION, CATALOG, new Map())
+    const execNodes = flowNodes(EXEC_DEFINITION, CATALOG, new Map(), new Map())
     const execEdges = flowEdges(EXEC_DEFINITION)
     const link = (sourceHandle: string, targetHandle: string) =>
       ({ source: 'a', target: 'b', sourceHandle, targetHandle })

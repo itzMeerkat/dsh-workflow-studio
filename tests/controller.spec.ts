@@ -4,73 +4,38 @@
 
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import {
-  apply as storageJsonApply, Config as storageJsonConfig,
-  inject as storageJsonInject, name as storageJsonName,
-} from '@deepseek-ai/dsh-storage-json'
-import {
-  apply as storageDomainApply, Config as storageDomainConfig,
-  inject as storageDomainInject, name as storageDomainName,
-} from '@deepseek-ai/dsh-storage-domain'
-import { registerFixtureNodes } from './fixture-nodes.ts'
-import { runEnded } from './host.ts'
+import type { Context } from '@deepseek-ai/cordis'
+import { createFixtureNodes } from './fixture-nodes.ts'
+import { workflow } from './graph-fixtures.ts'
+import { TestHosts, runEnded, signalRequested } from './host.ts'
 import { RunId } from '../src/shared/types.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
-import { DagEngineProvider } from '../src/engine-provider.ts'
-import { WorkflowNodeRegistry } from '../src/registry.ts'
 
 describe('WorkflowStudioController', () => {
-  const contexts: Context[] = []
-  const roots: string[] = []
+  const hosts = new TestHosts()
+  let host: Context
 
-  afterEach(async () => {
-    await Promise.all(contexts.splice(0).map(async ctx => ctx.fiber.dispose()))
-    await Promise.all(roots.splice(0).map(async root => rm(root, { recursive: true, force: true })))
-  })
+  afterEach(async () => { await hosts.cleanup() })
 
   async function setup(): Promise<WorkflowStudioController> {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-workflow-controller-'))
-    roots.push(root)
-    const ctx = new Context()
-    contexts.push(ctx)
-    await ctx.plugin(Storage)
-    await ctx.plugin({
-      name: storageJsonName,
-      inject: storageJsonInject,
-      apply: storageJsonApply,
-      Config: storageJsonConfig,
-    }, { root })
-    await ctx.plugin({
-      name: storageDomainName,
-      inject: storageDomainInject,
-      apply: storageDomainApply,
-      Config: storageDomainConfig,
-    }, { backend: 'json' })
-    await ctx.plugin(WorkflowNodeRegistry)
-    registerFixtureNodes(ctx)
-    await ctx.plugin(DagEngineProvider)
+    const { ctx } = await hosts.start(await hosts.root(), createFixtureNodes())
+    host = ctx
     return new WorkflowStudioController(ctx)
+  }
+
+  /** 快照中第一个工作流保存下来的定义。 */
+  function savedDefinition(controller: WorkflowStudioController): { nodes: Record<string, unknown>[] } {
+    const snapshot = JSON.parse(controller.snapshot()) as { workflows: { definition: string }[] }
+    return JSON.parse(snapshot.workflows[0]!.definition) as { nodes: Record<string, unknown>[] }
   }
 
   it('保存定义、列出节点并返回完整运行结果', async () => {
     const controller = await setup()
-    const workflowId = await controller.save(JSON.stringify({
-      name: 'sum',
-      nodes: [
-        { id: 'left', type: 'value', config: { value: 10 }, position: { x: 24, y: 48 } },
-        { id: 'right', type: 'value', config: { value: 20 } },
-        { id: 'add', type: 'sum', config: { offset: 0 } },
-      ],
-      edges: [
-        { id: 'left-add', kind: 'data', source: 'left', target: 'add', targetPort: 'left' },
-        { id: 'right-add', kind: 'data', source: 'right', target: 'add', targetPort: 'right' },
-      ],
-    }))
+    const workflowId = await controller.save(JSON.stringify(workflow({
+      left: { type: 'value', config: { value: 10 }, position: { x: 24, y: 48 } },
+      right: { type: 'value', config: { value: 20 } },
+      add: { type: 'sum', config: { offset: 0 } },
+    }, ['left>add:left', 'right>add:right'], { name: 'sum' })))
 
     const snapshot = JSON.parse(controller.snapshot()) as {
       workflows: Array<{ id: string; name: string }>
@@ -89,10 +54,13 @@ describe('WorkflowStudioController', () => {
     )
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
-      ['ask', 'branch', 'greater', 'merge', 'sum', 'value', 'workflow-input', 'workflow-output'],
+      [
+        'ask', 'branch', 'code-block', 'code-condition', 'code-function', 'greater', 'merge', 'sum', 'value',
+        'workflow-input', 'workflow-output',
+      ],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
-    assert.equal(sum?.sourcePlugin, 'test-fixtures')
+    assert.equal(sum?.sourcePlugin, 'engine-tests')
     assert.deepEqual(sum?.inputs.map(port => port.name), ['left', 'right'])
     assert.deepEqual(sum?.execOutputs, ['then'])
     assert.deepEqual(sum?.outputs.map(port => port.name), ['result'])
@@ -102,62 +70,37 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(greater?.inputs.map(port => port.name), ['left', 'right'])
     const gate = snapshot.nodeTypes.find(node => node.type === 'branch')
     assert.deepEqual(gate?.execOutputs, ['true', 'false'])
-    const savedDefinition = JSON.parse(
-      (JSON.parse(controller.snapshot()) as { workflows: Array<{ definition: string }> }).workflows[0]!.definition,
-    ) as { nodes: Array<{ id: string; position?: { x: number; y: number } }> }
-    assert.deepEqual(savedDefinition.nodes.find(node => node.id === 'left')?.position, { x: 24, y: 48 })
+    assert.deepEqual(savedDefinition(controller).nodes.find(node => node.id === 'left')?.position, { x: 24, y: 48 })
 
-    const runId = RunId(controller.start(workflowId))
-    const result = await runEnded(contexts.at(-1)!, runId)
+    const result = await runEnded(host, RunId(controller.start(workflowId)))
     assert.equal(result.status, 'completed')
     assert.deepEqual(result.nodes.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
   })
 
   it('保存的定义保留边界节点声明的端口和默认值', async () => {
     const controller = await setup()
-    await controller.save(JSON.stringify({
-      name: 'declared',
-      nodes: [
-        {
-          id: 'in',
-          type: 'workflow-input',
-          config: {},
-          outputs: [{ name: 'threshold', type: 'number', default: 3 }],
-        },
-        {
-          id: 'out',
-          type: 'workflow-output',
-          config: {},
-          inputs: [{ name: 'verdict', type: 'string', required: false }],
-        },
-      ],
-      edges: [],
-    }))
+    await controller.save(JSON.stringify(workflow({
+      in: { type: 'workflow-input', outputs: [{ name: 'threshold', type: 'number', default: 3 }] },
+      out: { type: 'workflow-output', inputs: [{ name: 'verdict', type: 'string', required: false }] },
+    }, [], { name: 'declared' })))
 
-    const saved = JSON.parse(
-      (JSON.parse(controller.snapshot()) as { workflows: Array<{ definition: string }> }).workflows[0]!.definition,
-    ) as { nodes: Array<{ id: string; outputs?: Array<{ name: string; default?: unknown }> }> }
     // A schema that does not declare `default` drops it, so the round trip is what proves it persists.
-    assert.deepEqual(saved.nodes.find(node => node.id === 'in')?.outputs, [
+    assert.deepEqual(savedDefinition(controller).nodes.find(node => node.id === 'in')?.outputs, [
       { name: 'threshold', type: 'number', default: 3 },
     ])
   })
 
   it('等待中的请求经 signal Remote 校验后送达结果', async () => {
     const controller = await setup()
-    const workflowId = await controller.save(JSON.stringify({
-      name: 'ask',
-      nodes: [{ id: 'ask', type: 'ask', config: {} }],
-      edges: [],
-    }))
+    const workflowId = await controller.save(JSON.stringify(
+      workflow({ ask: 'ask' }, [], { name: 'ask' }),
+    ))
+    const asked = signalRequested(host)
     const runId = RunId(controller.start(workflowId))
-    const record = () => JSON.parse(controller.getRun(runId)) as {
-      nodes: Array<{ status: string; requests?: Array<{ id: string; request: { kind: string }; result?: unknown }> }>
-    }
-    for (let tick = 0; tick < 200 && record().nodes[0]?.requests === undefined; tick++) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    const pending = record().nodes[0]!
+    await asked
+    const pending = (JSON.parse(controller.getRun(runId)) as {
+      nodes: { status: string; requests?: { id: string; request: { kind: string } }[] }[]
+    }).nodes[0]!
     assert.equal(pending.status, 'running')
     assert.deepEqual(pending.requests?.map(item => [item.id, item.request.kind]), [['pick', 'questions']])
 
@@ -171,18 +114,14 @@ describe('WorkflowStudioController', () => {
     }
     assert.deepEqual(after.nodes[0]?.requests?.[0]?.result, answer)
 
-    const result = await runEnded(contexts.at(-1)!, runId)
+    const result = await runEnded(host, runId)
     assert.equal(result.status, 'completed')
     assert.deepEqual(result.nodes[0]?.outputs, { answer: 'yes' })
   })
 
   it('按 ID 更新返回改名后的新 ID，快照只列出改名后的工作流', async () => {
     const controller = await setup()
-    const source = {
-      name: 'before',
-      nodes: [{ id: 'input', type: 'value', config: { value: 1 } }],
-      edges: [],
-    }
+    const source = workflow({ input: { type: 'value', config: { value: 1 } } }, [], { name: 'before' })
     assert.equal(await controller.save(JSON.stringify(source)), 'before')
 
     const renamed = await controller.update('before', JSON.stringify({ ...source, name: 'after' }))
@@ -201,11 +140,7 @@ describe('WorkflowStudioController', () => {
     const controller = await setup()
     await assert.rejects(controller.save('{'), /JSON/)
     await assert.rejects(
-      controller.save(JSON.stringify({
-        name: 'bad',
-        nodes: [{ id: 'node', type: 'missing', config: {} }],
-        edges: [],
-      })),
+      controller.save(JSON.stringify(workflow({ node: 'missing' }, [], { name: 'bad' }))),
       /未知节点类型/,
     )
   })

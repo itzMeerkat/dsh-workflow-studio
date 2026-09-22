@@ -14,9 +14,11 @@ import {
 import type { Connection, Edge, EdgeChange, NodeChange } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
+import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type {
   DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary, PortDefinition,
 } from '../shared/types.ts'
+import { withSignatures } from '../shared/language.ts'
 import { withBoundaryPorts } from '../shared/workflow-boundary.ts'
 import {
   applyWorkflowPortEdit,
@@ -42,6 +44,8 @@ interface WorkflowGraphEditorProps {
   readonly revision: number
   readonly nodeTypes: readonly NodeTypeSummary[]
   readonly runRecords: ReadonlyMap<string, NodeRunRecord>
+  /** Static-analysis findings by node ID. */
+  readonly diagnostics: ReadonlyMap<string, readonly WorkflowDiagnostic[]>
   readonly runResult?: string
   readonly t: Translate
   readonly onChange: (definition: DagWorkflowDefinition) => void
@@ -54,20 +58,21 @@ export function WorkflowGraphEditor({
   revision,
   nodeTypes: catalogTypes,
   runRecords,
+  diagnostics,
   runResult,
   t,
   onChange,
   onError,
 }: WorkflowGraphEditorProps) {
   const catalog = useMemo(() => new Map(catalogTypes.map(node => [node.type, node])), [catalogTypes])
-  const [nodes, setNodes] = useState<WorkflowFlowNode[]>(() => flowNodes(definition, catalog, runRecords))
+  const [nodes, setNodes] = useState<WorkflowFlowNode[]>(() => flowNodes(definition, catalog, runRecords, diagnostics))
   const [edges, setEdges] = useState<Edge[]>(() => flowEdges(definition))
   const [selectedNodeId, setSelectedNodeId] = useState<string>()
   const [configSource, setConfigSource] = useState('{}')
   const reconnectingEdgeId = useRef<string>()
 
   useEffect(() => {
-    setNodes(flowNodes(definition, catalog, runRecords))
+    setNodes(flowNodes(definition, catalog, runRecords, diagnostics))
     setEdges(flowEdges(definition))
     setSelectedNodeId(undefined)
   }, [revision, catalog])
@@ -95,10 +100,22 @@ export function WorkflowGraphEditor({
     })
   }
 
+  /**
+   * Replace one node's definition. A function node's ports follow its code, so the edit rereads
+   * them and drops the edges on ports the code no longer declares.
+   */
   const updateNode = (nodeId: string, update: (node: DagNodeDefinition) => DagNodeDefinition): void => {
-    commitNodes(current => current.map(node => node.id === nodeId
+    const edited = nodes.map(node => node.id === nodeId
       ? { ...node, data: { ...node.data, definition: update(node.data.definition) } }
-      : node))
+      : node)
+    const next = withSignatures(toDefinition(definition, edited, edges))
+    const signed = next.nodes.find(node => node.id === nodeId)!
+    const kept = new Set<string>(next.edges.map(edge => edge.id))
+    const nextNodes = edited.map(node => node.id === nodeId ? { ...node, data: { ...node.data, definition: signed } } : node)
+    const nextEdges = edges.filter(edge => kept.has(edge.id))
+    setNodes(nextNodes)
+    setEdges(nextEdges)
+    onChange(next)
   }
 
   const updateConfig = (nodeId: string, name: string, value: unknown): void => {

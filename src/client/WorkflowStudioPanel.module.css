@@ -1544,3 +1544,135 @@
   font: inherit;
   font-size: 12px;
 }
+
+.nodeDiagnostics {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+.nodeDiagnostics[data-severity='error'] {
+  background: #b83232;
+  color: #fff;
+}
+
+.nodeDiagnostics[data-severity='warning'] {
+  background: #9a6700;
+  color: #fff;
+}
+
+.diagnostics {
+  flex: 0 0 auto;
+  max-height: 160px;
+  overflow-y: auto;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding: 8px 12px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.diagnostics h3 {
+  margin: 0 0 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.diagnostics ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diagnosticRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+}
+
+.diagnosticSeverity {
+  flex: 0 0 auto;
+  font-weight: 500;
+}
+
+.diagnosticSeverity[data-severity='error'] {
+  color: #b83232;
+}
+
+.diagnosticSeverity[data-severity='warning'] {
+  color: #9a6700;
+}
+
+.diagnosticNode,
+.diagnosticDetail {
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--dsw-font-mono);
+  font-size: 11px;
+}
+
+.diagnosticsEmpty {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.source {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.source pre {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fileControl {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.fileControl code {
+  overflow: hidden;
+  flex: 1 1 100%;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeControlBlock {
+  align-items: stretch;
+}
+
+.nodeControlBlock textarea {
+  min-width: 220px;
+  resize: vertical;
+  font-family: var(--dsw-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.languagePicker {
+  height: 28px;
+  padding: 0 6px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+}

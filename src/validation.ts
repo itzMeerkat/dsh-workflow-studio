@@ -3,20 +3,20 @@
  * @module dsh-workflow-studio
  */
 
+import { DIAGNOSTIC_SEVERITY, analyzeWorkflow, indexNodeTypes } from './shared/analysis.ts'
+import { describeDiagnostic } from './diagnostic-message.ts'
 import {
   assertUniquePortNames,
   execOutputPins,
   execPinFault,
   execSourcePin,
   execTargetPin,
-  inboundEdges,
-  isDataEdge,
   isExecEdge,
   portsAreCompatible,
-  resolveInputPorts,
   topologicalLevels,
 } from './shared/graph.ts'
-import { isAnyJoin } from './flow-nodes.ts'
+import { languageOf } from './shared/language.ts'
+import { DEFAULT_WORKFLOW_KIND } from './shared/types.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './shared/workflow-boundary.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type {
@@ -39,12 +39,14 @@ export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefin
 /**
  * 按注册表验证一个作者保存的定义。
  *
- * 边界节点是普通节点，因此端口、边和拓扑校验对它们一视同仁；这里只多一条它们独有的规则。
+ * 边界节点是普通节点，因此端口、边和拓扑校验对它们一视同仁；这里只多一条它们独有的规则，
+ * 以及 `code` 工作流必须指定一种语言。
  * @param registry - 提供节点类型的注册表。
  * @param definition - 待验证的定义。
  * @throws 定义违反任一可由注册表确定的不变量时。
  */
 export function validateWorkflow(registry: WorkflowNodeRegistry, definition: DagWorkflowDefinition): void {
+  languageOf(definition)
   assertSingleBoundary(definition, WORKFLOW_INPUT_TYPE, '输入')
   assertSingleBoundary(definition, WORKFLOW_OUTPUT_TYPE, '输出')
   resolveExecutors(registry, definition)
@@ -88,7 +90,13 @@ export function resolveExecutors(
 
     const executor = registry.get(node.type)
     if (executor === undefined) throw new Error(`未知节点类型: ${node.type}`)
-    const inputs = resolveInputPorts(node.inputs, executor.inputs ?? [])
+    const kinds = executor.kinds ?? [DEFAULT_WORKFLOW_KIND]
+    if (!kinds.includes(definition.kind)) {
+      throw new Error(
+        `节点类型 ${node.type} 只能用在 ${kinds.join('、')} 工作流中，而本工作流是 ${definition.kind}`,
+      )
+    }
+    const inputs = node.inputs ?? executor.inputs ?? []
     const outputs = node.outputs ?? executor.outputs ?? []
     assertUniquePortNames(`节点 ${node.id}`, '输入', inputs)
     assertUniquePortNames(`节点 ${node.id}`, '输出', outputs)
@@ -124,79 +132,26 @@ export function resolveExecutors(
     }
   }
 
-  assertNoStarvedInputs(definition, executors, nodePorts)
+  assertNoAnalysisErrors(registry, definition)
   return executors
 }
 
-/** 节点执行所依赖的条件引脚集合；空集表示节点在运行到达时必然执行。 */
-type Guard = ReadonlySet<string>
-
 /**
- * 拒绝目标可能在源被跳过时仍然执行的数据边。
+ * 按整图分析拒绝在任何分支下都错误的接线。
  *
- * 跳过只沿执行边传递，因此这种接线会让目标带着缺失的必需输入执行并失败。
- * 对每个节点求出它执行所依赖的条件引脚集合 `guard`：只有 `guard(源) ⊆ guard(目标)` 时，
- * 目标执行就意味着源也执行过。无法证明时拒绝，作者补一条执行边即可。
- * @param definition - 已通过边校验的定义。
- * @param executors - 节点 ID 到执行器的映射。
- * @param nodePorts - 节点 ID 到已解析端口的映射。
- * @throws 存在可能缺失必需输入的数据边时。
+ * 逐条规则看不到跨分支的可达性：只有整张图能回答"目标执行时源是否必然执行过"。
+ * 告警由保存结果带回给作者，不阻止保存，因为分析不知道运行期会选哪条分支。
+ * @param registry - 提供节点类型的注册表。
+ * @param definition - 已通过逐条规则校验的定义。
+ * @returns 分析给出的全部告警。
+ * @throws 定义包含环，或存在严重程度为 error 的诊断时。
  */
-function assertNoStarvedInputs(
-  definition: DagWorkflowDefinition,
-  executors: ReadonlyMap<NodeId, WorkflowNodeExecutor>,
-  nodePorts: ReadonlyMap<NodeId, ResolvedNodePorts>,
-): void {
-  const inbound = inboundEdges(definition.edges)
-  const guards = new Map<NodeId, Guard>()
-  for (const level of topologicalSort(definition)) {
-    for (const node of level) {
-      const execEdges = inbound.exec.get(node.id) ?? []
-      if (execEdges.length === 0) {
-        guards.set(node.id, new Set())
-        continue
-      }
-      const reached = execEdges.map((edge) => {
-        const pins = new Set(guards.get(edge.source) ?? [])
-        // A source with one execution pin always fires it when it completes, so it adds no condition.
-        if (execOutputPins(executors.get(edge.source)!).length > 1) {
-          pins.add(`${edge.source}\u0000${execSourcePin(edge)}`)
-        }
-        return pins
-      })
-      const executor = executors.get(node.id)!
-      guards.set(node.id, isAnyJoin(executor) ? intersect(reached) : union(reached))
-    }
-  }
-
-  for (const edge of definition.edges) {
-    if (!isDataEdge(edge)) continue
-    const targetPort = edge.targetPort ?? 'input'
-    const port = nodePorts.get(edge.target)!.inputs.find(item => item.name === targetPort)
-    if (port?.required === false) continue
-    const sourceGuard = guards.get(edge.source)!
-    const targetGuard = guards.get(edge.target)!
-    const unmet = [...sourceGuard].find(pin => !targetGuard.has(pin))
-    if (unmet === undefined) continue
-    const [nodeId, pin] = unmet.split('\u0000')
-    throw new Error(
-      `边 ${edge.id} 的源节点 ${edge.source} 可能被跳过，而目标节点 ${edge.target} 仍会执行`
-      + `（${edge.target} 不依赖 ${nodeId}.${pin} 触发）：为 ${edge.target} 补一条执行边，`
-      + `或把输入端口 ${targetPort} 声明为可选`,
-    )
-  }
-}
-
-function union(sets: readonly Guard[]): Guard {
-  const result = new Set<string>()
-  for (const set of sets) for (const item of set) result.add(item)
-  return result
-}
-
-function intersect(sets: readonly Guard[]): Guard {
-  const [first, ...rest] = sets
-  if (first === undefined) return new Set()
-  return new Set([...first].filter(item => rest.every(set => set.has(item))))
+function assertNoAnalysisErrors(registry: WorkflowNodeRegistry, definition: DagWorkflowDefinition): void {
+  // 分析按拓扑序求 guard，环上的节点排不进任何层级，因此先在这里拒绝环。
+  topologicalSort(definition)
+  const { diagnostics } = analyzeWorkflow(definition, indexNodeTypes(registry.listTypes()))
+  const error = diagnostics.find(diagnostic => DIAGNOSTIC_SEVERITY[diagnostic.code] === 'error')
+  if (error !== undefined) throw new Error(describeDiagnostic(error))
 }
 
 /**

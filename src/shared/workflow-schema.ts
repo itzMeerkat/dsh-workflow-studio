@@ -18,6 +18,7 @@ import type {
   WorkflowRunSummary,
   WorkflowStudioSnapshot,
 } from './types.ts'
+import { DEFAULT_WORKFLOW_KIND } from './types.ts'
 
 // 每个 schema 断言为对应的声明类型：zod 输出省略缺失的可选键，但把它们类型化为 `T | undefined`，
 // 且不产生品牌 ID 类型；断言只恢复声明类型，不改变运行时值。
@@ -49,6 +50,14 @@ export const nodeControlSchema = z.discriminatedUnion('kind', [
     step: z.number().optional(),
   }),
   z.object({ ...controlIdentity, kind: z.literal('text'), defaultValue: z.string(), placeholder: z.string().optional() }),
+  z.object({
+    ...controlIdentity,
+    kind: z.literal('textarea'),
+    defaultValue: z.string(),
+    placeholder: z.string().optional(),
+    rows: z.number().int().positive().optional(),
+  }),
+  z.object({ ...controlIdentity, kind: z.literal('file'), defaultValue: z.string() }),
   z.object({ ...controlIdentity, kind: z.literal('boolean'), defaultValue: z.boolean() }),
   z.object({
     ...controlIdentity,
@@ -89,9 +98,14 @@ export const workflowEdgeSchema = z.discriminatedUnion('kind', [
   z.object({ ...edgeIdentity, kind: z.literal('exec') }),
 ]) as unknown as z.ZodType<DagEdgeDefinition>
 
+const workflowKind = z.enum(['run', 'code'])
+
 /** 完整工作流定义的持久化和 Remote JSON schema。 */
 export const workflowDefinitionSchema = z.object({
   name: nonEmptyString,
+  // 第二种工作流出现之前保存的记录没有这个字段，它们都是被执行的工作流。
+  kind: workflowKind.default(DEFAULT_WORKFLOW_KIND),
+  language: nonEmptyString.optional(),
   description: nonEmptyString.optional(),
   nodes: z.array(workflowNodeSchema),
   edges: z.array(workflowEdgeSchema),
@@ -157,6 +171,7 @@ export const workflowStudioSnapshotSchema = z.object({
   workflows: z.array(z.object({
     id: z.string().min(1),
     name: z.string(),
+    kind: workflowKind,
     description: z.string().optional(),
     definition: z.string(),
   })),
@@ -165,6 +180,8 @@ export const workflowStudioSnapshotSchema = z.object({
     label: z.string(),
     description: z.string(),
     sourcePlugin: z.string(),
+    execKind: z.enum(['plain', 'decision', 'join']),
+    kinds: z.array(workflowKind),
     inputs: z.array(workflowPortSchema),
     outputs: z.array(workflowPortSchema),
     execOutputs: z.array(z.string()),

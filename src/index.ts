@@ -1,7 +1,8 @@
 /**
  * dsh-workflow-studio 主插件入口。
  *
- * 注册节点表、执行引擎和模型面工具；本插件不注册任何节点。
+ * 注册节点表、执行引擎、模型面工具，以及存在技能表时的 `workflow-code-atoms` 技能。
+ * 本插件自带流程控制节点、边界节点、`code` 工作流的代码节点和写出源码的语言，其余节点由插件提供。
  * @module dsh-workflow-studio
  */
 
@@ -10,6 +11,7 @@ import { WorkflowNodeRegistry } from './registry.ts'
 import { DagEngineProvider, type DagEngineConfig } from './engine-provider.ts'
 import { registerWorkflowTools } from './tools.ts'
 import { WorkflowStudioController } from './controller.ts'
+import { registerWorkflowSkill } from './skill.ts'
 
 /** 插件运行所需的 Harness 服务。 */
 export const inject = ['tools', 'storageDomain']
@@ -35,6 +37,8 @@ export function apply(ctx: Context, config: Config): void {
     scope.plugin(WorkflowStudioController)
     registerWorkflowTools(scope)
   })
+
+  registerWorkflowSkill(ctx)
 }
 
 export { WorkflowNodeRegistry } from './registry.ts'
@@ -57,7 +61,26 @@ export {
   withRunInputs, workflowInputNode, workflowInputPorts, workflowOutputNode, workflowOutputPorts,
 } from './shared/workflow-boundary.ts'
 export type { WorkflowNodePorts } from './node.ts'
+export {
+  DIAGNOSTIC_SEVERITY, analyzeWorkflow, atomNode, atomPin, indexNodeTypes,
+} from './shared/analysis.ts'
+export type {
+  Guard, WorkflowAnalysis, WorkflowDiagnostic, WorkflowDiagnosticCode,
+} from './shared/analysis.ts'
+export { buildWorkflowIr } from './shared/ir.ts'
+export type {
+  IrArgument, IrArm, IrBlock, IrCall, IrGuard, IrItem, IrOutputs, IrValue, WorkflowIr,
+} from './shared/ir.ts'
+export { RenderError, renderWorkflow } from './shared/source.ts'
+export type { RenderFault } from './shared/source.ts'
+export {
+  CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, CODE_FUNCTION_TYPE, CODE_LANGUAGES, GO, PSEUDOCODE, PYTHON,
+  TYPESCRIPT, languageOf,
+} from './shared/language.ts'
+export type { FunctionSyntax, Language, Signature, TypedName } from './shared/language.ts'
+export { describeDiagnostic, describeRenderFault } from './diagnostic-message.ts'
 export { registerWorkflowTools } from './tools.ts'
+export { WORKFLOW_CODE_SKILL, registerWorkflowSkill } from './skill.ts'
 export { WorkflowStudioController } from './controller.ts'
 export { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 export { workflowDefinitionSchema, workflowRunRecordSchema } from './shared/workflow-schema.ts'
@@ -70,8 +93,9 @@ export type {
   NodeExecutionCompleted, NodeExecutionFailed, NodeControlDefinition,
   WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
   NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, NodeSignalRequest,
-  NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, WorkflowStudioSnapshot,
+  NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, NodeExecKind, WorkflowKind,
+  WorkflowStudioSnapshot,
 } from './shared/types.ts'
 export {
-  WorkflowId, RunId, NodeId, EdgeId,
+  DEFAULT_WORKFLOW_KIND, WorkflowId, RunId, NodeId, EdgeId,
 } from './shared/types.ts'

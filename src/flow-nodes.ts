@@ -8,12 +8,14 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { createCodeNodes } from './code-nodes.ts'
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from './node.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_INPUT_VALUES, WORKFLOW_OUTPUT_TYPE,
 } from './shared/workflow-boundary.ts'
 import type {
-  NodeExecutionContext, NodeExecutionResult, PortDefinition, WorkflowNodeExecutor,
+  NodeExecKind, NodeExecutionContext, NodeExecutionResult, PortDefinition, WorkflowKind,
+  WorkflowNodeExecutor,
 } from './shared/types.ts'
 
 /** {@link BranchNode} 条件成立时触发的执行输出引脚。 */
@@ -29,6 +31,7 @@ export const BRANCH_FALSE_PIN = 'false'
  */
 export class BranchNode implements WorkflowNodeExecutor {
   readonly type = 'branch'
+  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '条件分支'
   readonly description = '按布尔输入触发 true 或 false 执行引脚'
   readonly execOutputs: readonly string[] = [BRANCH_TRUE_PIN, BRANCH_FALSE_PIN]
@@ -57,6 +60,7 @@ export class BranchNode implements WorkflowNodeExecutor {
  */
 export class MergeNode extends WorkflowNode<{ output: unknown }> {
   readonly type = 'merge'
+  override readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '分支合并'
   readonly description = '从互斥分支中透传唯一送达的输入'
   override readonly variadicInputs: NonNullable<WorkflowNodeExecutor['variadicInputs']> = { min: 2, outputType: 'same' }
@@ -85,6 +89,7 @@ export class MergeNode extends WorkflowNode<{ output: unknown }> {
  */
 export class WorkflowInputNode implements WorkflowNodeExecutor {
   readonly type = WORKFLOW_INPUT_TYPE
+  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '工作流输入'
   readonly description = '把调用方提供的工作流输入送入图中'
   readonly inputs: readonly PortDefinition[] = []
@@ -107,6 +112,7 @@ export class WorkflowInputNode implements WorkflowNodeExecutor {
  */
 export class WorkflowOutputNode implements WorkflowNodeExecutor {
   readonly type = WORKFLOW_OUTPUT_TYPE
+  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '工作流输出'
   readonly description = '收集工作流声明的输出值'
   readonly inputs: readonly PortDefinition[] = []
@@ -121,24 +127,26 @@ const branchNode = new BranchNode()
 const mergeNode = new MergeNode()
 
 /**
- * 执行器是否为 OR 连接点：任一入执行边触发即执行，全部失效才跳过。
+ * 执行器的执行语义。
  *
- * 按实例身份判断，因此第三方节点即使使用相同类型名或字段也无法获得该语义。
+ * 按实例身份判断，因此第三方节点即使使用相同类型名或字段也无法获得 `decision` 或 `join` 语义。
  * @param executor - 运行中解析到的节点执行器。
  */
-export function isAnyJoin(executor: WorkflowNodeExecutor): boolean {
-  return executor === mergeNode
+export function execKindOf(executor: WorkflowNodeExecutor): NodeExecKind {
+  if (executor === mergeNode) return 'join'
+  if (executor === branchNode) return 'decision'
+  return 'plain'
 }
 
 /**
- * 注册引擎自有的流程控制节点。
+ * 注册引擎自有的节点：流程控制节点、边界节点和 `code` 工作流的代码节点。
  * @param ctx - 已加载 workflowNodeRegistry 服务的 Cordis context。
  */
-export function registerFlowControlNodes(ctx: Context): void {
+export function registerBuiltinNodes(ctx: Context): void {
   const nodes: readonly WorkflowNodeExecutor[] = [
-    branchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(),
+    branchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(), ...createCodeNodes(),
   ]
   for (const node of nodes) {
-    ctx.effect(() => ctx.workflowNodeRegistry.register(node, 'dsh-workflow-studio'), `flow-node:${node.type}`)
+    ctx.effect(() => ctx.workflowNodeRegistry.register(node, 'dsh-workflow-studio'), `builtin-node:${node.type}`)
   }
 }

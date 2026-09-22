@@ -4,49 +4,29 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { workflow } from './graph-fixtures.ts'
 import { topologicalSort } from '../src/validation.ts'
 import type { DagWorkflowDefinition } from '../src/shared/types.ts'
-import { NodeId, EdgeId } from '../src/shared/types.ts'
 
-function makeWorkflow(edges: Array<[string, string]>): DagWorkflowDefinition {
-  const nodeIds = [...new Set(edges.flat())]
-  return {
-    name: 'test',
-    nodes: nodeIds.map(id => ({
-      id: NodeId(id),
-      type: 'input',
-      config: {},
-      inputs: [{ name: 'input', type: 'any' }],
-      outputs: [{ name: 'output', type: 'any' }],
-    })),
-    edges: edges.map(([s, t], i) => ({
-      id: EdgeId(`e${i}`),
-      kind: 'data' as const,
-      source: NodeId(s),
-      target: NodeId(t),
-    })),
-  }
+/** `a>b` 写法的数据边构成的图；节点类型都是通用的 `value`。 */
+function graph(...wires: readonly string[]): DagWorkflowDefinition {
+  const ids = [...new Set(wires.flatMap(wire => wire.split('>')))]
+  return workflow(Object.fromEntries(ids.map(id => [id, 'value'])), wires)
+}
+
+function levels(definition: DagWorkflowDefinition): string[][] {
+  return topologicalSort(definition).map(level => level.map(node => node.id))
 }
 
 describe('topologicalSort', () => {
   it('按数据依赖分层，扇出节点同层，隔离节点在第一层', () => {
-    const chain = topologicalSort(makeWorkflow([['a', 'b'], ['b', 'c']]))
-    assert.deepEqual(chain.map(level => level.map(node => node.id)), [['a'], ['b'], ['c']])
-
-    const fanOut = topologicalSort(makeWorkflow([['a', 'b'], ['a', 'c']]))
-    assert.deepEqual(fanOut.map(level => level.map(node => node.id)), [['a'], ['b', 'c']])
-
-    const isolated = topologicalSort({
-      name: 'isolated',
-      nodes: [{ id: NodeId('a'), type: 'input', config: {} }],
-      edges: [],
-    })
-    assert.deepEqual(isolated.map(level => level.map(node => node.id)), [['a']])
-
-    assert.deepEqual(topologicalSort({ name: 'empty', nodes: [], edges: [] }), [])
+    assert.deepEqual(levels(graph('a>b', 'b>c')), [['a'], ['b'], ['c']])
+    assert.deepEqual(levels(graph('a>b', 'a>c')), [['a'], ['b', 'c']])
+    assert.deepEqual(levels(workflow({ a: 'value' }, [])), [['a']])
+    assert.deepEqual(levels(workflow({}, [])), [])
   })
 
   it('构成环的数据边被拒绝', () => {
-    assert.throws(() => topologicalSort(makeWorkflow([['a', 'b'], ['b', 'c'], ['c', 'a']])), /包含环/)
+    assert.throws(() => topologicalSort(graph('a>b', 'b>c', 'c>a')), /包含环/)
   })
 })

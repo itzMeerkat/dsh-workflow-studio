@@ -31,7 +31,7 @@ export class WorkflowStudioController extends TypertRemoteService {
     this.registry = ctx.workflowNodeRegistry
   }
 
-  /** Return all persisted definitions and the currently registered node types. */
+  /** Return all persisted definitions and the registered node types. */
   @Remote
   snapshot(): string {
     const payload: WorkflowStudioSnapshot = {
