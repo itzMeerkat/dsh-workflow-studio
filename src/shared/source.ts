@@ -3,13 +3,13 @@
  *
  * 伪代码和代码生成是同一次遍历：IR 定好了顺序和条件块，{@link Language} 决定块怎么开合、
  * 函数怎么声明、条件怎么取反；工作流的种类决定一项写成什么：`run` 工作流的节点写成对节点类型的调用，
- * `code` 工作流的节点携带代码，语句原样写出，函数写在文件顶层并按数据边调用。
+ * `code` 工作流的节点携带代码或调用原子目录中的函数。
  * @module dsh-workflow-studio
  */
 
 import type { IrBlock, IrCall, IrGuard, IrOutputs, IrValue, WorkflowIr } from './ir.ts'
 import {
-  CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FUNCTION_TYPE, codeOf, type Language, type Signature,
+  CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, atomOf, codeOf, type Atom, type Language,
 } from './language.ts'
 import type { NodeId, PortDefinition } from './types.ts'
 
@@ -21,11 +21,11 @@ export type RenderFault =
   | { readonly code: 'no-condition'; readonly node: NodeId }
   /** 作为条件的代码不止一行。 */
   | { readonly code: 'multiline-condition'; readonly node: NodeId }
-  /** 函数节点的代码不是该语言能读出签名的函数。 */
-  | { readonly code: 'not-a-function'; readonly node: NodeId }
-  /** 函数的必需参数 `port` 没有接线。 */
+  /** 原子节点引用的文件不在原子目录中，或不能作为原子。 */
+  | { readonly code: 'missing-atom'; readonly node: NodeId; readonly atom: string }
+  /** 原子的必需参数 `port` 没有接线。 */
   | { readonly code: 'unwired-parameter'; readonly node: NodeId; readonly port: string }
-  /** 生成的代码中没有保存这个节点产出的值：它既不是函数的结果，也不是只汇合函数结果的分支合并。 */
+  /** 生成的代码中没有保存这个节点产出的值：它既不是原子的结果，也不是只汇合原子结果的分支合并。 */
   | { readonly code: 'no-value'; readonly node: NodeId }
 
 /** 写不出源码的原因；文案由使用它的界面按 {@link RenderFault} 组织。 */
@@ -40,11 +40,12 @@ export class RenderError extends Error {
  * 把 IR 写成一种语言的一个函数。
  * @param ir - 工作流的 IR。
  * @param language - 工作流的语言，即 {@link languageOf} 的结果。
+ * @param atoms - 工作流原子目录中的原子，按文件名索引；没有原子目录时为空。
  * @returns 源码，以一个换行结尾。
  * @throws {@link RenderError} 图中有该语言写不出的结构时。
  */
-export function renderWorkflow(ir: WorkflowIr, language: Language): string {
-  const content = contentOf(ir, language)
+export function renderWorkflow(ir: WorkflowIr, language: Language, atoms: ReadonlyMap<string, Atom> = new Map()): string {
+  const content = contentOf(ir, language, atoms)
   const line = (depth: number, text: string): string => text === '' ? '' : `${language.indent.repeat(depth)}${text}`
   const close = (depth: number): string[] => language.blockEnd === undefined ? [] : [line(depth, language.blockEnd)]
   const block = (items: IrBlock, depth: number): string[] => {
@@ -64,20 +65,20 @@ export function renderWorkflow(ir: WorkflowIr, language: Language): string {
     ...close(depth),
   ]
 
-  return [
-    ...content.preamble,
+  const body = [
     content.open,
     ...content.prologue.map(text => line(1, text)),
     ...block(ir.body, 1),
     ...content.epilogue.map(text => line(1, text)),
     ...close(0),
-  ].join('\n') + '\n'
+  ]
+  return [...content.preamble(body), ...body].join('\n') + '\n'
 }
 
 /** 一种工作流的节点写成什么。 */
 interface Content {
-  /** 生成函数之前的行。 */
-  readonly preamble: readonly string[]
+  /** 生成函数之前的行，按写好的函数决定，例如只导入函数用到的包。 */
+  preamble(body: readonly string[]): readonly string[]
   /** 开启生成函数的一行。 */
   readonly open: string
   /** 函数体开头的行，不含缩进。 */
@@ -90,12 +91,12 @@ interface Content {
   condition(gate: IrCall, pin: string): string
 }
 
-function contentOf(ir: WorkflowIr, language: Language): Content {
+function contentOf(ir: WorkflowIr, language: Language, atoms: ReadonlyMap<string, Atom>): Content {
   switch (ir.kind) {
     case 'run':
       return runContent(ir, language)
     case 'code':
-      return codeContent(ir, language)
+      return codeContent(ir, language, atoms)
     default:
       return assertNever(ir.kind)
   }
@@ -125,7 +126,7 @@ function runContent(ir: WorkflowIr, language: Language): Content {
     return results.get(value.node)! > 1 ? `${names.get(value.node)!}.${value.port}` : names.get(value.node)!
   }
   return {
-    preamble: [],
+    preamble: () => [],
     open: fill(language.functionOpen, { name, parameters: [...parameters.values()].join(', '), results: '' }),
     prologue: [],
     epilogue: [],
@@ -145,35 +146,34 @@ function runContent(ir: WorkflowIr, language: Language): Content {
 }
 
 /**
- * `code` 工作流：节点携带的代码按类型写出，编译器只读函数的签名，不解析其余代码。
+ * `code` 工作流：节点携带的代码按类型写出，编译器只读原子的签名，不解析其余代码。
  *
- * 语句节点的代码按所在的块重新缩进后原样写出；表达式节点写进读它的值的地方；函数节点写在文件顶层，
- * 在图中的位置调用它，实参按参数名取自数据边。函数的结果只有被读时才存进变量，这些变量在函数体开头声明；
- * 分支合并不产生代码，汇合到它的结果直接存进它的变量。决策节点按它的第一个输入决定，
+ * 语句节点的代码按所在的块重新缩进后原样写出；表达式节点写进读它的值的地方；原子节点在图中的位置调用
+ * 原子目录中的函数，实参按参数名取自数据边。生成的函数与原子同属一个包，所以只写它自己：
+ * 包声明取自原子目录，导入只含函数中用到包名的那些原子导入。函数的结果只有被读时才存进变量，
+ * 这些变量在函数体开头声明；分支合并不产生代码，汇合到它的结果直接存进它的变量。决策节点按它的第一个输入决定，
  * 第一个引脚是条件成立的一侧，另一个是它的取反。
  */
-function codeContent(ir: WorkflowIr, language: Language): Content {
+function codeContent(ir: WorkflowIr, language: Language, library: ReadonlyMap<string, Atom>): Content {
   const functions = language.functions
   const identifiers = new Identifiers(language.reserved)
   const items = itemsOf(ir.body)
   const calls = new Map(items.flatMap(item => item.kind === 'call' ? [[item.node, item] as const] : []))
 
-  // 具名函数的名字由代码写定，先占用，其余标识符都避开它们。
-  const signatures = new Map<NodeId, Signature>()
+  // 原子与生成的函数同在一个包，所以包里每个原子的名字都已被占用。
+  for (const atom of library.values()) identifiers.reserve(atom.signature.name)
+  const signatures = new Map<NodeId, Atom['signature']>()
   for (const call of calls.values()) {
-    if (call.type !== CODE_FUNCTION_TYPE) continue
-    const signature = functions?.signature(codeOf(call.config))
-    if (signature === undefined) throw new RenderError({ code: 'not-a-function', node: call.node })
-    signatures.set(call.node, signature)
-    if (signature.name !== undefined) identifiers.reserve(signature.name)
+    if (call.type !== CODE_ATOM_TYPE) continue
+    const atom = functions?.atoms === undefined ? undefined : library.get(atomOf(call.config))
+    if (atom === undefined) throw new RenderError({ code: 'missing-atom', node: call.node, atom: atomOf(call.config) })
+    signatures.set(call.node, atom.signature)
   }
   const name = identifiers.take(ir.name, 'workflow')
   const parameters = new Map(ir.inputs.map(port => [port.name, identifiers.take(port.name, 'arg')]))
   const results = new Map(ir.outputs.map(port => [port.name, identifiers.take(port.name, 'result')]))
-  const callees = new Map([...signatures].map(([node, signature]) =>
-    [node, signature.name ?? identifiers.take(calls.get(node)!.label ?? node, 'function')]))
 
-  // 只汇合函数结果的分支合并由每一侧的结果写入同一个变量；汇合了其他值的合并没有变量。
+  // 只汇合原子结果的分支合并由每一侧的结果写入同一个变量；汇合了其他值的合并没有变量。
   const merged = new Map<string, NodeValue>()
   for (const call of calls.values()) {
     if (call.execKind !== 'join') continue
@@ -195,7 +195,7 @@ function codeContent(ir: WorkflowIr, language: Language): Content {
       const value = holder<NodeValue>({ kind: 'output', node, port: result.name })
       const key = valueKey(value)
       if (!read.has(key) || variables.has(key)) continue
-      const stem = callees.get(value.node) ?? calls.get(value.node)!.label ?? value.node
+      const stem = signatures.get(value.node)?.name ?? calls.get(value.node)!.label ?? value.node
       variables.set(key, { name: identifiers.take(`${stem}_${value.port}`, 'value'), type: result.type })
     }
   }
@@ -214,15 +214,14 @@ function codeContent(ir: WorkflowIr, language: Language): Content {
     if (variable === undefined) throw new RenderError({ code: 'no-value', node: value.node })
     return variable.name
   }
-  const invoke = (call: IrCall): string => {
-    const signature = signatures.get(call.node)!
+  const invoke = (call: IrCall, signature: Atom['signature']): string => {
     const args = signature.parameters.map((parameter) => {
       const arg = call.args.find(candidate => candidate.port === parameter.name)
       if (arg !== undefined) return valueOf(arg.value)
       if (parameter.optional) return functions!.absent
       throw new RenderError({ code: 'unwired-parameter', node: call.node, port: parameter.name })
     })
-    const invocation = `${callees.get(call.node)!}(${args.join(', ')})`
+    const invocation = `${signature.name}(${args.join(', ')})`
     const targets = signature.results.map(result => variableOf({ kind: 'output', node: call.node, port: result.name })?.name)
     if (targets.every(target => target === undefined)) return invocation
     return fill(functions!.assign, {
@@ -231,7 +230,7 @@ function codeContent(ir: WorkflowIr, language: Language): Content {
     })
   }
 
-  // 生成函数的参数和结果取所连函数参数、结果的类型；没有连到函数的端口按端口类型。
+  // 生成函数的参数和结果取所连原子参数、结果的类型；没有连到原子的端口按端口类型。
   const parameterType = (port: PortDefinition): string => {
     for (const [node, signature] of signatures) {
       const arg = calls.get(node)!.args.find(candidate => candidate.value.kind === 'input' && candidate.value.port === port.name)
@@ -249,16 +248,25 @@ function codeContent(ir: WorkflowIr, language: Language): Content {
       ? names.get(port.name)!
       : fill(functions.typed, { name: names.get(port.name)!, type: typeOf(port) })).join(', ')
 
+  const syntax = functions?.atoms
+  const folder = [...library.values()]
   return {
-    preamble: [
-      `${language.comment}Generated from workflow ${JSON.stringify(ir.name)}. Edit the workflow, not this file.`,
-      '',
-      ...[...signatures].flatMap(([node, signature]) => {
-        const code = codeLines(calls.get(node)!).join('\n')
-        const text = signature.name === undefined ? fill(functions!.bind, { name: callees.get(node)!, code }) : code
-        return [...text.split('\n'), '']
-      }),
-    ],
+    preamble(body) {
+      const text = body.join('\n')
+      // 函数只导入它写到的包；原子里的导入如果函数用不到，写进来 Go 会拒绝编译。
+      const imports = [...new Set(folder.flatMap(atom => atom.imports))].sort().filter((spec) => {
+        const used = syntax!.importName(spec)
+        return used !== undefined && new RegExp(`(?<![\\p{L}\\p{N}_.])${used}\\.`, 'u').test(text)
+      })
+      return [
+        header(language, ir),
+        '',
+        ...folder.length === 0 ? [] : [fill(syntax!.package, { name: folder[0]!.package }), ''],
+        ...imports.length === 0
+          ? []
+          : [syntax!.importOpen, ...imports.map(spec => `${language.indent}${spec}`), syntax!.importClose, ''],
+      ]
+    },
     open: fill(language.functionOpen, {
       name,
       parameters: list(ir.inputs, parameters, parameterType),
@@ -277,7 +285,8 @@ function codeContent(ir: WorkflowIr, language: Language): Content {
           : item.bindings.map(binding => fill(functions.assign, { targets: results.get(binding.port)!, value: valueOf(binding.value) }))
       }
       if (item.type === CODE_BLOCK_TYPE) return codeLines(item)
-      if (item.type === CODE_FUNCTION_TYPE) return [invoke(item)]
+      const signature = signatures.get(item.node)
+      if (signature !== undefined) return [invoke(item, signature)]
       // 表达式写进读它的地方；流程控制和边界节点没有代码。
       return []
     },
@@ -290,9 +299,14 @@ function codeContent(ir: WorkflowIr, language: Language): Content {
   }
 }
 
-/** 节点的值会存进变量：函数节点，或分支合并。 */
+/** 生成文件的第一行；Go 的工具按 `Code generated … DO NOT EDIT.` 认出生成的文件。 */
+function header(language: Language, ir: WorkflowIr): string {
+  return `${language.comment}Code generated from workflow ${JSON.stringify(ir.name)}. DO NOT EDIT.`
+}
+
+/** 节点的值会存进变量：原子节点，或分支合并。 */
 function producesVariable(call: IrCall): boolean {
-  return call.type === CODE_FUNCTION_TYPE || call.execKind === 'join'
+  return call.type === CODE_ATOM_TYPE || call.execKind === 'join'
 }
 
 /** 某个节点产出的值。 */

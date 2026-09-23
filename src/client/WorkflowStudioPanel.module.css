@@ -207,6 +207,60 @@
   white-space: nowrap;
 }
 
+.menuGroup {
+  margin: 8px 8px 2px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.folderBrowser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.folderBrowser input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono);
+  font-size: 12px;
+}
+
+.folderBrowser small {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.folderBrowser ul {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folderBrowser li button {
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folderBrowser li button:hover {
+  background: var(--dsw-alias-bg-layer-2);
+}
+
 .menuEmpty {
   margin: 8px;
 }
@@ -576,15 +630,11 @@
 
 /* ---- Workflow ports ---- */
 
-.boundaryCard {
-  width: 280px;
+.settingsPorts[data-side='inputs'] .boundaryPort {
+  grid-template-columns: minmax(0, 1fr) 66px minmax(0, 72px) 20px;
 }
 
-.boundaryCard[data-side='inputs'] .boundaryPort {
-  grid-template-columns: minmax(0, 1fr) 58px minmax(0, 66px) 20px;
-}
-
-.boundaryCard[data-side='outputs'] .boundaryPort {
+.settingsPorts[data-side='outputs'] .boundaryPort {
   grid-template-columns: minmax(0, 1fr) 66px 20px;
 }
 
@@ -595,9 +645,89 @@
   line-height: 16px;
 }
 
-.boundaryPorts {
+.settingsPanel {
   display: flex;
-  margin: 10px 0 0;
+  width: 340px;
+  min-width: 0;
+  flex: 0 0 340px;
+  overflow: hidden;
+  border-left: 0.5px solid var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  flex-direction: column;
+}
+
+.settingsContent {
+  display: flex;
+  overflow: auto;
+  padding: 12px 14px;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settingsField {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.settingsField code {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsField select,
+.settingsField textarea {
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.settingsField textarea {
+  resize: vertical;
+}
+
+.settingsActions {
+  display: flex;
+  gap: 6px;
+}
+
+.settingsPorts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settingsPorts small {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.settingsPortsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settingsPortsHeader h3 {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settingsPorts ul {
+  display: flex;
+  margin: 0;
   padding: 0;
   flex-direction: column;
   gap: 5px;
@@ -633,14 +763,6 @@
 
 .boundaryCard[data-side='inputs'] .execPins {
   justify-content: flex-end;
-}
-
-.boundaryCard[data-side='inputs'] :global(.react-flow__handle-right) {
-  right: -13px;
-}
-
-.boundaryCard[data-side='outputs'] :global(.react-flow__handle-left) {
-  left: -13px;
 }
 
 .workflowPortsAdd,
@@ -1637,23 +1759,6 @@
   line-height: 18px;
 }
 
-.fileControl {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-}
-
-.fileControl code {
-  overflow: hidden;
-  flex: 1 1 100%;
-  color: var(--dsw-alias-label-primary);
-  font-family: var(--dsw-font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .nodeControlBlock {
   align-items: stretch;
 }
@@ -1664,15 +1769,4 @@
   font-family: var(--dsw-font-mono);
   font-size: 11px;
   line-height: 16px;
-}
-
-.languagePicker {
-  height: 28px;
-  padding: 0 6px;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: 6px;
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
-  font-family: inherit;
-  font-size: 12px;
 }

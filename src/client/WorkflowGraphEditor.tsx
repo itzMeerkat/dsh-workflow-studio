@@ -16,12 +16,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type {
-  DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary, PortDefinition,
+  DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary,
 } from '../shared/types.ts'
-import { withSignatures } from '../shared/language.ts'
-import { withBoundaryPorts } from '../shared/workflow-boundary.ts'
+import { withSignatures, type Atom } from '../shared/language.ts'
 import {
-  applyWorkflowPortEdit,
   connectionError,
   flowEdges,
   flowNodes,
@@ -32,7 +30,6 @@ import {
 import type { Translate } from './locale.ts'
 import { NodeCardContext, WorkflowNodeCard } from './NodeCard.tsx'
 import { NodeInspector } from './NodeInspector.tsx'
-import type { WorkflowPortEdit } from './workflow-ports.ts'
 import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
 import css from './WorkflowStudioPanel.module.css'
 
@@ -47,6 +44,8 @@ interface WorkflowGraphEditorProps {
   /** Static-analysis findings by node ID. */
   readonly diagnostics: ReadonlyMap<string, readonly WorkflowDiagnostic[]>
   readonly runResult?: string
+  /** The workflow's atoms by file, which give atom nodes their ports. */
+  readonly atoms: ReadonlyMap<string, Atom>
   readonly t: Translate
   readonly onChange: (definition: DagWorkflowDefinition) => void
   readonly onError: (message: string | undefined) => void
@@ -60,6 +59,7 @@ export function WorkflowGraphEditor({
   runRecords,
   diagnostics,
   runResult,
+  atoms,
   t,
   onChange,
   onError,
@@ -101,14 +101,14 @@ export function WorkflowGraphEditor({
   }
 
   /**
-   * Replace one node's definition. A function node's ports follow its code, so the edit rereads
-   * them and drops the edges on ports the code no longer declares.
+   * Replace one node's definition. An atom node's ports follow its atom, so the edit rereads them and
+   * drops the edges on ports the atom no longer declares.
    */
   const updateNode = (nodeId: string, update: (node: DagNodeDefinition) => DagNodeDefinition): void => {
     const edited = nodes.map(node => node.id === nodeId
       ? { ...node, data: { ...node.data, definition: update(node.data.definition) } }
       : node)
-    const next = withSignatures(toDefinition(definition, edited, edges))
+    const next = withSignatures(toDefinition(definition, edited, edges), atoms)
     const signed = next.nodes.find(node => node.id === nodeId)!
     const kept = new Set<string>(next.edges.map(edge => edge.id))
     const nextNodes = edited.map(node => node.id === nodeId ? { ...node, data: { ...node.data, definition: signed } } : node)
@@ -147,23 +147,6 @@ export function WorkflowGraphEditor({
     }
   }
 
-  /** Replace the workflow ports one boundary node declares, bringing their edges along. */
-  const setBoundaryPorts = (
-    nodeId: string,
-    ports: readonly PortDefinition[],
-    edit: WorkflowPortEdit,
-  ): void => {
-    const nextEdges = applyWorkflowPortEdit(edges, nodeId, edit)
-    setEdges(nextEdges)
-    setNodes((current) => {
-      const next = current.map(node => node.id === nodeId
-        ? { ...node, data: { ...node.data, definition: withBoundaryPorts(node.data.definition, ports) } }
-        : node)
-      onChange(toDefinition(definition, next, nextEdges))
-      return next
-    })
-  }
-
   const deleteSelected = (): void => {
     if (selectedNodeId === undefined) return
     const nextNodes = nodes.filter(node => node.id !== selectedNodeId)
@@ -177,7 +160,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div className={css.canvas}>
-        <NodeCardContext.Provider value={{ t, updateConfig, updatePorts: setBoundaryPorts }}>
+        <NodeCardContext.Provider value={{ t, updateConfig }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}

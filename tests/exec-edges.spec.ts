@@ -8,7 +8,7 @@ import { TestHosts, runEnded, signalRequested } from './host.ts'
 import { workflow } from './graph-fixtures.ts'
 import { topologicalSort } from '../src/validation.ts'
 import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
-import { EdgeId, NodeId } from '../src/shared/types.ts'
+import { NodeId } from '../src/shared/types.ts'
 import type {
   DagWorkflowDefinition, NodeExecutionContext, NodeRunRecord, PortDefinition, WorkflowNodeExecutor,
   WorkflowRunRecord,

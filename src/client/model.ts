@@ -1,7 +1,7 @@
 /** Browser-side workflow editing helpers used by the visual editor. */
 
 import { execSourcePin, isExecEdge, topologicalLevels } from '../shared/graph.ts'
-import { CODE_LANGUAGES } from '../shared/language.ts'
+import { ATOM_FIELD, CODE_ATOM_TYPE, CODE_LANGUAGES, signaturePorts, type Atom } from '../shared/language.ts'
 import {
   NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowKind,
   type WorkflowStudioSnapshot,
@@ -107,6 +107,30 @@ export function appendEditorNode(
             inputs: [...nodeType.inputs],
             outputs: [...nodeType.outputs],
           }),
+      },
+    ],
+  }
+}
+
+/**
+ * Append one atom from the workflow's atom folder as a node named after its function.
+ * @param definition - Current editor definition.
+ * @param atom - The atom the node calls.
+ * @returns A new definition containing the positioned node, its ports read from the atom's signature.
+ */
+export function appendAtomNode(definition: DagWorkflowDefinition, atom: Atom): DagWorkflowDefinition {
+  return {
+    ...definition,
+    nodes: [
+      ...definition.nodes,
+      {
+        id: NodeId(nextEditorNodeId(atom.signature.name, definition.nodes)),
+        type: CODE_ATOM_TYPE,
+        label: atom.signature.name,
+        config: { [ATOM_FIELD]: atom.file },
+        position: nextEditorNodePosition(definition.nodes),
+        inputs: signaturePorts(atom.signature.parameters),
+        outputs: signaturePorts(atom.signature.results),
       },
     ],
   }

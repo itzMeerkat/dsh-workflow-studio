@@ -19,9 +19,9 @@ export function registerWorkflowSkill(ctx: Context): void {
     const content = readFileSync(new URL(`../skills/${WORKFLOW_CODE_SKILL}.md`, import.meta.url), 'utf8')
     scope.effect(() => scope.skills.register({
       name: WORKFLOW_CODE_SKILL,
-      description: 'Split existing code into atoms — one Go function per step — and wire them into a Workflow Studio '
-        + '`code` workflow with create_workflow, then check the generated Go with describe_workflow. Use when asked to '
-        + 'turn code into a workflow, visualize or restructure a function as a graph, or build a code workflow.',
+      description: 'Split existing Go code into atoms — one function per file in an atom folder — and wire them into a '
+        + 'Workflow Studio `code` workflow with create_workflow, which writes the flow into the folder as workflow.go. '
+        + 'Use when asked to turn code into a workflow, visualize or restructure a function as a graph, or build a code workflow.',
       source: 'bundled',
       content,
     }), `workflow-studio:skill:${WORKFLOW_CODE_SKILL}`)

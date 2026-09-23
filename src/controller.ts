@@ -11,6 +11,8 @@ import { NodeId, RunId, WorkflowId, type WorkflowStudioSnapshot } from './shared
 import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 import { messageOf } from './shared/errors.ts'
 import { parseJsonObject } from './shared/json.ts'
+import { languageOf } from './shared/language.ts'
+import { listFolders, readAtomFiles, saveWithFile } from './atom-folder.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -46,7 +48,8 @@ export class WorkflowStudioController extends TypertRemoteService {
   }
 
   /**
-   * Parse, validate, and save one browser-authored definition.
+   * Parse, validate, and save one browser-authored definition. A code workflow with an atom folder is
+   * written into that folder as its language's workflow file; a workflow that cannot be written is not saved.
    * @param source - Complete workflow definition encoded as JSON.
    * @returns The saved workflow ID.
    */
@@ -54,14 +57,15 @@ export class WorkflowStudioController extends TypertRemoteService {
   async save(source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return await this.engine.save(definition)
+      return await saveWithFile(definition, this.registry, () => this.engine.save(definition))
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
   }
 
   /**
-   * Replace one existing browser-authored definition, re-keying it when its name changed.
+   * Replace one existing browser-authored definition, re-keying it when its name changed, and write it into
+   * its atom folder as {@link save} does.
    * @param workflowId - Existing workflow ID returned by {@link save}.
    * @param source - Complete replacement definition encoded as JSON.
    * @returns The workflow ID after the save; renaming a workflow returns a new ID.
@@ -70,7 +74,38 @@ export class WorkflowStudioController extends TypertRemoteService {
   async update(workflowId: string, source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return await this.engine.update(WorkflowId(workflowId), definition)
+      return await saveWithFile(definition, this.registry, () => this.engine.update(WorkflowId(workflowId), definition))
+    } catch (error: unknown) {
+      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+    }
+  }
+
+  /**
+   * Read the atom files of one folder, for the browser to parse into its node library.
+   * @param folder - Absolute path of the atom folder.
+   * @param language - Name of a code language that reads atoms.
+   * @returns The folder's files of that language, as a JSON array of `{ file, text }`.
+   */
+  @Remote
+  async atomFiles(folder: string, language: string): Promise<string> {
+    try {
+      const syntax = languageOf({ kind: 'code', language }).functions?.atoms
+      if (syntax === undefined) throw new Error(`语言 ${language} 不能读原子目录`)
+      return JSON.stringify(await readAtomFiles(folder, syntax))
+    } catch (error: unknown) {
+      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+    }
+  }
+
+  /**
+   * List the subfolders of one Host folder, for choosing an atom folder.
+   * @param path - Absolute folder path; empty for the Host user's home folder.
+   * @returns The listing encoded as JSON.
+   */
+  @Remote
+  async folders(path: string): Promise<string> {
+    try {
+      return JSON.stringify(await listFolders(path))
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

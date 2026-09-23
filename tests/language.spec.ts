@@ -1,11 +1,11 @@
 /**
- * 语言单元测试：Go 签名的读法，以及函数节点的端口随代码变化。
+ * 语言单元测试：Go 签名、原子文件与导入名的读法，以及原子节点的端口随原子变化。
  */
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { goSignature } from '../src/shared/go.ts'
-import { CODE_FIELD, CODE_FUNCTION_TYPE, GO, languageOf, withSignatures } from '../src/shared/language.ts'
+import { goAtom, goImportName, goSignature } from '../src/shared/go.ts'
+import { ATOM_FIELD, CODE_ATOM_TYPE, GO, atomLibrary, languageOf, withSignatures } from '../src/shared/language.ts'
 import { WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { workflow } from './graph-fixtures.ts'
 
@@ -33,25 +33,87 @@ describe('Go 签名', () => {
     assert.equal(goSignature('func(a int'), undefined)
   })
 
-  it('函数节点的端口跟随代码，接在消失端口上的边被去掉，读不出签名时端口不变', () => {
-    const edit = (text: string) => ({ type: CODE_FUNCTION_TYPE, config: { [CODE_FIELD]: text } })
-    const wired = withSignatures(workflow({
-      fn: edit('func(amount float64, discount *float64) (price float64, ok bool) {}'),
-      out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'price', type: 'number' }, { name: 'ok', type: 'boolean' }] },
-    }, ['fn:price>out:price', 'fn:ok>out:ok'], { kind: 'code', language: GO.name }))
-    assert.deepEqual(wired.nodes[0]?.inputs, [{ name: 'amount', type: 'number' }, { name: 'discount', type: 'number', required: false }])
-    assert.deepEqual(wired.nodes[0]?.outputs, [{ name: 'price', type: 'number' }, { name: 'ok', type: 'boolean' }])
-
-    const renamed = withSignatures({ ...wired, nodes: [{ ...wired.nodes[0]!, ...edit('func(amount float64) (total float64, ok bool) {}') }, wired.nodes[1]!] })
-    assert.deepEqual(renamed.edges.map(edge => edge.id), ['e1'])
-
-    const typing = withSignatures({ ...wired, nodes: [{ ...wired.nodes[0]!, ...edit('func(amount') }, wired.nodes[1]!] })
-    assert.deepEqual(typing.nodes[0]?.outputs, wired.nodes[0]?.outputs)
-    assert.equal(typing.edges.length, 2)
+  it('导入项的包名：别名优先，路径的最后一段去掉版本和 go 前后缀，空白与点导入没有包名', () => {
+    assert.deepEqual(
+      ['"net/http"', 'str "strings"', '"gopkg.in/yaml.v3"', '"github.com/jackc/pgx/v5"', '"github.com/mattn/go-sqlite3"', '_ "embed"', '. "math"']
+        .map(goImportName),
+      ['http', 'str', 'yaml', 'pgx', 'sqlite3', undefined, undefined],
+    )
   })
 
   it('code 工作流必须指定一种代码语言', () => {
-    assert.throws(() => languageOf({ kind: 'code' }), /python、typescript、go 之一/)
+    assert.throws(() => languageOf({ kind: 'code' }), /go、python、typescript 之一/)
     assert.equal(languageOf({ kind: 'code', language: 'go' }), GO)
   })
+
+  it('原子文件：唯一的函数连同导入和全局声明，字符串里的关键字不算声明', () => {
+    const text = [
+      '//go:build linux',
+      '',
+      'package pricing',
+      '',
+      'import (',
+      '\t"fmt"',
+      '\tstr "strings" // aliased',
+      ')',
+      '',
+      '// rate is the discount rate.',
+      'var rate = 0.9',
+      '',
+      'type Order struct{ Total float64 }',
+      '',
+      'func (o Order) Label() string { return fmt.Sprint(o.Total) }',
+      '',
+      '// Discount prices an order.',
+      'var Discount = func(order Order) (price float64) {',
+      '\tnote := `',
+      'func Fake() {}',
+      '`',
+      '\t_ = str.TrimSpace(note)',
+      '\treturn order.Total * rate',
+      '}',
+      '',
+    ].join('\n')
+    assert.deepEqual(goAtom('discount.go', text), {
+      file: 'discount.go',
+      package: 'pricing',
+      imports: ['"fmt"', 'str "strings"'],
+      globals: [
+        '// rate is the discount rate.\nvar rate = 0.9',
+        'type Order struct{ Total float64 }',
+        'func (o Order) Label() string { return fmt.Sprint(o.Total) }',
+      ],
+      code: text.slice(text.indexOf('// Discount'), text.lastIndexOf('}') + 1),
+      signature: {
+        name: 'Discount',
+        parameters: [{ name: 'order', type: 'Order', port: 'any', optional: false }],
+        results: [{ name: 'price', type: 'float64', port: 'number', optional: false }],
+      },
+    })
+    assert.deepEqual(goAtom('none.go', 'package p\n\nvar x = 1\n'), { file: 'none.go', fault: 'no-function' })
+    assert.deepEqual(goAtom('two.go', 'package p\n\nfunc A() {}\n\nfunc B() {}\n'), { file: 'two.go', fault: 'several-functions' })
+  })
+
+  it('原子节点的端口来自原子目录，签名变化时去掉接在消失端口上的边，原子不在目录中时端口不变', () => {
+    const read = (text: string) => atomLibrary([
+      { file: 'a.go', text: `package p\n\n${text}\n` },
+      { file: 'b.go', text: 'package p\n' },
+    ], GO.functions!.atoms!)
+    const library = read('func Fetch(url string, retries *int) (body string, err error) { return "", nil }')
+    assert.deepEqual(library.faults, [{ file: 'b.go', fault: 'no-function' }])
+    const node = { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: 'a.go' } }
+    const definition = workflow({
+      fetch: node,
+      gone: { ...node, config: { [ATOM_FIELD]: 'gone.go' } },
+      out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'body', type: 'string' }, { name: 'err', type: 'any' }] },
+    }, ['fetch:body>out:body', 'fetch:err>out:err'], { kind: 'code', language: GO.name })
+    const signed = withSignatures(definition, library.atoms)
+    assert.deepEqual(signed.nodes[0]?.inputs, [{ name: 'url', type: 'string' }, { name: 'retries', type: 'number', required: false }])
+    assert.deepEqual(signed.nodes[0]?.outputs, [{ name: 'body', type: 'string' }, { name: 'err', type: 'any' }])
+    assert.equal(signed.nodes[1]?.inputs, undefined)
+
+    const renamed = withSignatures(signed, read('func Fetch(url string) (text string, err error) { return "", nil }').atoms)
+    assert.deepEqual(renamed.edges.map(edge => edge.id), ['e1'])
+  })
+
 })

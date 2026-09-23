@@ -7,7 +7,7 @@
  */
 
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from './node.ts'
-import { CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, CODE_FUNCTION_TYPE } from './shared/language.ts'
+import { CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD } from './shared/language.ts'
 import type { NodeControlDefinition, WorkflowKind, WorkflowNodeExecutor } from './shared/types.ts'
 
 /** 共同的部分：一个编辑代码的控件，只用于 `code` 工作流，不能运行。 */
@@ -15,10 +15,10 @@ abstract class CodeNode extends WorkflowNode {
   override readonly kinds: readonly WorkflowKind[] = ['code']
   override readonly controls: readonly NodeControlDefinition[]
 
-  /** @param control - 编辑 {@link CODE_FIELD} 的控件。 */
-  constructor(control: NodeControlDefinition) {
+  /** @param controls - 节点卡片上的控件。 */
+  constructor(controls: readonly NodeControlDefinition[]) {
     super()
-    this.controls = [control]
+    this.controls = controls
   }
 
   protected run(): never {
@@ -45,21 +45,24 @@ class CodeConditionNode extends CodeNode {
   }
 }
 
-/** 一个函数；节点实例的端口由浏览器按它的签名写入定义，类型本身不声明端口。 */
-class CodeFunctionNode extends CodeNode {
-  readonly type = CODE_FUNCTION_TYPE
-  readonly label = '代码函数'
-  readonly description = '一个函数，参数是输入端口、结果是输出端口；写在文件顶层，在图中的位置被调用'
+/**
+ * 原子目录中的一个原子。节点配置只记原子的文件名；端口按原子的签名写进节点实例，
+ * 类型本身不声明端口，卡片上也没有控件。
+ */
+class CodeAtomNode extends CodeNode {
+  readonly type = CODE_ATOM_TYPE
+  readonly label = '原子'
+  readonly description = '调用工作流原子目录中的一个函数；参数是输入端口，结果是输出端口'
   protected readonly ports: WorkflowNodePorts = { inputs: [], outputs: [] }
 }
 
-/** 每种代码节点的新实例；函数往往很长，所以从文件读入而不在卡片上编辑。 */
+/** 每种代码节点的新实例。 */
 export function createCodeNodes(): WorkflowNodeExecutor[] {
   const textarea = (label: string, placeholder: string, rows: number): NodeControlDefinition =>
     ({ name: CODE_FIELD, label, kind: 'textarea', defaultValue: '', placeholder, rows })
   return [
-    new CodeBlockNode(textarea('代码', 'result = compute(value)', 8)),
-    new CodeConditionNode(textarea('条件', 'amount > 100', 2)),
-    new CodeFunctionNode({ name: CODE_FIELD, label: '函数文件', kind: 'file', defaultValue: '' }),
+    new CodeBlockNode([textarea('代码', 'result = compute(value)', 8)]),
+    new CodeConditionNode([textarea('条件', 'amount > 100', 2)]),
+    new CodeAtomNode([]),
   ]
 }

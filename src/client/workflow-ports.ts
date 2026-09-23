@@ -1,9 +1,13 @@
 /**
- * Editing the ports a boundary node declares, which are the workflow's own inputs and outputs.
+ * Editing the workflow's own inputs and outputs, which the boundary nodes carry as their ports.
  * @module dsh-workflow-studio
  */
 
-import type { JsonObject, JsonValue, NodeRunRecord, PortDefinition, PortType } from '../shared/types.ts'
+import {
+  NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type JsonObject, type JsonValue, type NodeRunRecord,
+  type PortDefinition, type PortType,
+} from '../shared/types.ts'
+import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, withBoundaryPorts } from '../shared/workflow-boundary.ts'
 
 /** The port types a declaration may use, in the order the editor offers them. */
 export const WORKFLOW_PORT_TYPES: readonly PortType[] = ['any', 'string', 'number', 'boolean']
@@ -21,6 +25,55 @@ export type WorkflowPortEdit =
   | { readonly kind: 'renamed'; readonly from: string; readonly to: string }
   | { readonly kind: 'removed'; readonly name: string }
   | { readonly kind: 'other' }
+
+/**
+ * The boundary node of one side, as a new workflow places it: inputs on the left, outputs on the right.
+ * @param side - Which side of the workflow the node stands for.
+ */
+export function boundaryNode(side: WorkflowPortSide): DagNodeDefinition {
+  return side === 'inputs'
+    ? { id: NodeId(WORKFLOW_INPUT_TYPE), type: WORKFLOW_INPUT_TYPE, config: {}, outputs: [], position: { x: 80, y: 80 } }
+    : { id: NodeId(WORKFLOW_OUTPUT_TYPE), type: WORKFLOW_OUTPUT_TYPE, config: {}, inputs: [], position: { x: 720, y: 80 } }
+}
+
+/**
+ * A definition whose workflow declares `ports` on one side.
+ *
+ * The ports live on that side's boundary node, which is where they are wired, so the node is added
+ * back when the author deleted it. An edge names the port it connects, so a renamed port takes its
+ * edges along and a removed port takes them away.
+ * @param definition - The workflow being edited.
+ * @param side - Which side the ports belong to.
+ * @param ports - Every port that side now declares.
+ * @param edit - What the change did to one port.
+ * @returns The definition with the ports and the edges that follow them.
+ */
+export function withWorkflowPorts(
+  definition: DagWorkflowDefinition,
+  side: WorkflowPortSide,
+  ports: readonly PortDefinition[],
+  edit: WorkflowPortEdit,
+): DagWorkflowDefinition {
+  const type = side === 'inputs' ? WORKFLOW_INPUT_TYPE : WORKFLOW_OUTPUT_TYPE
+  const node = definition.nodes.find(candidate => candidate.type === type) ?? boundaryNode(side)
+  const nodes = definition.nodes.includes(node)
+    ? definition.nodes.map(candidate => candidate === node ? withBoundaryPorts(candidate, ports) : candidate)
+    : [...definition.nodes, withBoundaryPorts(node, ports)]
+  if (edit.kind === 'other') return { ...definition, nodes }
+  const name = edit.kind === 'renamed' ? edit.from : edit.name
+  return {
+    ...definition,
+    nodes,
+    edges: definition.edges.flatMap((edge) => {
+      const onPort = edge.kind === 'data' && (side === 'inputs'
+        ? edge.source === node.id && edge.sourcePort === name
+        : edge.target === node.id && edge.targetPort === name)
+      if (!onPort) return [edge]
+      if (edit.kind === 'removed') return []
+      return [side === 'inputs' ? { ...edge, sourcePort: edit.to } : { ...edge, targetPort: edit.to }]
+    }),
+  }
+}
 
 /** Why a declared port cannot be referenced. */
 export type WorkflowPortFault = 'empty' | 'duplicate'

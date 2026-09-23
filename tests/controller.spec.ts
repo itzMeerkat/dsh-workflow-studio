@@ -8,7 +8,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createFixtureNodes } from './fixture-nodes.ts'
 import { workflow } from './graph-fixtures.ts'
 import { TestHosts, runEnded, signalRequested } from './host.ts'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ATOM_FIELD, CODE_ATOM_TYPE } from '../src/shared/language.ts'
 import { RunId } from '../src/shared/types.ts'
+import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 
 describe('WorkflowStudioController', () => {
@@ -55,7 +60,7 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
       [
-        'ask', 'branch', 'code-block', 'code-condition', 'code-function', 'greater', 'merge', 'sum', 'value',
+        'ask', 'branch', 'code-atom', 'code-block', 'code-condition', 'greater', 'merge', 'sum', 'value',
         'workflow-input', 'workflow-output',
       ],
     )
@@ -143,5 +148,34 @@ describe('WorkflowStudioController', () => {
       controller.save(JSON.stringify(workflow({ node: 'missing' }, [], { name: 'bad' }))),
       /未知节点类型/,
     )
+  })
+
+  it('保存带原子目录的 Go 工作流时写出目录中的 workflow.go；写不出时不保存', async () => {
+    const controller = await setup()
+    const folder = await mkdtemp(join(tmpdir(), 'atoms-'))
+    try {
+      await writeFile(join(folder, 'greet.go'), 'package hello\n\nimport "fmt"\n\nfunc Greet(name string) {\n\tfmt.Println(name)\n}\n')
+      const greet = (file: string) => workflow({
+        in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'name', type: 'string' }] },
+        say: { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: file }, inputs: [{ name: 'name', type: 'string' }] },
+      }, ['in:name>say:name'], { name: 'hello', kind: 'code', language: 'go', atomFolder: folder })
+
+      await assert.rejects(controller.save(JSON.stringify(greet('gone.go'))), /写不出 .*workflow\.go，工作流未保存/)
+      assert.deepEqual(JSON.parse(controller.snapshot()).workflows, [])
+
+      await controller.save(JSON.stringify(greet('greet.go')))
+      assert.equal(await readFile(join(folder, 'workflow.go'), 'utf8'), [
+        '// Code generated from workflow "hello". DO NOT EDIT.',
+        '',
+        'package hello',
+        '',
+        'func hello(name string) {',
+        '\tGreet(name)',
+        '}',
+        '',
+      ].join('\n'))
+    } finally {
+      await rm(folder, { recursive: true, force: true })
+    }
   })
 })

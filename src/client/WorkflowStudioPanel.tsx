@@ -9,18 +9,21 @@ import {
   IconListPenOutlineRegular,
   IconPlayOutlineRegular,
   IconRefreshOutlineRegular,
+  IconSettingsOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
-import {
-  NodeId, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowKind,
-  type WorkflowStudioSnapshot,
+import type {
+  DagWorkflowDefinition, NodeTypeSummary, WorkflowKind, WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, workflowInputPorts,
 } from '../shared/workflow-boundary.ts'
-import { CODE_LANGUAGES, languageOf, withSignatures } from '../shared/language.ts'
+import {
+  CODE_LANGUAGES, atomLibrary, languageOf, withSignatures, type AtomLibrary,
+} from '../shared/language.ts'
+import { atomFilesSchema } from '../shared/workflow-schema.ts'
 import { analyzeEditorGraph } from './analysis-model.ts'
 import { DiagnosticsView } from './DiagnosticsView.tsx'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
@@ -28,6 +31,7 @@ import { SourceView } from './SourceView.tsx'
 import type { NS } from './locale.ts'
 import { NodeLibraryMenu, WorkflowPicker } from './Menus.tsx'
 import {
+  appendAtomNode,
   appendEditorNode,
   formatEditorDefinition,
   nextWorkflowName,
@@ -43,6 +47,8 @@ import { isActiveRun, runRecordsByNode } from './runs-model.ts'
 import { downloadWorkflow, importedWorkflowName, parseImportedWorkflow } from './transfer.ts'
 import { useRuns } from './use-runs.ts'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
+import { WorkflowSettings } from './WorkflowSettings.tsx'
+import { boundaryNode } from './workflow-ports.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 type View = 'canvas' | 'execution' | 'source' | 'runs'
@@ -78,6 +84,10 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   const runs = useRuns(remote, setNotice, runnable)
   // Set while the run dialog is collecting values for the workflow's declared inputs.
   const [runPrompt, setRunPrompt] = useState(false)
+  // The atoms read from the workflow's atom folder; reading again after a refresh picks up edited files.
+  const [library, setLibrary] = useState<AtomLibrary>()
+  const [atomsRead, setAtomsRead] = useState(0)
+  const [settingsOpen, setSettingsOpen] = useState(true)
   const importInput = useRef<HTMLInputElement>(null)
 
   const replaceDefinition = (next: DagWorkflowDefinition): void => {
@@ -103,6 +113,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   }
 
   const load = async (preferredId?: string): Promise<void> => {
+    setAtomsRead(value => value + 1)
     setPhase('loading')
     setNotice(undefined)
     const next = await callRemote(() => remote.snapshot(), parseSnapshot, setNotice)
@@ -120,6 +131,29 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   useEffect(() => {
     void load()
   }, [])
+
+  const atomSyntax = languageOf(definition).functions?.atoms
+  useEffect(() => {
+    const folder = definition.atomFolder
+    if (folder === undefined || atomSyntax === undefined) {
+      setLibrary(undefined)
+      return
+    }
+    let current = true
+    void callRemote(
+      () => remote.atomFiles(folder, definition.language!),
+      files => atomLibrary(atomFilesSchema.parse(JSON.parse(files)), atomSyntax),
+      setNotice,
+    ).then((next) => { if (current) setLibrary(next) })
+    return () => { current = false }
+  }, [definition.atomFolder, definition.language, atomsRead])
+
+  // Atom nodes take their ports from the folder, so a folder read again, or a workflow opened on it, may move them.
+  useEffect(() => {
+    if (library === undefined) return
+    const signed = withSignatures(definition, library.atoms)
+    if (JSON.stringify(signed) !== JSON.stringify(definition)) replaceDefinition(signed)
+  }, [library, revision])
 
   /** Save the edited definition and return its workflow ID; failures show as the notice. */
   const persist = async (): Promise<string | undefined> => {
@@ -141,8 +175,10 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
       setPhase('ready')
       return
     }
+    // Saving a workflow with an atom folder also writes its function into that folder.
+    const written = definition.atomFolder === undefined ? undefined : atomSyntax?.output
     await load(workflowId)
-    setNotice(t('notice.saved'))
+    setNotice(written === undefined ? t('notice.saved') : `${t('notice.savedFile')} ${written}`)
   }
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
@@ -229,19 +265,6 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             }}
             onSelect={select}
           />
-          {kind === 'code' && (
-            <select
-              className={css.languagePicker}
-              aria-label={t('source.language')}
-              value={definition.language}
-              disabled={busy}
-              onChange={(event) => {
-                replaceDefinition(withSignatures({ ...definition, language: event.currentTarget.value }))
-              }}
-            >
-              {CODE_LANGUAGES.map(({ name }) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          )}
           <div className={css.viewTabs} role="tablist" aria-label={t('view.label')}>
             {views.map(({ view: tab, Icon }) => (
               <button
@@ -260,7 +283,9 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             <NodeLibraryMenu
               disabled={busy}
               nodeTypes={addableNodeTypes}
+              atoms={library}
               t={t}
+              onSelectAtom={(atom) => { replaceDefinition(appendAtomNode(definition, atom)) }}
               onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType)) }}
             />
           )}
@@ -277,6 +302,15 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
               {waitingRequests} {t('runs.waitingCount')}
             </button>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<IconSettingsOutlineRegular size={14} />}
+            aria-pressed={settingsOpen}
+            onClick={() => { setSettingsOpen(open => !open) }}
+          >
+            {t('settings.title')}
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -359,6 +393,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
               nodeTypes={snapshot.nodeTypes}
               runRecords={runRecords}
               diagnostics={analysis?.byNode ?? new Map()}
+              atoms={library?.atoms ?? new Map()}
               t={t}
               onChange={setDefinition}
               onError={setNotice}
@@ -374,7 +409,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             />
           )}
           {view === 'source' && (
-            <SourceView ir={analysis?.ir} language={languageOf(definition)} t={t} />
+            <SourceView ir={analysis?.ir} language={languageOf(definition)} atoms={library?.atoms ?? new Map()} t={t} />
           )}
           {view === 'canvas' && <DiagnosticsView diagnostics={analysis?.diagnostics} t={t} />}
           {notice !== undefined && <p className={css.notice} role="alert">{notice}</p>}
@@ -388,6 +423,16 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             />
           )}
         </section>
+        {settingsOpen && (
+          <WorkflowSettings
+            definition={definition}
+            library={library}
+            remote={remote}
+            t={t}
+            onChange={replaceDefinition}
+            onClose={() => { setSettingsOpen(false) }}
+          />
+        )}
       </div>
     </main>
   )
@@ -406,10 +451,7 @@ function emptyDefinition(name: string, kind: WorkflowKind): DagWorkflowDefinitio
     name,
     kind,
     ...(kind === 'code' ? { language: CODE_LANGUAGES[0]!.name } : {}),
-    nodes: [
-      { id: NodeId(WORKFLOW_INPUT_TYPE), type: WORKFLOW_INPUT_TYPE, config: {}, outputs: [], position: { x: 80, y: 80 } },
-      { id: NodeId(WORKFLOW_OUTPUT_TYPE), type: WORKFLOW_OUTPUT_TYPE, config: {}, inputs: [], position: { x: 720, y: 80 } },
-    ],
+    nodes: [boundaryNode('inputs'), boundaryNode('outputs')],
     edges: [],
   }
 }

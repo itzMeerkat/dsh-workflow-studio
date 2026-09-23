@@ -6,8 +6,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { indexNodeTypes } from '../src/shared/analysis.ts'
 import {
-  CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, CODE_FUNCTION_TYPE, GO, PSEUDOCODE, PYTHON, TYPESCRIPT,
-  withSignatures, type Language,
+  ATOM_FIELD, CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, GO, PSEUDOCODE, PYTHON,
+  TYPESCRIPT, atomLibrary, withSignatures, type Language,
 } from '../src/shared/language.ts'
 import { RenderError, renderWorkflow } from '../src/shared/source.ts'
 import { NodeId, type DagWorkflowDefinition } from '../src/shared/types.ts'
@@ -20,7 +20,7 @@ const CODE_CATALOG = indexNodeTypes([
   ...NODE_TYPES.map(type => ({ ...type, kinds: ['run', 'code'] as const })),
   nodeType(CODE_BLOCK_TYPE, { kinds: ['code'] }),
   nodeType(CODE_CONDITION_TYPE, { kinds: ['code'], outputs: [{ name: 'value', type: 'boolean' }] }),
-  nodeType(CODE_FUNCTION_TYPE, { kinds: ['code'] }),
+  nodeType(CODE_ATOM_TYPE, { kinds: ['code'] }),
 ])
 
 /** 超额时打折，否则原价，两条分支之后继续。 */
@@ -84,7 +84,7 @@ describe('run 工作流写成伪代码', () => {
 describe('code 工作流写成它的语言', () => {
   it('语句原样写出并按所在的块重新缩进，条件写进 if，块的开合由语言决定', () => {
     assert.equal(compile(discount(), PYTHON), [
-      '# Generated from workflow "折扣". Edit the workflow, not this file.',
+      '# Code generated from workflow "折扣". DO NOT EDIT.',
       '',
       'def 折扣(amount):',
       '    if amount > 100:',
@@ -96,7 +96,7 @@ describe('code 工作流写成它的语言', () => {
       '',
     ].join('\n'))
     assert.equal(compile(discount(), TYPESCRIPT), [
-      '// Generated from workflow "折扣". Edit the workflow, not this file.',
+      '// Code generated from workflow "折扣". DO NOT EDIT.',
       '',
       'export function 折扣(amount) {',
       '  if (amount > 100) {',
@@ -130,32 +130,29 @@ describe('code 工作流写成它的语言', () => {
     assert.match(compile(definition, PYTHON), /def flagged\(arg2\):\n {4}if arg2:\n {8}go\(\)/)
   })
 
-  it('Go 的函数写在顶层并按数据边调用，未接线的指针参数传 nil，被读的结果先声明，分支合并共用一个变量', () => {
-    assert.equal(compile(goDiscount(), GO), [
-      '// Generated from workflow "折扣". Edit the workflow, not this file.',
+  it('Go 只写出工作流函数：按名字调用原子，被读的结果先声明，分支合并共用一个变量，只导入函数写到的包', () => {
+    assert.equal(renderWorkflow(irOf(goDiscount(), CODE_CATALOG), GO, SHOP.atoms), [
+      '// Code generated from workflow "折扣". DO NOT EDIT.',
       '',
-      'var over = func(amount float64) bool {',
-      '\treturn amount > 100',
-      '}',
+      'package shop',
       '',
-      'func cut(amount float64) (price float64, saved float64) {',
-      '\treturn amount * 0.9, amount * 0.1',
-      '}',
+      'import (',
+      '\t"time"',
+      ')',
       '',
-      'var keep = func(amount float64, floor *float64) float64 {',
-      '\treturn amount',
-      '}',
-      '',
-      'func 折扣(amount float64) (price float64) {',
-      '\tvar over_output bool',
+      'func 折扣(amount float64) (price float64, delay time.Duration) {',
+      '\tvar Over_output bool',
       '\tvar join_output float64',
-      '\tover_output = over(amount)',
-      '\tif over_output {',
-      '\t\tjoin_output, _ = cut(amount)',
+      '\tvar Wait_delay time.Duration',
+      '\tOver_output = Over(amount)',
+      '\tif Over_output {',
+      '\t\tjoin_output, _ = Cut(amount)',
       '\t} else {',
-      '\t\tjoin_output = keep(amount, nil)',
+      '\t\tjoin_output = Keep(amount, nil)',
       '\t}',
+      '\tWait_delay = Wait(join_output)',
       '\tprice = join_output',
+      '\tdelay = Wait_delay',
       '\treturn',
       '}',
       '',
@@ -163,9 +160,9 @@ describe('code 工作流写成它的语言', () => {
   })
 
   it('写不出时指出要改的节点', () => {
-    const fault = (definition: DagWorkflowDefinition, language: Language) => {
+    const fault = (definition: DagWorkflowDefinition, language: Language, atoms = SHOP.atoms) => {
       try {
-        compile(definition, language)
+        renderWorkflow(irOf(definition, CODE_CATALOG), language, atoms)
       } catch (error: unknown) {
         if (error instanceof RenderError) return error.fault
         throw error
@@ -180,28 +177,48 @@ describe('code 工作流写成它的语言', () => {
     multiline.nodes.find(node => node.id === NodeId('over'))!.config = { [CODE_FIELD]: 'a\nb' }
     assert.deepEqual(fault(multiline, PYTHON), { code: 'multiline-condition', node: 'over' })
 
-    assert.deepEqual(fault(goDiscount(), PYTHON), { code: 'not-a-function', node: 'over' })
+    assert.deepEqual(fault(goDiscount(), GO, new Map()), { code: 'missing-atom', node: 'over', atom: 'over.go' })
     const parameterless = goDiscount()
     parameterless.edges = parameterless.edges.filter(edge => edge.target !== NodeId('keep'))
     assert.deepEqual(fault(parameterless, GO), { code: 'unwired-parameter', node: 'keep', port: 'amount' })
   })
 })
 
-/** {@link discount} 的 Go 写法：每个节点是一个函数，端口由签名给出。 */
+/** 一个 Go 包形式的原子目录。 */
+const SHOP = atomLibrary([
+  { file: 'over.go', text: 'package shop\n\nconst limit = 100\n\nvar Over = func(amount float64) bool {\n\treturn amount > limit\n}\n' },
+  {
+    file: 'cut.go',
+    text: 'package shop\n\nimport "math"\n\nfunc Cut(amount float64) (price float64, saved float64) {\n\treturn math.Round(amount * 0.9), amount * 0.1\n}\n',
+  },
+  {
+    file: 'keep.go',
+    text: 'package shop\n\nimport "fmt"\n\nfunc Keep(amount float64, floor *float64) float64 {\n\tfmt.Println(amount)\n\treturn amount\n}\n',
+  },
+  {
+    file: 'wait.go',
+    text: 'package shop\n\nimport "time"\n\nfunc Wait(price float64) (delay time.Duration) {\n\treturn time.Duration(price) * time.Millisecond\n}\n',
+  },
+], GO.functions!.atoms)
+
+/** {@link discount} 的 Go 写法：每一步是原子目录中的一个原子，端口由它的签名给出。 */
 function goDiscount(): DagWorkflowDefinition {
+  const atom = (file: string) => ({ type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: file } })
   return withSignatures(workflow({
     in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'amount', type: 'number' }] },
-    over: { type: CODE_FUNCTION_TYPE, ...code('func(amount float64) bool {\n\treturn amount > 100\n}') },
+    over: atom('over.go'),
     gate: 'branch',
-    cut: {
-      type: CODE_FUNCTION_TYPE,
-      ...code('func cut(amount float64) (price float64, saved float64) {\n\treturn amount * 0.9, amount * 0.1\n}'),
-    },
-    keep: { type: CODE_FUNCTION_TYPE, ...code('func(amount float64, floor *float64) float64 {\n\treturn amount\n}') },
+    cut: atom('cut.go'),
+    keep: atom('keep.go'),
     join: 'merge',
-    out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'price', type: 'number', required: false }] },
+    wait: atom('wait.go'),
+    out: {
+      type: WORKFLOW_OUTPUT_TYPE,
+      inputs: [{ name: 'price', type: 'number', required: false }, { name: 'delay', type: 'any', required: false }],
+    },
   }, [
     'in:amount>over:amount', 'over>gate:condition', 'gate.true>cut', 'gate.false>keep', 'in:amount>cut:amount',
-    'in:amount>keep:amount', 'cut:price>join:input1', 'keep>join:input2', 'cut.then>join', 'keep.then>join', 'join>out:price',
-  ], { name: '折扣', kind: 'code', language: GO.name }))
+    'in:amount>keep:amount', 'cut:price>join:input1', 'keep>join:input2', 'cut.then>join', 'keep.then>join',
+    'join>wait:price', 'join>out:price', 'wait:delay>out:delay',
+  ], { name: '折扣', kind: 'code', language: GO.name, atomFolder: '/shop' }), SHOP.atoms)
 }

@@ -25,12 +25,13 @@ import {
   removeWorkflowPort,
   setWorkflowPortDefault,
   updateWorkflowPort,
+  withWorkflowPorts,
   workflowPortFault,
   workflowResultValues,
   workflowRunDefaults,
   workflowRunInputs,
 } from '../src/client/workflow-ports.ts'
-import { applyWorkflowPortEdit, flowNodes, toDefinition } from '../src/client/graph-model.ts'
+import { flowNodes, toDefinition } from '../src/client/graph-model.ts'
 import { nodeType, workflow } from './graph-fixtures.ts'
 import {
   boundaryPorts, WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, withBoundaryPorts,
@@ -244,7 +245,7 @@ describe('workflow import and export', () => {
     const dangling = workflow({ a: 'value' }, ['a>gone'])
     assert.deepEqual(openFault(dangling, 'code'), { key: 'open.otherKind', detail: 'run' })
     assert.deepEqual(openFault(dangling, 'run'), { key: 'open.danglingEdge', detail: 'e0 (a → gone)' })
-    assert.deepEqual(openFault({ ...definition, kind: 'code' }, 'code'), { key: 'open.language', detail: 'python, typescript, go' })
+    assert.deepEqual(openFault({ ...definition, kind: 'code' }, 'code'), { key: 'open.language', detail: 'go, python, typescript' })
     assert.equal(openFault({ ...definition, kind: 'code', language: 'go' }, 'code'), undefined)
   })
 })
@@ -268,20 +269,6 @@ describe('execution stage layout', () => {
     )
     assert.ok(layout.cards[1]!.y >= layout.cards[0]!.y + estimateNodeCardHeight(first))
     assert.equal(layout.cards[2]!.y, layout.cards[0]!.y)
-  })
-
-  it('边界节点按它自己的卡片估算高度，端口行是一排字段而不是一行标签', () => {
-    const boundary: WorkflowNodeData = {
-      definition: {
-        id: NodeId('out'),
-        type: WORKFLOW_OUTPUT_TYPE,
-        config: {},
-        inputs: [{ name: 'verdict', type: 'any', required: false }],
-      },
-    }
-    const plain = card('a', [{ name: 'verdict', type: 'any' }])
-
-    assert.ok(estimateNodeCardHeight(boundary) > estimateNodeCardHeight(plain))
   })
 
   it('泳道高度随其中最高的卡片增长', () => {
@@ -400,35 +387,27 @@ describe('workflow boundary nodes', () => {
 })
 
 describe('workflow port edits move their edges', () => {
-  const edges = [
-    { id: 'in', source: 'inputs', target: 'add', sourceHandle: 'data:left', targetHandle: 'data:left' },
-    { id: 'out', source: 'add', target: 'outputs', sourceHandle: 'data:result', targetHandle: 'data:total' },
-    { id: 'plain', source: 'add', target: 'other', sourceHandle: 'data:result', targetHandle: 'data:input' },
-  ]
+  const declared = workflow({
+    'workflow-input': { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'left', type: 'number' }] },
+    add: 'double',
+    'workflow-output': { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'total', type: 'number' }] },
+  }, ['workflow-input:left>add:input', 'add:output>workflow-output:total', 'add:output>add:input'])
 
-  it('改名把边带到新端口，两侧各自只动自己的一端', () => {
-    const renamedInput = applyWorkflowPortEdit(edges, 'inputs', { kind: 'renamed', from: 'left', to: 'amount' })
-    const renamedOutput = applyWorkflowPortEdit(edges, 'outputs', { kind: 'renamed', from: 'total', to: 'sum' })
+  it('改名把边带到新端口，两侧各自只动自己的一端；删除端口带走它的边', () => {
+    const renamed = withWorkflowPorts(declared, 'inputs', [{ name: 'amount', type: 'number' }], { kind: 'renamed', from: 'left', to: 'amount' })
+    assert.deepEqual(workflowInputPorts(renamed), [{ name: 'amount', type: 'number' }])
+    assert.equal(renamed.edges[0]?.sourcePort, 'amount')
+    assert.deepEqual(renamed.edges.slice(1), declared.edges.slice(1))
 
-    assert.equal(renamedInput[0]?.sourceHandle, 'data:amount')
-    assert.deepEqual(renamedInput.slice(1), edges.slice(1))
-    assert.equal(renamedOutput[1]?.targetHandle, 'data:sum')
-    assert.deepEqual(renamedOutput[0], edges[0])
+    const removed = withWorkflowPorts(declared, 'outputs', [], { kind: 'removed', name: 'total' })
+    assert.deepEqual(removed.edges.map(edge => edge.id), ['e0', 'e2'])
   })
 
-  it('删除端口带走它的边，其余边和无关编辑不受影响', () => {
-    assert.deepEqual(
-      applyWorkflowPortEdit(edges, 'inputs', { kind: 'removed', name: 'left' }).map(edge => edge.id),
-      ['out', 'plain'],
-    )
-    assert.deepEqual(applyWorkflowPortEdit(edges, 'outputs', { kind: 'other' }), edges)
-    // An edge between two authored nodes never names a declared port, whatever it is called.
-    assert.deepEqual(
-      applyWorkflowPortEdit(edges, 'outputs', { kind: 'removed', name: 'input' }).map(edge => edge.id),
-      ['in', 'out', 'plain'],
-    )
+  it('作者删掉的边界节点在声明端口时加回来', () => {
+    const bare = { ...declared, nodes: declared.nodes.filter(node => node.type !== WORKFLOW_OUTPUT_TYPE), edges: [] }
+    const restored = withWorkflowPorts(bare, 'outputs', [{ name: 'total', type: 'number' }], { kind: 'other' })
+    assert.deepEqual(workflowOutputPorts(restored), [{ name: 'total', type: 'number' }])
   })
-
 })
 
 describe('run input values', () => {

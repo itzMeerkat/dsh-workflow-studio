@@ -35,7 +35,6 @@ function setup() {
     workflowNodeRegistry: {
       listTypes: () => [
         nodeType('hitl', { kinds: ['code'], outputs: [{ name: 'output', type: 'any' }] }),
-        nodeType('code-function', { kinds: ['code'] }),
       ],
     },
     tools: {
@@ -53,7 +52,7 @@ function setup() {
 }
 
 describe('workflow tools', () => {
-  it('create_workflow 拒绝伪造缺失字段，保留工作流种类，并按签名写出函数节点的端口', async () => {
+  it('create_workflow 拒绝伪造缺失字段，保留工作流种类和语言', async () => {
     const fixture = setup()
     const create = fixture.definitions.get('create_workflow') as unknown as CallableTool
 
@@ -77,10 +76,6 @@ describe('workflow tools', () => {
         config: {},
         inputs: [],
         outputs: [{ name: 'output', type: 'any' }],
-      }, {
-        id: 'fn',
-        type: 'code-function',
-        config: { code: 'func(limit *int) {}' },
       }],
       edges: [],
     }, {})
@@ -88,7 +83,6 @@ describe('workflow tools', () => {
     assert.deepEqual(fixture.saved()?.nodes[0]?.outputs, [{ name: 'output', type: 'any' }])
     assert.equal(fixture.saved()?.kind, 'code')
     assert.equal(fixture.saved()?.language, 'go')
-    assert.deepEqual(fixture.saved()?.nodes[1]?.inputs, [{ name: 'limit', type: 'number', required: false }])
   })
 
   it('describe_workflow 写成工作流指定的语言', async () => {
@@ -98,7 +92,7 @@ describe('workflow tools', () => {
     assert.deepEqual(await describeTool.execute({ name: 'code-flow' }, {}), {
       name: 'code-flow',
       language: 'go',
-      source: '// Generated from workflow "code-flow". Edit the workflow, not this file.\n\nfunc code_flow() {\n}\n',
+      source: '// Code generated from workflow "code-flow". DO NOT EDIT.\n\nfunc code_flow() {\n}\n',
       warnings: [],
     })
   })

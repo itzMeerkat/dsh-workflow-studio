@@ -15,6 +15,7 @@ import {
   portsAreCompatible,
   topologicalLevels,
 } from './shared/graph.ts'
+import { isAbsolute } from 'node:path'
 import { languageOf } from './shared/language.ts'
 import { DEFAULT_WORKFLOW_KIND } from './shared/types.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './shared/workflow-boundary.ts'
@@ -40,13 +41,16 @@ export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefin
  * 按注册表验证一个作者保存的定义。
  *
  * 边界节点是普通节点，因此端口、边和拓扑校验对它们一视同仁；这里只多一条它们独有的规则，
- * 以及 `code` 工作流必须指定一种语言。
+ * 以及 `code` 工作流必须指定一种语言、原子目录必须是能读原子的语言中的绝对路径。
  * @param registry - 提供节点类型的注册表。
  * @param definition - 待验证的定义。
  * @throws 定义违反任一可由注册表确定的不变量时。
  */
 export function validateWorkflow(registry: WorkflowNodeRegistry, definition: DagWorkflowDefinition): void {
-  languageOf(definition)
+  const language = languageOf(definition)
+  if (definition.atomFolder !== undefined && (language.functions?.atoms === undefined || !isAbsolute(definition.atomFolder))) {
+    throw new Error(`原子目录必须是绝对路径，且只用于能读原子的语言: ${definition.atomFolder}`)
+  }
   assertSingleBoundary(definition, WORKFLOW_INPUT_TYPE, '输入')
   assertSingleBoundary(definition, WORKFLOW_OUTPUT_TYPE, '输出')
   resolveExecutors(registry, definition)

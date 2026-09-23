@@ -51,12 +51,12 @@ export function describeRenderFault(fault: RenderFault): string {
       return `决策节点 ${fault.node} 的条件输入没有接线`
     case 'multiline-condition':
       return `节点 ${fault.node} 作为条件时必须是单行表达式`
-    case 'not-a-function':
-      return `函数节点 ${fault.node} 的代码不是该语言能读出签名的函数`
     case 'unwired-parameter':
-      return `函数节点 ${fault.node} 的参数 ${fault.port} 没有接线`
+      return `原子节点 ${fault.node} 的参数 ${fault.port} 没有接线`
+    case 'missing-atom':
+      return `原子节点 ${fault.node} 引用的 ${fault.atom} 不在工作流的原子目录中，或不能作为原子`
     case 'no-value':
-      return `节点 ${fault.node} 的值在生成的代码中没有来源：只有函数的结果和只汇合函数结果的分支合并有值`
+      return `节点 ${fault.node} 的值在生成的代码中没有来源：只有原子的结果和只汇合原子结果的分支合并有值`
     default:
       return assertNever(fault)
   }

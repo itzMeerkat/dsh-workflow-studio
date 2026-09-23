@@ -57,7 +57,7 @@ describe('工作流种类', () => {
     assert.deepEqual(snapshot.nodeTypes[0]?.kinds, ['run', 'code'])
   })
 
-  it('节点类型不适用于该种类的工作流、或 code 工作流没有语言时保存被拒绝', async () => {
+  it('节点类型不适用于该种类的工作流、code 工作流没有语言、或原子目录不可用时保存被拒绝', async () => {
     const fixture = registry()
     const definition = {
       name: 'mixed',
@@ -70,6 +70,8 @@ describe('工作流种类', () => {
     const asCode = { ...definition, kind: 'code' as WorkflowKind }
     assert.throws(() => { validateWorkflow(fixture.registry, asCode) }, /语言必须是/)
     validateWorkflow(fixture.registry, { ...asCode, language: 'go' })
+    assert.throws(() => { validateWorkflow(fixture.registry, { ...asCode, language: 'go', atomFolder: 'atoms' }) }, /原子目录/)
+    assert.throws(() => { validateWorkflow(fixture.registry, { ...asCode, language: 'python', atomFolder: '/atoms' }) }, /原子目录/)
     await fixture.dispose()
   })
 })

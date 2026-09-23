@@ -8,6 +8,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { DIAGNOSTIC_SEVERITY, analyzeWorkflow, indexNodeTypes, type WorkflowAnalysis } from './shared/analysis.ts'
 import { describeDiagnostic, describeRenderFault } from './diagnostic-message.ts'
 import { buildWorkflowIr } from './shared/ir.ts'
+import { saveWithFile, workflowAtoms } from './atom-folder.ts'
 import { CODE_LANGUAGES, languageOf, withSignatures } from './shared/language.ts'
 import { RenderError, renderWorkflow } from './shared/source.ts'
 import { RunId, type JsonObject, type NodeTypeSummary } from './shared/types.ts'
@@ -39,8 +40,13 @@ export function registerWorkflowTools(ctx: Context): void {
       language: {
         type: 'string',
         description: `code 工作流的语言：${CODE_LANGUAGES.map(({ name }) => name).join('、')}。`
-          + 'go 的 code-function 节点的 config.code 是一个函数，保存时按它的签名填写节点的 inputs 和 outputs，'
-          + '端口名就是参数名和结果名（未命名的结果为 output 或 output1、output2……），指针参数和结果是可选端口。',
+      },
+      atomFolder: {
+        type: 'string',
+        description: 'go 工作流的原子目录，Host 上的绝对路径，一个 Go 包。目录中每个 .go 文件定义一个函数（连同导入和全局声明），'
+          + '用 { type: "code-atom", config: { atom: "<文件名>" } } 的节点调用它；保存时按该函数的签名填写节点的 inputs 和 outputs，'
+          + '端口名就是参数名和结果名（未命名的结果为 output 或 output1、output2……），指针参数和结果是可选端口。'
+          + '保存还把工作流函数写成目录中的 workflow.go；写不出时不保存。',
       },
       nodes: {
         type: 'array',
@@ -82,15 +88,17 @@ export function registerWorkflowTools(ctx: Context): void {
       ],
     },
     async execute(args, _exec) {
-      const def = withSignatures(workflowDefinitionSchema.parse({
+      const parsed = workflowDefinitionSchema.parse({
         name: args.name,
         nodes: args.nodes,
         edges: args.edges,
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         ...(args.language === undefined ? {} : { language: args.language }),
+        ...(args.atomFolder === undefined ? {} : { atomFolder: args.atomFolder }),
         ...(args.description === undefined ? {} : { description: args.description }),
-      }))
-      const workflowId = await engine.save(def)
+      })
+      const def = withSignatures(parsed, (await workflowAtoms(parsed)).atoms)
+      const workflowId = await saveWithFile(def, ctx.workflowNodeRegistry, () => engine.save(def))
       return {
         workflowId,
         name: args.name,
@@ -104,7 +112,8 @@ export function registerWorkflowTools(ctx: Context): void {
     name: 'describe_workflow',
     description: '把一个已定义的工作流写成它的语言的一个函数：按执行顺序缩进，分支写成 if/else。'
       + 'run 工作流写成伪代码，节点是对节点类型的调用、数据边是实参，读它比读节点/边 JSON 更快看出工作流做什么；'
-      + 'code 工作流写成它指定的语言，语句节点的代码按位置和所属分支原样写出，函数节点按数据边被调用。同时给出整图分析的告警。',
+      + 'code 工作流写成它指定的语言，语句节点的代码按位置和所属分支原样写出，原子节点按数据边调用原子目录中的函数；'
+      + '源码与保存时写进原子目录的 workflow.go 相同。同时给出整图分析的告警。',
     parameters: {
       name: { type: 'string', required: true, description: '工作流名称' },
     },
@@ -133,7 +142,7 @@ export function registerWorkflowTools(ctx: Context): void {
       const analysis = analyzeWorkflow(definition, types)
       let source: string
       try {
-        source = renderWorkflow(buildWorkflowIr(definition, types, analysis), language)
+        source = renderWorkflow(buildWorkflowIr(definition, types, analysis), language, (await workflowAtoms(definition)).atoms)
       } catch (error: unknown) {
         if (error instanceof RenderError) throw new Error(describeRenderFault(error.fault))
         throw error

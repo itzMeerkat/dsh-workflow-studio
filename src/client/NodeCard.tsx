@@ -1,8 +1,7 @@
 /** The node card both graphs render: identity, ports, inline controls, and displayed run outputs. */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import { createContext, useContext, useRef } from 'react'
+import { createContext, useContext } from 'react'
 import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
@@ -10,7 +9,6 @@ import { EXEC_RUN_PIN, execOutputPins } from '../shared/graph.ts'
 import { diagnosticDetails } from './DiagnosticsView.tsx'
 import { handleId, nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
 import type { Translate } from './locale.ts'
-import type { WorkflowPortEdit } from './workflow-ports.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 /**
@@ -27,12 +25,6 @@ export interface NodeCardActions {
   readonly t: Translate
   /** Set when the card may edit configuration; absent in a read-only graph. */
   readonly updateConfig?: (nodeId: string, name: string, value: unknown) => void
-  /** Set when a boundary card may edit the ports it declares. */
-  readonly updatePorts?: (
-    nodeId: string,
-    ports: readonly PortDefinition[],
-    edit: WorkflowPortEdit,
-  ) => void
 }
 
 /** Provides {@link NodeCardActions} to the cards React Flow renders. */
@@ -305,8 +297,6 @@ function NodeControl({ control, value, onChange, readOnly }: NodeControlProps) {
           />
         </label>
       )
-    case 'file':
-      return <FileControl label={control.label} text={typeof value === 'string' ? value : ''} onPick={readOnly ? undefined : commit} />
     case 'textarea':
       return (
         <label className={`${css.nodeControl} ${css.nodeControlBlock} nodrag`}>
@@ -325,47 +315,6 @@ function NodeControl({ control, value, onChange, readOnly }: NodeControlProps) {
     default:
       return assertNever(control)
   }
-}
-
-/**
- * A config value holding a whole text file. The card shows its first line and its length rather
- * than the text, and the button replaces it with another file's text.
- * @param onPick - Stores the chosen file's text; absent in a read-only graph.
- */
-function FileControl({ label, text, onPick }: {
-  readonly label: string
-  readonly text: string
-  readonly onPick: ((text: string) => void) | undefined
-}) {
-  const { t } = useContext(NodeCardContext)!
-  const picker = useRef<HTMLInputElement>(null)
-  const lines = text === '' ? [] : text.split('\n')
-  const first = lines.find(line => line.trim() !== '')?.trim()
-  return (
-    <div className={`${css.nodeControl} nodrag`}>
-      <span>{label}</span>
-      <div className={css.fileControl}>
-        <code title={first}>{first ?? t('node.noFile')}</code>
-        {lines.length > 0 && <small>{lines.length} {t('node.lines')}</small>}
-        {onPick !== undefined && (
-          <>
-            <input
-              ref={picker}
-              type="file"
-              hidden
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0]
-                // Clear the picker so choosing the same file again, after editing it, still fires a change.
-                event.currentTarget.value = ''
-                if (file !== undefined) void file.text().then(onPick)
-              }}
-            />
-            <Button size="sm" variant="outline" onClick={() => { picker.current?.click() }}>{t('node.chooseFile')}</Button>
-          </>
-        )}
-      </div>
-    </div>
-  )
 }
 
 /** Visible rows of a `textarea` control that does not ask for a height. */

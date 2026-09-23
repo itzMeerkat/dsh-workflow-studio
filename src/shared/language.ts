@@ -2,12 +2,12 @@
  * 工作流写成的语言，以及携带这些语言代码的节点。
  *
  * `run` 工作流写成伪代码；`code` 工作流在 {@link DagWorkflowDefinition.language} 中指定一种
- * {@link CODE_LANGUAGES}，它的节点携带的就是该语言的代码。浏览器在每次编辑时读函数签名，
- * 所以语言是本包的代码，而不是由插件注册的数据。
+ * {@link CODE_LANGUAGES}，它的节点携带的就是该语言的代码，或调用它的原子目录中的函数。浏览器读原子的签名
+ * 来画节点的端口，所以语言是本包的代码，而不是由插件注册的数据。
  * @module dsh-workflow-studio
  */
 
-import { goSignature } from './go.ts'
+import { goAtom, goImportName } from './go.ts'
 import type { DagNodeDefinition, DagWorkflowDefinition, PortDefinition, PortType } from './types.ts'
 
 /** 代码节点存放代码的配置字段。 */
@@ -19,8 +19,11 @@ export const CODE_BLOCK_TYPE = 'code-block'
 /** 一行表达式，写进读它的值的地方，例如分支的条件。 */
 export const CODE_CONDITION_TYPE = 'code-condition'
 
-/** 一个函数；它的参数和结果就是节点的输入和输出端口。 */
-export const CODE_FUNCTION_TYPE = 'code-function'
+/** 工作流原子目录中的一个原子；节点只记下文件名，代码和端口随目录更新。 */
+export const CODE_ATOM_TYPE = 'code-atom'
+
+/** 原子节点存放原子文件名的配置字段。 */
+export const ATOM_FIELD = 'atom'
 
 /** 签名中的一个参数或结果。 */
 export interface TypedName {
@@ -33,7 +36,7 @@ export interface TypedName {
   readonly optional: boolean
 }
 
-/** 函数节点的代码声明的函数。 */
+/** 一个函数声明的参数和结果。 */
 export interface Signature {
   /** 函数自己的名字；匿名函数没有。 */
   readonly name?: string
@@ -42,13 +45,68 @@ export interface Signature {
 }
 
 /**
- * 一种语言如何读和调用函数节点。模板中的 `{键}` 由生成器替换。
+ * 原子：原子目录中的一个文件，恰好定义一个函数，连同它需要的导入和全局声明。
  *
- * 生成的函数在开头声明它读的每个函数结果，所以分支里赋的值在分支之后仍然可读。
+ * 目录里的文件同属一个包，生成的工作流函数也写进这个包，所以它按名字调用原子，不必复制它们。
+ */
+export interface Atom {
+  /** 目录中的文件名，也是原子的 ID。 */
+  readonly file: string
+  /** 文件声明的包名。 */
+  readonly package: string
+  /** 导入项，按原文，例如 `"fmt"` 或 `str "strings"`。 */
+  readonly imports: readonly string[]
+  /** 函数之外的顶层声明，按原文，各带文档注释。 */
+  readonly globals: readonly string[]
+  /** 函数的声明，按原文。 */
+  readonly code: string
+  /** 函数的签名；原子的函数总有名字，调用按名字进行。 */
+  readonly signature: Signature & { readonly name: string }
+}
+
+/** 一个不能作为原子的文件。 */
+export interface AtomFault {
+  readonly file: string
+  /** `no-function`：没有函数；`several-functions`：不止一个函数；`unreadable-signature`：读不出函数的签名。 */
+  readonly fault: 'no-function' | 'several-functions' | 'unreadable-signature'
+}
+
+/** 从原子目录读出的一个文件。 */
+export interface AtomFile {
+  readonly file: string
+  readonly text: string
+}
+
+/** 一个原子目录读出的全部原子，按文件名索引；不能作为原子的文件单列。 */
+export interface AtomLibrary {
+  readonly atoms: ReadonlyMap<string, Atom>
+  readonly faults: readonly AtomFault[]
+}
+
+/** 一种语言如何读原子目录，以及把生成的函数写进原子所在的包。 */
+export interface AtomSyntax {
+  /** 原子文件的扩展名，含点。 */
+  readonly extension: string
+  /** 生成的函数写进原子目录时的文件名；它不是原子。 */
+  readonly output: string
+  /** 一个导入项在代码中的包名；空白导入和点导入没有。 */
+  readonly importName: (spec: string) => string | undefined
+  /** 读一个原子文件。 */
+  readonly read: (file: string, text: string) => Atom | AtomFault
+  /** 包声明，含 `{name}`。 */
+  readonly package: string
+  /** 导入块的第一行；导入项在块内缩进一级。 */
+  readonly importOpen: string
+  /** 导入块的最后一行。 */
+  readonly importClose: string
+}
+
+/**
+ * 一种语言如何调用原子并声明生成的函数。模板中的 `{键}` 由生成器替换。
+ *
+ * 生成的函数在开头声明它读的每个原子结果，所以分支里赋的值在分支之后仍然可读。
  */
 export interface FunctionSyntax {
-  /** 读代码开头的函数；代码不是函数时为 undefined。 */
-  readonly signature: (code: string) => Signature | undefined
   /** 每种端口类型的值在该语言中的类型。 */
   readonly types: Readonly<Record<PortType, string>>
   /** 签名中带类型的一项，含 `{name}` 与 `{type}`。 */
@@ -63,10 +121,10 @@ export interface FunctionSyntax {
   readonly discard: string
   /** 可选参数没有接线时传入的值。 */
   readonly absent: string
-  /** 在文件顶层给匿名函数一个名字，含 `{name}` 与 `{code}`。 */
-  readonly bind: string
   /** 有结果的生成函数的最后一行。 */
   readonly return: string
+  /** 原子目录的读法。 */
+  readonly atoms: AtomSyntax
 }
 
 /** 一种语言的写法。模板中的 `{键}` 由生成器替换。 */
@@ -90,7 +148,7 @@ export interface Language {
   readonly emptyBlock?: string
   /** 不能作为标识符的词。 */
   readonly reserved: readonly string[]
-  /** 函数节点的读法和调用法；没有它的语言不能容纳函数节点。 */
+  /** 原子的读法和调用法；没有它的语言不能使用原子目录。 */
   readonly functions?: FunctionSyntax
 }
 
@@ -142,7 +200,7 @@ export const TYPESCRIPT: Language = {
   ],
 }
 
-/** Go；函数节点的代码是具名函数或函数字面量。 */
+/** Go；原子目录是一个 Go 包，每个文件定义一个具名函数或绑定到 `var` 的函数字面量。 */
 export const GO: Language = {
   name: 'go',
   indent: '\t',
@@ -158,7 +216,6 @@ export const GO: Language = {
     'struct', 'switch', 'type', 'var',
   ],
   functions: {
-    signature: goSignature,
     types: { number: 'float64', string: 'string', boolean: 'bool', any: 'any' },
     typed: '{name} {type}',
     results: ' ({results})',
@@ -166,13 +223,21 @@ export const GO: Language = {
     assign: '{targets} = {value}',
     discard: '_',
     absent: 'nil',
-    bind: 'var {name} = {code}',
     return: 'return',
+    atoms: {
+      extension: '.go',
+      output: 'workflow.go',
+      importName: goImportName,
+      read: goAtom,
+      package: 'package {name}',
+      importOpen: 'import (',
+      importClose: ')',
+    },
   },
 }
 
-/** `code` 工作流可以使用的语言。 */
-export const CODE_LANGUAGES: readonly Language[] = [PYTHON, TYPESCRIPT, GO]
+/** `code` 工作流可以使用的语言；新的 `code` 工作流用第一种。 */
+export const CODE_LANGUAGES: readonly Language[] = [GO, PYTHON, TYPESCRIPT]
 
 /**
  * 一个工作流写成的语言。
@@ -204,24 +269,53 @@ export function codeOf(config: Readonly<Record<string, unknown>>): string {
 }
 
 /**
- * 按代码重读每个函数节点的端口，并去掉接在它已不再声明的端口上的数据边。
- *
- * 代码读不出函数时（例如正在输入签名）保留节点原有的端口，接线不因一次按键而丢失。
- * @param definition - 工作流定义。
- * @returns 端口与代码一致的定义；语言不能容纳函数节点时原样返回。
+ * 原子节点引用的原子文件名。
+ * @param config - 节点配置。
  */
-export function withSignatures(definition: DagWorkflowDefinition): DagWorkflowDefinition {
-  const functions = languageOf(definition).functions
-  if (functions === undefined) return definition
+export function atomOf(config: Readonly<Record<string, unknown>>): string {
+  return String(config[ATOM_FIELD] ?? '')
+}
+
+/**
+ * 读出一个原子目录中的原子。
+ * @param files - 目录中该语言扩展名的文件。
+ * @param syntax - 语言的原子读法。
+ * @returns 按文件名索引的原子，以及不能作为原子的文件。
+ */
+export function atomLibrary(files: readonly AtomFile[], syntax: AtomSyntax): AtomLibrary {
+  const read = files.map(({ file, text }) => syntax.read(file, text))
+  return {
+    atoms: new Map(read.flatMap(atom => 'fault' in atom ? [] : [[atom.file, atom] as const])),
+    faults: read.filter(atom => 'fault' in atom),
+  }
+}
+
+/**
+ * 签名对应的端口。
+ * @param names - 签名中的参数或结果。
+ */
+export function signaturePorts(names: readonly TypedName[]): PortDefinition[] {
+  return names.map(({ name, port, optional }) => optional ? { name, type: port, required: false } : { name, type: port })
+}
+
+/**
+ * 按原子目录重读每个原子节点的端口，并去掉接在它已不再声明的端口上的数据边。
+ *
+ * 原子已不在目录中时保留节点原有的端口，接线不因目录暂时读不到而丢失。
+ * @param definition - 工作流定义。
+ * @param atoms - 工作流原子目录中的原子。
+ * @returns 端口与原子签名一致的定义。
+ */
+export function withSignatures(definition: DagWorkflowDefinition, atoms: ReadonlyMap<string, Atom>): DagWorkflowDefinition {
   const nodes = definition.nodes.map((node) => {
-    const signature = node.type === CODE_FUNCTION_TYPE ? functions.signature(codeOf(node.config)) : undefined
+    const signature = node.type === CODE_ATOM_TYPE ? atoms.get(atomOf(node.config))?.signature : undefined
     return signature === undefined
       ? node
-      : { ...node, inputs: signature.parameters.map(portOf), outputs: signature.results.map(portOf) }
+      : { ...node, inputs: signaturePorts(signature.parameters), outputs: signaturePorts(signature.results) }
   })
   const byId = new Map(nodes.map(node => [node.id, node]))
   const declares = (node: DagNodeDefinition, ports: DagNodeDefinition['inputs'], port: string): boolean =>
-    node.type !== CODE_FUNCTION_TYPE || (ports ?? []).some(candidate => candidate.name === port)
+    node.type !== CODE_ATOM_TYPE || (ports ?? []).some(candidate => candidate.name === port)
   return {
     ...definition,
     nodes,
@@ -233,10 +327,6 @@ export function withSignatures(definition: DagWorkflowDefinition): DagWorkflowDe
         && declares(target, target.inputs, edge.targetPort ?? 'input')
     }),
   }
-}
-
-function portOf({ name, port, optional }: TypedName): PortDefinition {
-  return optional ? { name, type: port, required: false } : { name, type: port }
 }
 
 function assertNever(kind: never): never {

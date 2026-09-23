@@ -17,7 +17,9 @@ import type {
   WorkflowRunRecord,
   WorkflowRunSummary,
   WorkflowStudioSnapshot,
+  FolderListing,
 } from './types.ts'
+import type { AtomFile } from './language.ts'
 import { DEFAULT_WORKFLOW_KIND } from './types.ts'
 
 // 每个 schema 断言为对应的声明类型：zod 输出省略缺失的可选键，但把它们类型化为 `T | undefined`，
@@ -57,7 +59,6 @@ export const nodeControlSchema = z.discriminatedUnion('kind', [
     placeholder: z.string().optional(),
     rows: z.number().int().positive().optional(),
   }),
-  z.object({ ...controlIdentity, kind: z.literal('file'), defaultValue: z.string() }),
   z.object({ ...controlIdentity, kind: z.literal('boolean'), defaultValue: z.boolean() }),
   z.object({
     ...controlIdentity,
@@ -106,6 +107,7 @@ export const workflowDefinitionSchema = z.object({
   // 第二种工作流出现之前保存的记录没有这个字段，它们都是被执行的工作流。
   kind: workflowKind.default(DEFAULT_WORKFLOW_KIND),
   language: nonEmptyString.optional(),
+  atomFolder: nonEmptyString.optional(),
   description: nonEmptyString.optional(),
   nodes: z.array(workflowNodeSchema),
   edges: z.array(workflowEdgeSchema),
@@ -189,3 +191,14 @@ export const workflowStudioSnapshotSchema = z.object({
     variadicInputs: z.object({ min: z.number(), outputType: z.literal('same').optional() }).optional(),
   })),
 }) as unknown as z.ZodType<WorkflowStudioSnapshot>
+
+/** Host 读出的原子目录文件的 Remote JSON schema。 */
+export const atomFilesSchema = z.array(z.object({ file: z.string(), text: z.string() })) as z.ZodType<AtomFile[]>
+
+/** 一层 Host 目录的 Remote JSON schema。 */
+export const folderListingSchema = z.object({
+  path: z.string(),
+  parent: z.string().optional(),
+  folders: z.array(z.object({ name: z.string(), path: z.string() })),
+  files: z.array(z.string()),
+}) as unknown as z.ZodType<FolderListing>

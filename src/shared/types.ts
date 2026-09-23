@@ -100,13 +100,6 @@ export type NodeControlDefinition =
   | {
     readonly name: string
     readonly label: string
-    /** 选择一个本机文本文件，字段保存它的全文；用于放不进卡片的长文本。 */
-    readonly kind: 'file'
-    readonly defaultValue: string
-  }
-  | {
-    readonly name: string
-    readonly label: string
     readonly kind: 'boolean'
     readonly defaultValue: boolean
   }
@@ -177,6 +170,8 @@ export interface DagWorkflowDefinition {
   kind: WorkflowKind
   /** `code` 工作流写成的语言，节点携带的代码也是该语言；`run` 工作流没有。 */
   language?: string
+  /** `code` 工作流的原子目录，Host 上的绝对路径；其中的原子成为这个工作流可用的节点。 */
+  atomFolder?: string
   description?: string
   nodes: DagNodeDefinition[]
   edges: DagEdgeDefinition[]
@@ -413,6 +408,18 @@ export interface NodeTypeSummary {
   execOutputs: readonly string[]
   controls: readonly NodeControlDefinition[]
   variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
+}
+
+/** 选择原子目录时看到的一层 Host 目录。 */
+export interface FolderListing {
+  /** 目录的绝对路径。 */
+  readonly path: string
+  /** 上一级目录；根目录没有。 */
+  readonly parent?: string
+  /** 子目录，不含隐藏目录，按名字排序；路径由 Host 拼接。 */
+  readonly folders: readonly { readonly name: string; readonly path: string }[]
+  /** 文件的名字，不含隐藏文件，按名字排序。 */
+  readonly files: readonly string[]
 }
 
 /** 浏览器编辑器启动时读取的已保存工作流与节点目录。 */
