@@ -20,7 +20,7 @@ export function registerWorkflowSkill(ctx: Context): void {
     scope.effect(() => scope.skills.register({
       name: WORKFLOW_CODE_SKILL,
       description: 'Split existing Go code into atoms — one exported function per file in an atom folder — and wire them into a '
-        + 'Workflow Studio `code` workflow with create_workflow, which writes the flow into the folder as workflow.go. '
+        + 'Workflow Studio `code` workflow with create_workflow, which writes the flow into the folder as <id>.workflow.go. '
         + 'Use when asked to turn code into a workflow, visualize or restructure a function as a graph, or build a code workflow.',
       source: 'bundled',
       content,

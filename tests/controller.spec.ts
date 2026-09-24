@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createFixtureNodes } from './fixture-nodes.ts'
 import { workflow } from './graph-fixtures.ts'
 import { TestHosts, runEnded, signalRequested } from './host.ts'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ATOM_FIELD, CODE_ATOM_TYPE } from '../src/shared/language.ts'
@@ -60,7 +60,7 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
       [
-        'ask', 'branch', 'greater', 'merge', 'sum', 'value', 'workflow-input', 'workflow-output',
+        'ask', 'branch', 'greater', 'merge', 'subworkflow', 'sum', 'value', 'workflow-input', 'workflow-output',
       ],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
@@ -171,7 +171,7 @@ describe('WorkflowStudioController', () => {
     )
   })
 
-  it('保存带原子目录的 Go 工作流时写出目录中的 workflow.go；写不出时不保存', async () => {
+  it('保存带原子目录的 Go 工作流时写出目录中的 <ID>.workflow.go，改名时换掉旧文件；写不出时不保存', async () => {
     const controller = await setup()
     const folder = await mkdtemp(join(tmpdir(), 'atoms-'))
     try {
@@ -181,11 +181,11 @@ describe('WorkflowStudioController', () => {
         say: { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: file }, inputs: [{ name: 'name', type: 'string' }] },
       }, ['in:name>say:name'], { name: 'hello', kind: 'code', language: 'go', atomFolder: folder })
 
-      await assert.rejects(controller.save(JSON.stringify(greet('gone.go'))), /写不出 .*workflow\.go，工作流未保存/)
+      await assert.rejects(controller.save(JSON.stringify(greet('gone.go'))), /写不出工作流 "hello" 的源码，工作流未保存/)
       assert.deepEqual(JSON.parse(controller.snapshot('code')).workflows, [])
 
       await controller.save(JSON.stringify(greet('greet.go')))
-      assert.equal(await readFile(join(folder, 'workflow.go'), 'utf8'), [
+      assert.equal(await readFile(join(folder, 'hello.workflow.go'), 'utf8'), [
         '// Code generated from workflow "hello". DO NOT EDIT.',
         '',
         'package hello',
@@ -195,6 +195,10 @@ describe('WorkflowStudioController', () => {
         '}',
         '',
       ].join('\n'))
+
+      // 改名后文件随新 ID 改名，旧文件不再留在包里。
+      await controller.update('hello', JSON.stringify({ ...greet('greet.go'), name: 'greeting' }))
+      assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'greeting.workflow.go'])
     } finally {
       await rm(folder, { recursive: true, force: true })
     }

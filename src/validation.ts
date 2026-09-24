@@ -41,7 +41,8 @@ export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefin
  * 按注册表验证一个作者保存的定义。
  *
  * 边界节点是普通节点，因此端口、边和拓扑校验对它们一视同仁；这里只多一条它们独有的规则，
- * 以及 `code` 工作流必须指定一种语言、原子目录必须是能读原子的语言中的绝对路径。
+ * 以及每个节点类型都属于工作流的种类、`code` 工作流必须指定一种语言、原子目录必须是能读原子的语言中的绝对路径。
+ * 种类只约束作者放置的节点；运行开始时展开子工作流放置的节点不属于任何种类，所以 {@link resolveExecutors} 不查它。
  * @param registry - 提供节点类型的注册表。
  * @param definition - 待验证的定义。
  * @throws 定义违反任一可由注册表确定的不变量时。
@@ -53,7 +54,15 @@ export function validateWorkflow(registry: WorkflowNodeRegistry, definition: Dag
   }
   assertSingleBoundary(definition, WORKFLOW_INPUT_TYPE, '输入')
   assertSingleBoundary(definition, WORKFLOW_OUTPUT_TYPE, '输出')
-  resolveExecutors(registry, definition)
+  const executors = resolveExecutors(registry, definition)
+  for (const node of definition.nodes) {
+    const kinds = executors.get(node.id)!.kinds ?? [DEFAULT_WORKFLOW_KIND]
+    if (!kinds.includes(definition.kind)) {
+      throw new Error(
+        `节点类型 ${node.type} 只能用在 ${kinds.join('、')} 工作流中，而本工作流是 ${definition.kind}`,
+      )
+    }
+  }
 }
 
 /**
@@ -94,12 +103,6 @@ export function resolveExecutors(
 
     const executor = registry.get(node.type)
     if (executor === undefined) throw new Error(`未知节点类型: ${node.type}`)
-    const kinds = executor.kinds ?? [DEFAULT_WORKFLOW_KIND]
-    if (!kinds.includes(definition.kind)) {
-      throw new Error(
-        `节点类型 ${node.type} 只能用在 ${kinds.join('、')} 工作流中，而本工作流是 ${definition.kind}`,
-      )
-    }
     const inputs = node.inputs ?? executor.inputs ?? []
     const outputs = node.outputs ?? executor.outputs ?? []
     assertUniquePortNames(`节点 ${node.id}`, '输入', inputs)

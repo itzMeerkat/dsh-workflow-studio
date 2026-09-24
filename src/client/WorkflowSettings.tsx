@@ -3,8 +3,9 @@
 import { IconCloseOutlineRegular, IconPlusOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useState } from 'react'
 import {
-  CODE_LANGUAGES, atomTypes, languageOf, typeName, withSignatures, type AtomLibrary, type Language,
+  CODE_LANGUAGES, atomTypes, languageOf, typeName, type AtomLibrary, type Language,
 } from '../shared/language.ts'
+import { withCallees, type Callees } from '../shared/callees.ts'
 import { BUILTIN_PORT_TYPES, type DagWorkflowDefinition, type PortDefinition, type PortType } from '../shared/types.ts'
 import { workflowInputPorts, workflowOutputPorts } from '../shared/workflow-boundary.ts'
 import type { Translate, WorkflowStudioKey } from './locale.ts'
@@ -31,13 +32,15 @@ const FAULT: Record<'empty' | 'duplicate', WorkflowStudioKey> = {
  * The workflow's description, its language when it is a code workflow, and the inputs and outputs it declares.
  * @param definition - The workflow being edited.
  * @param library - The atoms read from its atom folder; the types they use are the types a port may declare.
+ * @param callees - What the workflow's nodes call, which gives those nodes their ports again after a language change.
  * @param t - Translate.
  * @param onChange - Receives the edited workflow.
  * @param onClose - Hides the panel.
  */
-export function WorkflowSettings({ definition, library, t, onChange, onClose }: {
+export function WorkflowSettings({ definition, library, callees, t, onChange, onClose }: {
   readonly definition: DagWorkflowDefinition
   readonly library: AtomLibrary | undefined
+  readonly callees: Callees
   readonly t: Translate
   readonly onChange: (definition: DagWorkflowDefinition) => void
   readonly onClose: () => void
@@ -80,10 +83,7 @@ export function WorkflowSettings({ definition, library, t, onChange, onClose }: 
                 // A language that cannot read atoms has no atom folder.
                 const next: DagWorkflowDefinition = { ...definition, language: event.currentTarget.value }
                 const { atomFolder: _dropped, ...withoutFolder } = next
-                onChange(withSignatures(
-                  languageOf(next).functions?.atoms === undefined ? withoutFolder : next,
-                  library?.atoms ?? new Map(),
-                ))
+                onChange(withCallees(languageOf(next).functions?.atoms === undefined ? withoutFolder : next, callees))
               }}
             >
               {CODE_LANGUAGES.map(({ name }) => <option key={name} value={name}>{name}</option>)}

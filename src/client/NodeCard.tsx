@@ -7,9 +7,12 @@ import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
 import { EXEC_RUN_PIN, execOutputPins } from '../shared/graph.ts'
 import { typeName, type Language } from '../shared/language.ts'
+import { SUBWORKFLOW_TYPE, subworkflowOf } from '../shared/subworkflow.ts'
+import type { WorkflowId } from '../shared/types.ts'
 import { diagnosticDetails } from './DiagnosticsView.tsx'
 import { handleId, nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
 import type { Translate } from './locale.ts'
+import type { WorkflowRow } from './model.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 /**
@@ -28,6 +31,12 @@ export interface NodeCardActions {
   readonly language: Language
   /** Set when the card may edit configuration; absent in a read-only graph. */
   readonly updateConfig?: (nodeId: string, name: string, value: unknown) => void
+  /** Set when a subworkflow card may change the workflow it links to; absent in a read-only graph. */
+  readonly linkWorkflow?: {
+    /** The saved workflows the edited one may embed. */
+    readonly choices: readonly WorkflowRow[]
+    readonly link: (nodeId: string, workflow: WorkflowId) => void
+  }
 }
 
 /** Provides {@link NodeCardActions} to the cards React Flow renders. */
@@ -58,7 +67,7 @@ export function NodeCard({
 }) {
   const actions = useContext(NodeCardContext)
   if (actions === undefined) throw new Error('Workflow node card rendered outside its view')
-  const { t, language, updateConfig } = actions
+  const { t, language, updateConfig, linkWorkflow } = actions
   const inputs = nodeInputPorts(data)
   const outputs = nodeOutputPorts(data)
   const controls = data.catalog?.controls ?? []
@@ -102,6 +111,16 @@ export function NodeCard({
         <div>{inputs.map(port => <PortRow key={port.name} port={port} language={language} side="input" connectable={connectable} />)}</div>
         <div>{outputs.map(port => <PortRow key={port.name} port={port} language={language} side="output" connectable={connectable} />)}</div>
       </div>
+      {data.definition.type === SUBWORKFLOW_TYPE && linkWorkflow !== undefined && (
+        <div className={css.nodeControls}>
+          <WorkflowLink
+            linked={subworkflowOf(data.definition.config)}
+            choices={linkWorkflow.choices}
+            t={t}
+            onLink={(workflow) => { linkWorkflow.link(data.definition.id, workflow) }}
+          />
+        </div>
+      )}
       {controls.length > 0 && (
         <div className={css.nodeControls}>
           {controls.map(control => (
@@ -250,6 +269,35 @@ function PortRow({ port, language, side, connectable }: {
       {isInput && port.required !== false && <b className={css.requiredPort}>*</b>}
       <small>{type}</small>
     </div>
+  )
+}
+
+/**
+ * The workflow a subworkflow node calls. A link to a workflow the edited one may not embed, or to none yet,
+ * stays listed as it is until another is chosen.
+ */
+function WorkflowLink({ linked, choices, t, onLink }: {
+  readonly linked: WorkflowId
+  readonly choices: readonly WorkflowRow[]
+  readonly t: Translate
+  readonly onLink: (workflow: WorkflowId) => void
+}) {
+  const listed = choices.some(choice => choice.id === linked)
+  return (
+    <label className={`${css.nodeControl} nodrag`}>
+      <span>{t('node.workflow')}</span>
+      <select
+        className="nowheel"
+        value={linked}
+        onChange={(event) => {
+          const choice = choices.find(item => item.id === event.currentTarget.value)
+          if (choice !== undefined) onLink(choice.id)
+        }}
+      >
+        {!listed && <option value={linked} disabled>{linked === '' ? t('node.chooseWorkflow') : linked}</option>}
+        {choices.map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
+      </select>
+    </label>
   )
 }
 

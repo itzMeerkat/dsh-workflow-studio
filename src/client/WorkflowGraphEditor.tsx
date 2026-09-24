@@ -16,9 +16,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type {
-  DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary,
+  DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary, WorkflowId,
 } from '../shared/types.ts'
-import { languageOf, withSignatures, type Atom } from '../shared/language.ts'
+import { withCallees, type Callees } from '../shared/callees.ts'
+import { languageOf } from '../shared/language.ts'
+import { SUBWORKFLOW_FIELD, subworkflowOf } from '../shared/subworkflow.ts'
 import {
   connectionError,
   flowEdges,
@@ -28,6 +30,7 @@ import {
   type WorkflowFlowNode,
 } from './graph-model.ts'
 import type { Translate } from './locale.ts'
+import type { WorkflowRow } from './model.ts'
 import { NodeCardContext, WorkflowNodeCard } from './NodeCard.tsx'
 import { NodeInspector } from './NodeInspector.tsx'
 import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
@@ -44,8 +47,10 @@ interface WorkflowGraphEditorProps {
   /** Static-analysis findings by node ID. */
   readonly diagnostics: ReadonlyMap<string, readonly WorkflowDiagnostic[]>
   readonly runResult?: string
-  /** The workflow's atoms by file, which give atom nodes their ports. */
-  readonly atoms: ReadonlyMap<string, Atom>
+  /** The atoms and workflows the graph's nodes call, which give those nodes their ports. */
+  readonly callees: Callees
+  /** The saved workflows a subworkflow node may link to. */
+  readonly workflows: readonly WorkflowRow[]
   readonly t: Translate
   readonly onChange: (definition: DagWorkflowDefinition) => void
   readonly onError: (message: string | undefined) => void
@@ -59,7 +64,8 @@ export function WorkflowGraphEditor({
   runRecords,
   diagnostics,
   runResult,
-  atoms,
+  callees,
+  workflows,
   t,
   onChange,
   onError,
@@ -108,7 +114,7 @@ export function WorkflowGraphEditor({
     const edited = nodes.map(node => node.id === nodeId
       ? { ...node, data: { ...node.data, definition: update(node.data.definition) } }
       : node)
-    const next = withSignatures(toDefinition(definition, edited, edges), atoms)
+    const next = withCallees(toDefinition(definition, edited, edges), callees)
     const signed = next.nodes.find(node => node.id === nodeId)!
     const kept = new Set<string>(next.edges.map(edge => edge.id))
     const nextNodes = edited.map(node => node.id === nodeId ? { ...node, data: { ...node.data, definition: signed } } : node)
@@ -123,6 +129,17 @@ export function WorkflowGraphEditor({
       const config = { ...node.config, [name]: value }
       if (nodeId === selectedNodeId) setConfigSource(JSON.stringify(config, null, 2))
       return { ...node, config }
+    })
+  }
+
+  /** Link a subworkflow node to another workflow; its ports follow, and edges on ports that workflow lacks go. */
+  const linkWorkflow = (nodeId: string, workflow: WorkflowId): void => {
+    updateNode(nodeId, (node) => {
+      // A label that only repeated the old workflow's name follows the new one.
+      const named = node.label === undefined || node.label === callees.workflows.get(subworkflowOf(node.config))?.name
+      const config = { ...node.config, [SUBWORKFLOW_FIELD]: workflow }
+      if (nodeId === selectedNodeId) setConfigSource(JSON.stringify(config, null, 2))
+      return { ...node, ...(named ? { label: callees.workflows.get(workflow)!.name } : {}), config }
     })
   }
 
@@ -160,7 +177,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div className={css.canvas}>
-        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig }}>
+        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow } }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}

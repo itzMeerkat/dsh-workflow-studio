@@ -139,7 +139,10 @@ describe('DagEngineProvider', () => {
     // boundary, or code generation; nothing else.
     assert.deepEqual(
       ctx.workflowNodeRegistry.listTypes().map(node => node.type).sort(),
-      ['branch', 'code-atom', 'code-block', 'code-condition', 'merge', 'workflow-input', 'workflow-output'],
+      [
+        'branch', 'code-atom', 'code-block', 'code-condition', 'merge', 'subworkflow', 'subworkflow-entry', 'subworkflow-exit',
+        'workflow-input', 'workflow-output',
+      ],
     )
     assert.deepEqual([...tools.keys()].sort(), ['create_workflow', 'describe_workflow', 'get_workflow_run', 'run_workflow'])
 

@@ -1,6 +1,6 @@
 # Split code into workflow atoms
 
-Turn existing Go code into a `code` workflow. Each step of the logic becomes an **atom**: one file in an atom folder, exporting one function. The graph wires the atoms together, and saving the workflow writes the whole flow as one Go function, `workflow.go`, into the same folder. The graph then shows the program's data flow and branches, and anyone can rewire it in the Code Workflows panel.
+Turn existing Go code into a `code` workflow. Each step of the logic becomes an **atom**: one file in an atom folder, exporting one function. The graph wires the atoms together, and saving the workflow writes the whole flow as one Go function, `<id>.workflow.go` (the workflow's ID is its name in kebab-case), into the same folder. The graph then shows the program's data flow and branches, and anyone can rewire it in the Code Workflows panel.
 
 ## 1. Read the code and choose atoms
 
@@ -21,7 +21,7 @@ The atom folder is one Go package on the Host: use the folder the user names, or
 - The file has the package clause, its own imports, and any package-level `var` and `const` declarations it needs.
 - It **exports exactly one function**: `func Name(…) … { … }` or `var Name = func(…) … { … }`, with a name that starts with an upper-case letter. Unexported helpers (`func round(…)`) may sit beside it; a file that exports no function, or two, is not an atom. Methods and type parameters cannot be atoms.
 - **Every custom type the atoms use goes in `types.go`**, together with its methods. That file is part of the package but is not an atom, and the panel only reports whether it exists; a folder whose atoms use only built-in types does not need one.
-- Every file shares the package, so names must not clash across files, and no atom may be called `workflow.go` (saving writes that file) or `types.go`, or end in `_test.go` (those are not read).
+- Every file shares the package, so names must not clash across files, and no atom may end in `.workflow.go` (saving writes those files) or `_test.go`, or be called `types.go` (those are not read as atoms).
 
 For example, `types.go`:
 
@@ -67,6 +67,7 @@ func floor(price float64) float64 {
 | A value the original function returned | `workflow-output` (at most one) | Declare one entry in its `inputs` per result, typed as below, with `"required": false`; wire each from the atom or `merge` that produces it |
 | A step | `code-atom` | Set `config.atom` to the atom's file name, such as `"discounted.go"`; ports are read from the function's signature when the workflow is saved, so do not write `inputs` or `outputs` yourself |
 | A choice | `branch` | Wire a `bool` result to its `condition` input; draw `exec` edges from its `true` and `false` pins to the first atom of each side |
+| A step that is itself a saved code workflow in the same folder | `subworkflow` | Set `config.workflow` to that workflow's ID; its ports are that workflow's inputs and outputs, filled in when saved, and the call goes to the function it generated |
 | Two sides meeting again | `merge` | Wire one result from each side into `input1` and `input2`, draw an `exec` edge from the last atom of each side into it, and read its `output` afterwards |
 
 A declared port's `type` is the Go type of the parameter or result, written as in Go (`Order`, `int`, `[]string`, `*Coupon`), except the four built-in port types: `number` for `float64`, `boolean` for `bool`, `string`, and `any` (also for `interface{}`). The workflow's function is declared with exactly these types.
@@ -110,7 +111,7 @@ Example — a checkout that discounts large orders, with atoms `subtotal.go`, `i
 
 ## 4. Save and check
 
-Call `create_workflow` with that JSON: `kind` is `code`, `language` is `go`, and `atomFolder` is the folder's absolute path. Saving validates the graph, writes the workflow's function into the folder as `workflow.go`, and refuses to save a workflow whose function cannot be written, naming the edge, port or node to fix. For the example, `workflow.go` holds the package clause and:
+Call `create_workflow` with that JSON: `kind` is `code`, `language` is `go`, and `atomFolder` is the folder's absolute path. Saving validates the graph, writes the workflow's function into the folder as `<id>.workflow.go`, and refuses to save a workflow whose function cannot be written, naming the edge, port or node to fix. For the example, `checkout.workflow.go` holds the package clause and:
 
 ```go
 func Checkout(order Order) (price float64) {
@@ -131,8 +132,8 @@ func Checkout(order Order) (price float64) {
 
 The file imports only the packages its own function names (here none: `math` stays in `discounted.go`). Then:
 
-1. Run `go vet` (or `go build`) in the folder. It compiles the atoms and `workflow.go` together, so a clash or a type mismatch between wired ports shows up here.
-2. Compare the function with the original: the same calls in the same order under the same conditions, and the same values returned. Fix the graph or an atom, not `workflow.go`, and save again under the same name to rewrite it. `describe_workflow` returns the same source without writing it.
+1. Run `go vet` (or `go build`) in the folder. It compiles the atoms and the `*.workflow.go` files together, so a clash or a type mismatch between wired ports shows up here.
+2. Compare the function with the original: the same calls in the same order under the same conditions, and the same values returned. Fix the graph or an atom, not the generated file, and save again under the same name to rewrite it. `describe_workflow` returns the same source without writing it.
 
 Saving refuses, naming the node, when:
 

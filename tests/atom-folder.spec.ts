@@ -18,7 +18,7 @@ describe('原子目录', () => {
       await writeFile(join(folder, 'add.go'), 'package m\n\nfunc Add(a, b int) int { return a + b }\n')
       await writeFile(join(folder, 'add_test.go'), 'package m\n')
       await writeFile(join(folder, 'types.go'), 'package m\n\ntype Sum int\n')
-      await writeFile(join(folder, 'workflow.go'), 'package m\n\nfunc flow() {}\n')
+      await writeFile(join(folder, 'flow.workflow.go'), 'package m\n\nfunc Flow() {}\n')
       await writeFile(join(folder, 'notes.md'), '# notes\n')
       await mkdir(join(folder, 'nested'))
       await mkdir(join(folder, '.git'))
@@ -31,7 +31,7 @@ describe('原子目录', () => {
         path: folder,
         parent: tmpdir(),
         folders: [{ name: 'nested', path: join(folder, 'nested') }],
-        files: ['add.go', 'add_test.go', 'notes.md', 'types.go', 'workflow.go'],
+        files: ['add.go', 'add_test.go', 'flow.workflow.go', 'notes.md', 'types.go'],
       })
       await assert.rejects(readAtomFiles('relative/atoms', GO.functions!.atoms), /绝对路径/)
     } finally {

@@ -9,7 +9,7 @@
 
 import { GO_TYPES, goAtom, goImportName } from './go.ts'
 import type {
-  BuiltinPortType, DagNodeDefinition, DagWorkflowDefinition, PortDefinition, PortType,
+  BuiltinPortType, DagWorkflowDefinition, PortDefinition, PortType,
 } from './types.ts'
 
 /** 代码节点存放代码的配置字段。 */
@@ -91,8 +91,8 @@ export interface AtomLibrary {
 export interface AtomSyntax {
   /** 原子文件的扩展名，含点。 */
   readonly extension: string
-  /** 生成的函数写进原子目录时的文件名；它不是原子。 */
-  readonly output: string
+  /** 生成的函数写进原子目录时的文件名后缀，前接工作流 ID，例如 `checkout.workflow.go`；这些文件不是原子。 */
+  readonly outputSuffix: string
   /** 声明原子所用自定义类型的文件的文件名；它不是原子，内容不被解析，目录中可以没有它。 */
   readonly types: string
   /** 一个导入项在代码中的包名；空白导入和点导入没有。 */
@@ -232,7 +232,7 @@ export const GO: Language = {
     return: 'return',
     atoms: {
       extension: '.go',
-      output: 'workflow.go',
+      outputSuffix: '.workflow.go',
       types: 'types.go',
       importName: goImportName,
       read: goAtom,
@@ -302,7 +302,7 @@ export function typeName(language: Language, type: PortType): string {
  */
 export function isAtomFile(file: string, syntax: AtomSyntax): boolean {
   return file.endsWith(syntax.extension) && !file.endsWith(`_test${syntax.extension}`)
-    && file !== syntax.output && file !== syntax.types
+    && !file.endsWith(syntax.outputSuffix) && file !== syntax.types
 }
 
 /**
@@ -335,37 +335,6 @@ export function atomTypes(library: AtomLibrary): PortType[] {
  */
 export function signaturePorts(names: readonly (TypedName & { readonly optional?: boolean })[]): PortDefinition[] {
   return names.map(({ name, type, optional }) => optional === true ? { name, type, required: false } : { name, type })
-}
-
-/**
- * 按原子目录重读每个原子节点的端口，并去掉接在它已不再声明的端口上的数据边。
- *
- * 原子已不在目录中时保留节点原有的端口，接线不因目录暂时读不到而丢失。
- * @param definition - 工作流定义。
- * @param atoms - 工作流原子目录中的原子。
- * @returns 端口与原子签名一致的定义。
- */
-export function withSignatures(definition: DagWorkflowDefinition, atoms: ReadonlyMap<string, Atom>): DagWorkflowDefinition {
-  const nodes = definition.nodes.map((node) => {
-    const signature = node.type === CODE_ATOM_TYPE ? atoms.get(atomOf(node.config))?.signature : undefined
-    return signature === undefined
-      ? node
-      : { ...node, inputs: signaturePorts(signature.parameters), outputs: signaturePorts(signature.results) }
-  })
-  const byId = new Map(nodes.map(node => [node.id, node]))
-  const declares = (node: DagNodeDefinition, ports: DagNodeDefinition['inputs'], port: string): boolean =>
-    node.type !== CODE_ATOM_TYPE || (ports ?? []).some(candidate => candidate.name === port)
-  return {
-    ...definition,
-    nodes,
-    edges: definition.edges.filter((edge) => {
-      if (edge.kind === 'exec') return true
-      const source = byId.get(edge.source)!
-      const target = byId.get(edge.target)!
-      return declares(source, source.outputs, edge.sourcePort ?? 'output')
-        && declares(target, target.inputs, edge.targetPort ?? 'input')
-    }),
-  }
 }
 
 function assertNever(kind: never): never {

@@ -7,8 +7,9 @@ import assert from 'node:assert/strict'
 import { indexNodeTypes } from '../src/shared/analysis.ts'
 import {
   ATOM_FIELD, CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, GO, PSEUDOCODE, PYTHON,
-  TYPESCRIPT, atomLibrary, withSignatures, type Language,
+  TYPESCRIPT, atomLibrary, type Language,
 } from '../src/shared/language.ts'
+import { withCallees } from '../src/shared/callees.ts'
 import { RenderError, renderWorkflow } from '../src/shared/source.ts'
 import { NodeId, type DagWorkflowDefinition } from '../src/shared/types.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
@@ -131,7 +132,7 @@ describe('code 工作流写成它的语言', () => {
   })
 
   it('Go 只写出工作流函数：类型取自端口，按名字调用原子，被读的结果先声明，分支合并共用一个变量，只导入函数写到的包', () => {
-    assert.equal(renderWorkflow(irOf(goDiscount(), CODE_CATALOG), GO, SHOP.atoms), [
+    assert.equal(renderWorkflow(irOf(goDiscount(), CODE_CATALOG), GO, { atoms: SHOP.atoms, workflows: new Map() }), [
       '// Code generated from workflow "折扣". DO NOT EDIT.',
       '',
       'package shop',
@@ -162,7 +163,7 @@ describe('code 工作流写成它的语言', () => {
   it('写不出时指出要改的节点', () => {
     const fault = (definition: DagWorkflowDefinition, language: Language, atoms = SHOP.atoms) => {
       try {
-        renderWorkflow(irOf(definition, CODE_CATALOG), language, atoms)
+        renderWorkflow(irOf(definition, CODE_CATALOG), language, { atoms, workflows: new Map() })
       } catch (error: unknown) {
         if (error instanceof RenderError) return error.fault
         throw error
@@ -204,7 +205,7 @@ const SHOP = atomLibrary([
 /** {@link discount} 的 Go 写法：每一步是原子目录中的一个原子，端口由它的签名给出。 */
 function goDiscount(): DagWorkflowDefinition {
   const atom = (file: string) => ({ type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: file } })
-  return withSignatures(workflow({
+  return withCallees(workflow({
     in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'amount', type: 'number' }] },
     over: atom('over.go'),
     gate: 'branch',
@@ -220,5 +221,5 @@ function goDiscount(): DagWorkflowDefinition {
     'in:amount>over:amount', 'over>gate:condition', 'gate.true>cut', 'gate.false>keep', 'in:amount>cut:amount',
     'in:amount>keep:amount', 'cut:price>join:input1', 'keep>join:input2', 'cut.then>join', 'keep.then>join',
     'join>wait:price', 'join>out:price', 'wait:delay>out:delay',
-  ], { name: '折扣', kind: 'code', language: GO.name, atomFolder: '/shop' }), SHOP.atoms)
+  ], { name: '折扣', kind: 'code', language: GO.name, atomFolder: '/shop' }), { atoms: SHOP.atoms, workflows: new Map() })
 }

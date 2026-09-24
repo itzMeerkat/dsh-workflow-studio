@@ -6,8 +6,9 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { goAtom, goImportName, goSignature } from '../src/shared/go.ts'
 import {
-  ATOM_FIELD, CODE_ATOM_TYPE, GO, PSEUDOCODE, atomLibrary, atomTypes, isAtomFile, languageOf, typeName, withSignatures,
+  ATOM_FIELD, CODE_ATOM_TYPE, GO, PSEUDOCODE, atomLibrary, atomTypes, isAtomFile, languageOf, typeName,
 } from '../src/shared/language.ts'
+import { withCallees } from '../src/shared/callees.ts'
 import { WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { workflow } from './graph-fixtures.ts'
 
@@ -101,9 +102,9 @@ describe('Go 签名', () => {
     })
   })
 
-  it('原子目录：types.go 与生成的 workflow.go 不是原子，测试文件不是原子文件', () => {
+  it('原子目录：types.go 与生成的 *.workflow.go 不是原子，测试文件不是原子文件', () => {
     const syntax = GO.functions!.atoms!
-    assert.deepEqual(['a.go', 'a_test.go', 'types.go', 'workflow.go', 'notes.md'].map(file => isAtomFile(file, syntax)), [
+    assert.deepEqual(['a.go', 'a_test.go', 'types.go', 'checkout.workflow.go', 'notes.md'].map(file => isAtomFile(file, syntax)), [
       true, false, false, false, false,
     ])
     const library = atomLibrary([
@@ -134,12 +135,12 @@ describe('Go 签名', () => {
       gone: { ...node, config: { [ATOM_FIELD]: 'gone.go' } },
       out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'body', type: 'string' }, { name: 'err', type: 'error' }] },
     }, ['fetch:body>out:body', 'fetch:err>out:err'], { kind: 'code', language: GO.name })
-    const signed = withSignatures(definition, library.atoms)
+    const signed = withCallees(definition, { atoms: library.atoms, workflows: new Map() })
     assert.deepEqual(signed.nodes[0]?.inputs, [{ name: 'url', type: 'string' }, { name: 'retries', type: '*int', required: false }])
     assert.deepEqual(signed.nodes[0]?.outputs, [{ name: 'body', type: 'string' }, { name: 'err', type: 'error' }])
     assert.equal(signed.nodes[1]?.inputs, undefined)
 
-    const renamed = withSignatures(signed, read('func Fetch(url string) (text string, err error) { return "", nil }').atoms)
+    const renamed = withCallees(signed, { atoms: read('func Fetch(url string) (text string, err error) { return "", nil }').atoms, workflows: new Map() })
     assert.deepEqual(renamed.edges.map(edge => edge.id), ['e1'])
   })
 

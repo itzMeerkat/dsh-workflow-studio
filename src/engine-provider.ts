@@ -18,7 +18,9 @@ import type {
 } from './shared/types.ts'
 import { WorkflowId, RunId } from './shared/types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
-import { registerBuiltinNodes } from './flow-nodes.ts'
+import { execKindOf, registerBuiltinNodes } from './flow-nodes.ts'
+import { SUBWORKFLOW_TYPE, subworkflowOf } from './shared/subworkflow.ts'
+import { assertEmbeddings, expandSubworkflows } from './subworkflow.ts'
 import { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 import { messageOf } from './shared/errors.ts'
 import { resolveExecutors, validateWorkflow } from './validation.ts'
@@ -120,6 +122,7 @@ export class DagEngineProvider extends DagEngine {
         throw new Error(`工作流名称 "${snapshot.name}" 已被一个 ${existing.kind} 工作流使用`)
       }
       const id = existing !== undefined ? existing.id : this.allocateId(snapshot.name)
+      this.assertEmbeddable(id, snapshot)
       await this.workflows.put(id, snapshot)
       return id
     })
@@ -146,14 +149,40 @@ export class DagEngineProvider extends DagEngine {
       if (named !== undefined && named.id !== id) {
         throw new Error(`工作流名称 "${snapshot.name}" 已存在`)
       }
+      this.assertEmbeddable(id, snapshot)
       if (current.name === snapshot.name) {
         await this.workflows.put(id, snapshot)
         return id
+      }
+      // 子工作流节点按 ID 链接，而 ID 随名称改变，所以被嵌入的工作流改名会断开每个嵌入它的地方。
+      const embedders = [...this.workflows.entries()].map(([, other]) => other)
+        .filter(other => other.nodes.some(node => node.type === SUBWORKFLOW_TYPE && subworkflowOf(node.config) === id))
+      if (embedders.length > 0) {
+        throw new Error(`工作流 "${current.name}" 被 ${embedders.map(other => `"${other.name}"`).join('、')} 作为子工作流嵌入，不能改名`)
       }
       const renamed = this.allocateId(snapshot.name)
       await this.workflows.put(renamed, snapshot)
       await this.workflows.delete(id)
       return renamed
+    })
+  }
+
+  /**
+   * 检查一个待保存定义嵌入的工作流；`run` 工作流还按展开后的图校验，因此嵌入处读不到子工作流输出这类错误在保存时就被拒绝。
+   * @param id - 待保存定义的 ID。
+   * @param definition - 已通过 {@link validateWorkflow} 的定义。
+   * @throws 嵌入的工作流不存在、不能嵌入，或展开后的图不合法时。
+   */
+  private assertEmbeddable(id: WorkflowId, definition: DagWorkflowDefinition): void {
+    assertEmbeddings(id, definition, ref => this.workflows.get(ref))
+    if (definition.kind === 'run') resolveExecutors(this.registry, this.expand(definition))
+  }
+
+  /** 定义中的子工作流按当前保存的版本展开后的图。 */
+  private expand(definition: DagWorkflowDefinition): DagWorkflowDefinition {
+    return expandSubworkflows(definition, ref => this.workflows.get(ref), (type) => {
+      const executor = this.registry.get(type)
+      return executor !== undefined && execKindOf(executor) === 'join'
     })
   }
 
@@ -188,8 +217,8 @@ export class DagEngineProvider extends DagEngine {
     const authored = this.get(workflowId)
     if (authored === undefined) throw new Error(`工作流 ${workflowId} 未找到`)
     if (authored.kind !== 'run') throw new Error(`工作流 ${workflowId} 是 ${authored.kind} 工作流，只写成源码，不能运行`)
-    // 输入值写进边界节点的配置，因此运行快照自带它们，恢复时也不必重新提供。
-    const definition = withRunInputs(authored, inputs)
+    // 子工作流按启动时保存的版本展开，输入值写进边界节点的配置，因此运行快照自带它们，恢复时也不必重新提供。
+    const definition = withRunInputs(this.expand(authored), inputs)
     const executors = resolveExecutors(this.registry, definition)
     const runId = RunId(randomUUID())
     const now = Date.now()

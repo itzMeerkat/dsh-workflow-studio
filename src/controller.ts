@@ -59,7 +59,7 @@ export class WorkflowStudioController extends TypertRemoteService {
 
   /**
    * Parse, validate, and save one browser-authored definition. A code workflow with an atom folder is
-   * written into that folder as its language's workflow file; a workflow that cannot be written is not saved.
+   * written into that folder as `<id>` plus its language's output suffix; a workflow that cannot be written is not saved.
    * @param source - Complete workflow definition encoded as JSON.
    * @returns The saved workflow ID.
    */
@@ -67,7 +67,7 @@ export class WorkflowStudioController extends TypertRemoteService {
   async save(source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return await saveWithFile(definition, this.registry, () => this.engine.save(definition))
+      return await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.save(definition))
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
@@ -84,7 +84,8 @@ export class WorkflowStudioController extends TypertRemoteService {
   async update(workflowId: string, source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return await saveWithFile(definition, this.registry, () => this.engine.update(WorkflowId(workflowId), definition))
+      const id = WorkflowId(workflowId)
+      return await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.update(id, definition), id)
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

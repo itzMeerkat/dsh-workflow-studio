@@ -15,14 +15,16 @@ import {
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
-import type {
-  DagWorkflowDefinition, NodeTypeSummary, WorkflowKind, WorkflowStudioSnapshot,
+import { withCallees, type Callees } from '../shared/callees.ts'
+import { SUBWORKFLOW_TYPE, embedFault } from '../shared/subworkflow.ts'
+import {
+  WorkflowId, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowKind, type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, workflowInputPorts,
 } from '../shared/workflow-boundary.ts'
 import {
-  CODE_LANGUAGES, atomLibrary, languageOf, withSignatures, type AtomLibrary,
+  CODE_LANGUAGES, atomLibrary, languageOf, type AtomLibrary,
 } from '../shared/language.ts'
 import { atomFilesSchema } from '../shared/workflow-schema.ts'
 import { analyzeEditorGraph } from './analysis-model.ts'
@@ -35,6 +37,7 @@ import { NodeLibraryMenu, WorkflowPicker } from './Menus.tsx'
 import {
   appendAtomNode,
   appendEditorNode,
+  appendSubworkflowNode,
   formatEditorDefinition,
   nextWorkflowName,
   openFault,
@@ -151,12 +154,19 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     return () => { current = false }
   }, [definition.atomFolder, definition.language, atomsRead])
 
-  // Atom nodes take their ports from the folder, so a folder read again, or a workflow opened on it, may move them.
+  // The saved workflows of this panel's kind, which subworkflow nodes link to by ID.
+  const saved = useMemo(
+    () => new Map(snapshot.workflows.map(row => [row.id, parseEditorDefinition(row.definition)])),
+    [snapshot.workflows],
+  )
+  const callees = useMemo<Callees>(() => ({ atoms: library?.atoms ?? new Map(), workflows: saved }), [library, saved])
+
+  // Atom and subworkflow nodes take their ports from what they call, so a folder read again, a workflow saved
+  // again, or a workflow opened on them may move those ports.
   useEffect(() => {
-    if (library === undefined) return
-    const signed = withSignatures(definition, library.atoms)
+    const signed = withCallees(definition, callees)
     if (JSON.stringify(signed) !== JSON.stringify(definition)) replaceDefinition(signed)
-  }, [library, revision])
+  }, [callees, revision])
 
   /** Save the edited definition and return its workflow ID; failures show as the notice. */
   const persist = async (): Promise<string | undefined> => {
@@ -178,8 +188,10 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
       setPhase('ready')
       return
     }
-    // Saving a workflow with an atom folder also writes its function into that folder.
-    const written = definition.atomFolder === undefined ? undefined : atomSyntax?.output
+    // Saving a workflow with an atom folder also writes its function into that folder, in a file named after its ID.
+    const written = definition.atomFolder === undefined || atomSyntax === undefined
+      ? undefined
+      : `${workflowId}${atomSyntax.outputSuffix}`
     await load(workflowId)
     setNotice(written === undefined ? t('notice.saved') : `${t('notice.savedFile')} ${written}`)
   }
@@ -227,11 +239,15 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
 
   const busy = phase !== 'ready'
   const { workflows } = snapshot
+  const parentId = selectedId === undefined ? undefined : WorkflowId(selectedId)
+  const embeddable = workflows.filter(row =>
+    embedFault(definition, parentId, row.id, saved.get(row.id)!, id => saved.get(id), language.functions !== undefined) === undefined)
   const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
-  // A workflow has at most one boundary node per side, so the library stops offering a second.
-  const addableNodeTypes = snapshot.nodeTypes.filter(type =>
-    (type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
-    || !definition.nodes.some(node => node.type === type.type))
+  // A workflow has at most one boundary node per side, so the library stops offering a second; a subworkflow
+  // node is added from the menu's workflows, so the node types do not offer one linked to nothing.
+  const addableNodeTypes = snapshot.nodeTypes.filter(type => type.type !== SUBWORKFLOW_TYPE
+    && ((type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
+      || !definition.nodes.some(node => node.type === type.type)))
   const overlay = runs.record?.workflowId === selectedId ? runs.record : undefined
   const runRecords = overlay === undefined ? new Map() : runRecordsByNode(overlay)
   const runResult = overlay === undefined ? undefined : JSON.stringify(overlay.nodes, null, 2)
@@ -284,8 +300,10 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             <NodeLibraryMenu
               disabled={busy}
               nodeTypes={addableNodeTypes}
+              workflows={embeddable}
               t={t}
               onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType)) }}
+              onSelectWorkflow={(row) => { replaceDefinition(appendSubworkflowNode(definition, row.id, saved.get(row.id)!)) }}
             />
           )}
         </div>
@@ -420,7 +438,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
               nodeTypes={snapshot.nodeTypes}
               runRecords={runRecords}
               diagnostics={analysis?.byNode ?? new Map()}
-              atoms={library?.atoms ?? new Map()}
+              callees={callees}
+              workflows={embeddable}
               t={t}
               onChange={setDefinition}
               onError={setNotice}
@@ -436,7 +455,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             />
           )}
           {view === 'source' && (
-            <SourceView ir={analysis?.ir} language={language} atoms={library?.atoms ?? new Map()} t={t} />
+            <SourceView ir={analysis?.ir} language={language} callees={callees} t={t} />
           )}
           {view === 'canvas' && <DiagnosticsView diagnostics={analysis?.diagnostics} t={t} />}
           {notice !== undefined && <p className={css.notice} role="alert">{notice}</p>}
@@ -454,6 +473,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
           <WorkflowSettings
             definition={definition}
             library={library}
+            callees={callees}
             t={t}
             onChange={replaceDefinition}
             onClose={() => { setSettingsOpen(false) }}

@@ -10,6 +10,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createCodeNodes } from './code-nodes.ts'
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from './node.ts'
+import { SUBWORKFLOW_TYPE } from './shared/subworkflow.ts'
+import { SUBWORKFLOW_DEFAULTS, SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE } from './subworkflow.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_INPUT_VALUES, WORKFLOW_OUTPUT_TYPE,
 } from './shared/workflow-boundary.ts'
@@ -123,6 +125,60 @@ export class WorkflowOutputNode implements WorkflowNodeExecutor {
   }
 }
 
+/**
+ * 嵌入另一个同种类工作流的节点；它的端口是那个工作流的输入和输出，写在节点实例上。
+ *
+ * `run` 工作流在运行开始时把它展开成那个工作流的节点，`code` 工作流把它写成一次函数调用，所以它自己从不执行。
+ */
+export class SubworkflowNode implements WorkflowNodeExecutor {
+  readonly type = SUBWORKFLOW_TYPE
+  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
+  readonly label = '子工作流'
+  readonly description = '调用另一个同种类的工作流；输入输出端口就是它声明的输入和输出'
+  readonly inputs: readonly PortDefinition[] = []
+  readonly outputs: readonly PortDefinition[] = []
+
+  execute(): NodeExecutionResult {
+    return { status: 'failed', error: '子工作流节点在运行开始时已展开，不会被执行' }
+  }
+}
+
+/**
+ * 子工作流展开后的入口：把嵌入处送来的值，以及未送来的输入的默认值，交给子工作流的节点。
+ *
+ * 只由展开放置，任何工作流都不能直接使用，所以它不属于任何种类；端口写在节点实例上。
+ */
+export class SubworkflowEntryNode implements WorkflowNodeExecutor {
+  readonly type = SUBWORKFLOW_ENTRY_TYPE
+  readonly kinds: readonly WorkflowKind[] = []
+  readonly label = '子工作流入口'
+  readonly description = '把嵌入处送来的值交给子工作流'
+  readonly inputs: readonly PortDefinition[] = []
+  readonly outputs: readonly PortDefinition[] = []
+
+  execute({ config, inputs }: NodeExecutionContext): NodeExecutionResult {
+    const defaults = config[SUBWORKFLOW_DEFAULTS]
+    if (typeof defaults !== 'object' || defaults === null || Array.isArray(defaults)) {
+      return { status: 'failed', error: '子工作流入口缺少输入默认值' }
+    }
+    return { status: 'completed', outputs: { ...defaults as Record<string, unknown>, ...inputs } }
+  }
+}
+
+/** 子工作流展开后的出口：它完成即子工作流完成。只由展开放置，不属于任何种类。 */
+export class SubworkflowExitNode implements WorkflowNodeExecutor {
+  readonly type = SUBWORKFLOW_EXIT_TYPE
+  readonly kinds: readonly WorkflowKind[] = []
+  readonly label = '子工作流出口'
+  readonly description = '子工作流在此完成'
+  readonly inputs: readonly PortDefinition[] = []
+  readonly outputs: readonly PortDefinition[] = []
+
+  execute(): NodeExecutionResult {
+    return { status: 'completed', outputs: {} }
+  }
+}
+
 const branchNode = new BranchNode()
 const mergeNode = new MergeNode()
 
@@ -139,12 +195,13 @@ export function execKindOf(executor: WorkflowNodeExecutor): NodeExecKind {
 }
 
 /**
- * 注册引擎自有的节点：流程控制节点、边界节点和 `code` 工作流的代码节点。
+ * 注册引擎自有的节点：流程控制节点、边界节点、子工作流节点及其展开所用的节点，以及 `code` 工作流的代码节点。
  * @param ctx - 已加载 workflowNodeRegistry 服务的 Cordis context。
  */
 export function registerBuiltinNodes(ctx: Context): void {
   const nodes: readonly WorkflowNodeExecutor[] = [
-    branchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(), ...createCodeNodes(),
+    branchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(),
+    new SubworkflowNode(), new SubworkflowEntryNode(), new SubworkflowExitNode(), ...createCodeNodes(),
   ]
   for (const node of nodes) {
     ctx.effect(() => ctx.workflowNodeRegistry.register(node, 'dsh-workflow-studio'), `builtin-node:${node.type}`)

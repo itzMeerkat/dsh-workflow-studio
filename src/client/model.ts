@@ -2,8 +2,9 @@
 
 import { execSourcePin, isExecEdge, topologicalLevels } from '../shared/graph.ts'
 import { ATOM_FIELD, CODE_ATOM_TYPE, CODE_LANGUAGES, signaturePorts, type Atom } from '../shared/language.ts'
+import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE, workflowSignature } from '../shared/subworkflow.ts'
 import {
-  NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowKind,
+  NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowId, type WorkflowKind,
   type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import type { WorkflowStudioKey } from './locale.ts'
@@ -142,6 +143,36 @@ export function appendAtomNode(definition: DagWorkflowDefinition, atom: Atom): D
         position: nextEditorNodePosition(definition.nodes),
         inputs: signaturePorts(atom.signature.parameters),
         outputs: signaturePorts(atom.signature.results),
+      },
+    ],
+  }
+}
+
+/**
+ * Append a node that embeds another saved workflow, named after it.
+ * @param definition - Current editor definition.
+ * @param id - The embedded workflow's ID, which the node links to.
+ * @param child - The embedded workflow.
+ * @returns A new definition containing the positioned node, its ports read from the embedded workflow's inputs and outputs.
+ */
+export function appendSubworkflowNode(
+  definition: DagWorkflowDefinition,
+  id: WorkflowId,
+  child: DagWorkflowDefinition,
+): DagWorkflowDefinition {
+  const signature = workflowSignature(child)
+  return {
+    ...definition,
+    nodes: [
+      ...definition.nodes,
+      {
+        id: NodeId(nextEditorNodeId(SUBWORKFLOW_TYPE, definition.nodes)),
+        type: SUBWORKFLOW_TYPE,
+        label: child.name,
+        config: { [SUBWORKFLOW_FIELD]: id },
+        position: nextEditorNodePosition(definition.nodes),
+        inputs: signaturePorts(signature.parameters),
+        outputs: signaturePorts(signature.results),
       },
     ],
   }

@@ -10,6 +10,7 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useRef, useState } from 'react'
+import { SUBWORKFLOW_TYPE } from '../shared/subworkflow.ts'
 import type { NodeTypeSummary } from '../shared/types.ts'
 import type { Translate } from './locale.ts'
 import { filterNodeTypes, filterWorkflows, type WorkflowRow } from './model.ts'
@@ -82,20 +83,29 @@ export function WorkflowPicker({
   )
 }
 
-/** Pick a registered node type to add to the canvas; a workflow's atoms have a panel of their own. */
+/**
+ * Pick a registered node type, or a saved workflow of the same kind to embed, to add to the canvas; a workflow's
+ * atoms have a panel of their own.
+ * @param workflows - The saved workflows this one can embed.
+ */
 export function NodeLibraryMenu({
   disabled,
   nodeTypes,
+  workflows,
   t,
   onSelect,
+  onSelectWorkflow,
 }: {
   readonly disabled: boolean
   readonly nodeTypes: readonly NodeTypeSummary[]
+  readonly workflows: readonly WorkflowRow[]
   readonly t: Translate
   readonly onSelect: (nodeType: NodeTypeSummary) => void
+  readonly onSelectWorkflow: (workflow: WorkflowRow) => void
 }) {
   const menu = useMenu()
   const matches = filterNodeTypes(nodeTypes, menu.query)
+  const workflowMatches = filterWorkflows(workflows, menu.query)
 
   return (
     <div className={css.nodePicker} ref={menu.rootRef}>
@@ -115,23 +125,36 @@ export function NodeLibraryMenu({
         <div className={css.nodeMenu} role="dialog" aria-label={t('nodes.title')}>
           <MenuSearch menu={menu} label={t('nodes.search')} />
           <div className={css.nodeMenuList}>
-            {matches.length === 0
-              ? <p className={css.menuEmpty}>{t('nodes.empty')}</p>
-              : matches.map(node => (
-                  <button
-                    type="button"
-                    className={css.nodeType}
-                    key={node.type}
-                    onClick={() => { onSelect(node); menu.close() }}
-                  >
-                    <span className={css.nodeTypeTitle}>
-                      <strong>{node.label}</strong>
-                      <code>{node.type}</code>
-                    </span>
-                    <span>{node.description}</span>
-                    <small>{t('nodes.source')}: {node.sourcePlugin}</small>
-                  </button>
-                ))}
+            {matches.length === 0 && workflowMatches.length === 0 && <p className={css.menuEmpty}>{t('nodes.empty')}</p>}
+            {matches.map(node => (
+              <button
+                type="button"
+                className={css.nodeType}
+                key={node.type}
+                onClick={() => { onSelect(node); menu.close() }}
+              >
+                <span className={css.nodeTypeTitle}>
+                  <strong>{node.label}</strong>
+                  <code>{node.type}</code>
+                </span>
+                <span>{node.description}</span>
+                <small>{t('nodes.source')}: {node.sourcePlugin}</small>
+              </button>
+            ))}
+            {workflowMatches.length > 0 && <p className={css.menuGroup}>{t('nodes.workflows')}</p>}
+            {workflowMatches.map(workflow => (
+              <button
+                type="button"
+                className={css.nodeType}
+                key={workflow.id}
+                onClick={() => { onSelectWorkflow(workflow); menu.close() }}
+              >
+                <span className={css.nodeTypeTitle}>
+                  <strong>{workflow.name}</strong>
+                  <code>{SUBWORKFLOW_TYPE}</code>
+                </span>
+              </button>
+            ))}
           </div>
         </div>
       )}

@@ -30,6 +30,7 @@ function setup() {
         return WorkflowId('workflow-id')
       },
       findByName: (name: string) => name === CODE_FLOW.name ? { id: WorkflowId('code-flow') } : undefined,
+      list: () => [{ id: WorkflowId('code-flow') }],
       get: () => CODE_FLOW,
     },
     workflowNodeRegistry: {
