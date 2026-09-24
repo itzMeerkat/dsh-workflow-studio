@@ -137,6 +137,8 @@ export interface DagNodeDefinition {
   recovery?: NodeRecoveryPolicy
   /** 可视化编辑器中的节点坐标。 */
   position?: { x: number; y: number }
+  /** 可视化编辑器中卡片的宽度（像素）；省略时为默认宽度。 */
+  width?: number
   /** 节点声明的输出端口；省略时使用执行器声明。 */
   outputs?: PortDefinition[]
   /** 节点声明的输入端口；省略时使用执行器声明。 */

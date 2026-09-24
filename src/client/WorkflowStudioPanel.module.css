@@ -148,6 +148,7 @@
 
 .menuSearch input {
   min-width: 0;
+  flex: 1;
   border: 0;
   outline: 0;
   background: transparent;
@@ -631,6 +632,10 @@
   grid-template-columns: minmax(0, 1fr) 66px minmax(0, 72px) 20px;
 }
 
+.boundaryCard .ports {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .boundaryCard p {
   margin: 9px 0 0;
   color: var(--dsw-alias-label-tertiary);
@@ -851,7 +856,7 @@
 
 .ports {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
   margin-top: 10px;
 }
@@ -880,13 +885,28 @@
   padding-right: 3px;
 }
 
+.port span,
 .port small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.port span {
+  flex: 0 1 auto;
+}
+
+/* A name tells ports apart better than a type does, so the type gives up its width first. */
+.port small {
+  flex: 0 3 auto;
   color: var(--dsw-alias-label-secondary);
   font-size: 10px;
 }
 
 .requiredPort {
-  margin-left: 2px;
+  flex: none;
+  margin-left: -2px;
   color: #b83232;
   font-weight: 600;
 }
@@ -1001,11 +1021,19 @@
 
 .nodeControl {
   display: grid;
-  grid-template-columns: minmax(56px, auto) minmax(0, 1fr);
+  grid-template-columns: fit-content(45%) minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   color: var(--dsw-alias-label-secondary);
   font-size: 11px;
+}
+
+.nodeControl > span,
+.nodeOutput > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nodeControl input[type='number'] {
@@ -1755,10 +1783,12 @@
 
 .nodeControlBlock {
   align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .nodeControlBlock textarea {
-  min-width: 220px;
+  width: 100%;
+  box-sizing: border-box;
   resize: vertical;
   font-family: var(--dsw-font-mono);
   font-size: 11px;
@@ -1848,7 +1878,16 @@
   font-size: 12px;
 }
 
+.atomList .nodeTypeTitle > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The function name identifies the atom, so the file name gives up its width first. */
 .atomList .nodeTypeTitle code {
+  flex: 0 3 auto;
   color: var(--dsw-alias-label-tertiary);
   font-family: var(--dsw-font-mono);
   font-size: 11px;
@@ -1869,6 +1908,10 @@
   font-weight: 500;
 }
 
+.atomProblems li {
+  overflow-wrap: anywhere;
+}
+
 .atomProblems ul {
   display: flex;
   margin: 0;
@@ -1882,4 +1925,30 @@
 
 .atomProblems code {
   font-family: var(--dsw-font-mono);
+}
+
+/* ---- Card width ---- */
+
+/* On the editable canvas the node carries the width, which its author can drag. */
+.canvasNodeResizable {
+  width: 100%;
+}
+
+.cardResizer {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--dsw-alias-brand-primary);
+  cursor: ew-resize;
+  opacity: 0;
+  transform: translateX(50%);
+}
+
+.cardResizer:hover,
+.canvas :global(.react-flow__node.selected) .cardResizer {
+  opacity: 0.35;
 }

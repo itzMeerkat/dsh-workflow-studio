@@ -31,7 +31,7 @@ import {
   workflowRunDefaults,
   workflowRunInputs,
 } from '../src/client/workflow-ports.ts'
-import { flowNodes, toDefinition } from '../src/client/graph-model.ts'
+import { CARD_WIDTH, flowNodes, toDefinition } from '../src/client/graph-model.ts'
 import { nodeType, workflow } from './graph-fixtures.ts'
 import {
   boundaryPorts, WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, withBoundaryPorts,
@@ -384,6 +384,18 @@ describe('workflow boundary nodes', () => {
     assert.deepEqual(saved.nodes.map(node => node.id), ['in', 'add', 'out'])
     assert.deepEqual(saved.nodes[0]?.position, { x: -900, y: 40 })
     assert.deepEqual(workflowInputPorts(saved).map(port => port.name), ['left'])
+  })
+
+  it('卡片宽度随节点往返，默认宽度不写进定义', () => {
+    const nodes = flowNodes(definition, new Map(), new Map(), new Map())
+    assert.deepEqual(nodes.map(node => node.width), [CARD_WIDTH, CARD_WIDTH, CARD_WIDTH])
+
+    const resized = nodes.map(node => node.id === 'add' ? { ...node, width: 360 } : node)
+    const saved = parseEditorDefinition(formatEditorDefinition(toDefinition(definition, resized, [])))
+    assert.deepEqual(saved.nodes.map(node => node.width), [undefined, 360, undefined])
+
+    const narrowed = flowNodes(saved, new Map(), new Map(), new Map()).map(node => ({ ...node, width: CARD_WIDTH }))
+    assert.equal(toDefinition(saved, narrowed, []).nodes[1]?.width, undefined)
   })
 })
 

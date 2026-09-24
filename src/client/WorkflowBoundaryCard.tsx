@@ -7,7 +7,7 @@ import { typeName } from '../shared/language.ts'
 import { boundaryPorts, boundarySide } from '../shared/workflow-boundary.ts'
 import { handleId, type WorkflowFlowNode } from './graph-model.ts'
 import type { WorkflowStudioKey } from './locale.ts'
-import { CardRunValues, NodeCardContext, type NodeCardGraph } from './NodeCard.tsx'
+import { CardResizer, CardRunValues, NodeCardContext, cardClass, type NodeCardGraph } from './NodeCard.tsx'
 import { formatWorkflowPortDefault, workflowResultValues, type WorkflowPortSide } from './workflow-ports.ts'
 import css from './WorkflowStudioPanel.module.css'
 
@@ -33,10 +33,8 @@ export function WorkflowBoundaryCard({ data, selected, graph = 'data' }: NodePro
   const isInput = side === 'inputs'
   const returned = isInput ? [] : workflowResultValues(ports, data.runRecord)
   return (
-    <article
-      className={`${css.canvasNode} ${css.boundaryCard} ${selected ? css.canvasNodeSelected : ''}`}
-      data-side={side}
-    >
+    <article className={`${cardClass(graph, selected)} ${css.boundaryCard}`} data-side={side}>
+      {graph === 'data' && <CardResizer />}
       {graph === 'execution' && (
         <Handle id="dependency" type="target" position={Position.Left} isConnectable={false} />
       )}
@@ -53,18 +51,22 @@ export function WorkflowBoundaryCard({ data, selected, graph = 'data' }: NodePro
       </div>
       <div className={css.ports}>
         <div>
-          {ports.map(port => (
-            <div key={port.name} className={`${css.port} ${isInput ? css.portOutput : css.portInput}`}>
-              <Handle
-                type={isInput ? 'source' : 'target'}
-                position={isInput ? Position.Right : Position.Left}
-                id={handleId({ kind: 'data', name: port.name })}
-                isConnectable={graph === 'data'}
-              />
-              <span>{port.name}</span>
-              <small>{typeName(language, port.type)}{port.default === undefined ? '' : ` = ${formatWorkflowPortDefault(port.default, port.type)}`}</small>
-            </div>
-          ))}
+          {ports.map((port) => {
+            const type = typeName(language, port.type)
+            const described = port.default === undefined ? type : `${type} = ${formatWorkflowPortDefault(port.default, port.type)}`
+            return (
+              <div key={port.name} className={`${css.port} ${isInput ? css.portOutput : css.portInput}`} title={`${port.name} ${described}`}>
+                <Handle
+                  type={isInput ? 'source' : 'target'}
+                  position={isInput ? Position.Right : Position.Left}
+                  id={handleId({ kind: 'data', name: port.name })}
+                  isConnectable={graph === 'data'}
+                />
+                <span>{port.name}</span>
+                <small>{described}</small>
+              </div>
+            )
+          })}
         </div>
       </div>
       {ports.length === 0 && <p>{t('workflowPorts.empty')}</p>}

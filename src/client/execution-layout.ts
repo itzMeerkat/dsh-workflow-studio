@@ -8,12 +8,11 @@
 import { execOutputPins } from '../shared/graph.ts'
 import type { NodeId } from '../shared/types.ts'
 import { boundaryPorts, WORKFLOW_OUTPUT_TYPE } from '../shared/workflow-boundary.ts'
-import { nodeInputPorts, nodeOutputPorts, type WorkflowNodeData } from './graph-model.ts'
+import { CARD_WIDTH, nodeInputPorts, nodeOutputPorts, type WorkflowNodeData } from './graph-model.ts'
 import { workflowResultValues } from './workflow-ports.ts'
 
-/** Stage column geometry in pixels; the cards are the width the stylesheet gives them. */
+/** Stage column geometry in pixels; the cards keep their default width, {@link CARD_WIDTH}. */
 const LAYOUT = {
-  cardWidth: 220,
   stagePadding: 16,
   stageHeader: 30,
   stageGap: 44,
@@ -92,7 +91,7 @@ export function executionLayout(
 ): ExecutionLayout {
   const bands: StageBandLayout[] = []
   const cards: StageCardLayout[] = []
-  const width = LAYOUT.cardWidth + LAYOUT.stagePadding * 2
+  const width = CARD_WIDTH + LAYOUT.stagePadding * 2
   stages.forEach((stage, index) => {
     const heights = stage.map(card => estimateNodeCardHeight(card))
     const id = `stage:${index + 1}`

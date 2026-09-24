@@ -112,8 +112,8 @@ export function AtomsPanel({ definition, language, syntax, library, remote, t, o
                     <li key={atom.file}>
                       <button type="button" title={t('atoms.add')} onClick={() => { onAdd(atom) }}>
                         <span className={css.nodeTypeTitle}>
-                          <strong>{atom.signature.name}</strong>
-                          <code>{atom.file}</code>
+                          <strong title={atom.signature.name}>{atom.signature.name}</strong>
+                          <code title={atom.file}>{atom.file}</code>
                         </span>
                         <code className={css.atomSignature}>
                           ({signatureText(atom.signature.parameters, language)})

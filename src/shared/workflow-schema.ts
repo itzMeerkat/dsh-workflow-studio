@@ -80,6 +80,7 @@ export const workflowNodeSchema = z.object({
   config: z.record(z.string(), z.json()).default({}),
   recovery: z.enum(['rerun', 'hold']).optional(),
   position: editorPosition.optional(),
+  width: z.number().positive().optional(),
   outputs: z.array(workflowPortSchema).optional(),
   inputs: z.array(workflowPortSchema).optional(),
 }) as unknown as z.ZodType<DagNodeDefinition>

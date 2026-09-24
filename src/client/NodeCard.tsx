@@ -1,6 +1,6 @@
 /** The node card both graphs render: identity, ports, inline controls, and displayed run outputs. */
 
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizeControl, Position, ResizeControlVariant, type NodeProps } from '@xyflow/react'
 import { createContext, useContext } from 'react'
 import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
@@ -64,13 +64,15 @@ export function NodeCard({
   const controls = data.catalog?.controls ?? []
   const runOutputs = displayedOutputs(data)
   const connectable = graph === 'data'
+  const title = data.definition.label ?? data.catalog?.label ?? data.definition.type
   return (
-    <article className={`${css.canvasNode} ${selected ? css.canvasNodeSelected : ''}`}>
+    <article className={cardClass(graph, selected)}>
+      {graph === 'data' && <CardResizer />}
       {graph === 'execution' && (
         <Handle id="dependency" type="target" position={Position.Left} isConnectable={false} />
       )}
       <div className={css.nodeHeader}>
-        <strong>{data.definition.label ?? data.catalog?.label ?? data.definition.type}</strong>
+        <strong title={title}>{title}</strong>
         {data.runRecord !== undefined && (
           <span className={css.nodeStatus} data-status={data.runRecord.status}>
             {data.runRecord.status}
@@ -79,8 +81,8 @@ export function NodeCard({
         {data.diagnostics !== undefined && <DiagnosticBadge diagnostics={data.diagnostics} t={t} />}
       </div>
       <div className={css.nodeMeta}>
-        <code>{data.definition.type}</code>
-        {data.catalog !== undefined && <span>{data.catalog.sourcePlugin}</span>}
+        <code title={data.definition.type}>{data.definition.type}</code>
+        {data.catalog !== undefined && <span title={data.catalog.sourcePlugin}>{data.catalog.sourcePlugin}</span>}
       </div>
       <div className={css.execPins}>
         <ExecPin pin={EXEC_RUN_PIN} side="input" connectable={connectable} />
@@ -124,6 +126,35 @@ export function NodeCard({
   )
 }
 
+/**
+ * The class of a card's frame. On the editable canvas the card fills the width its node is given, which its
+ * author can change; the execution-order view lays cards out at the stylesheet's width.
+ * @param graph - Which graph the card is drawn in.
+ * @param selected - Whether the canvas has the node selected.
+ */
+export function cardClass(graph: NodeCardGraph, selected: boolean): string {
+  return [css.canvasNode, graph === 'data' && css.canvasNodeResizable, selected && css.canvasNodeSelected]
+    .filter(Boolean).join(' ')
+}
+
+/** Narrowest and widest a card can be dragged, in pixels. */
+const CARD_WIDTH_RANGE = { min: 160, max: 640 } as const
+
+/** The grip on a card's right edge that sets its width; the height keeps following the content. */
+export function CardResizer() {
+  return (
+    <NodeResizeControl
+      // The stylesheet defines the class; the module typing only cannot promise it.
+      className={css.cardResizer!}
+      variant={ResizeControlVariant.Line}
+      position="right"
+      resizeDirection="horizontal"
+      minWidth={CARD_WIDTH_RANGE.min}
+      maxWidth={CARD_WIDTH_RANGE.max}
+    />
+  )
+}
+
 /** One value a run produced, as a card shows it. */
 export interface CardRunValue {
   readonly name: string
@@ -151,7 +182,7 @@ export function CardRunValues({ title, values }: {
       <span className={css.nodeSection}>{title}</span>
       {values.map(({ name, value, display }) => (
         <div key={name} className={css.nodeOutput}>
-          <span>{name}</span>
+          <span title={name}>{name}</span>
           <output>{formatOutput(value, display ?? (typeof value === 'string' ? 'value' : 'json'))}</output>
         </div>
       ))}
@@ -204,22 +235,20 @@ function PortRow({ port, language, side, connectable }: {
   readonly connectable: boolean
 }) {
   const isInput = side === 'input'
+  const type = typeName(language, port.type)
+  // The row cuts a long name or type short, so its tooltip carries both in full.
+  const title = [`${port.name} ${type}`, ...port.description === undefined ? [] : [port.description]].join('\n')
   return (
-    <div
-      className={`${css.port} ${isInput ? css.portInput : css.portOutput}`}
-      title={port.description}
-    >
+    <div className={`${css.port} ${isInput ? css.portInput : css.portOutput}`} title={title}>
       <Handle
         type={isInput ? 'target' : 'source'}
         position={isInput ? Position.Left : Position.Right}
         id={handleId({ kind: 'data', name: port.name })}
         isConnectable={connectable}
       />
-      <span>
-        {port.name}
-        {isInput && port.required !== false && <b className={css.requiredPort}>*</b>}
-      </span>
-      <small>{typeName(language, port.type)}</small>
+      <span>{port.name}</span>
+      {isInput && port.required !== false && <b className={css.requiredPort}>*</b>}
+      <small>{type}</small>
     </div>
   )
 }

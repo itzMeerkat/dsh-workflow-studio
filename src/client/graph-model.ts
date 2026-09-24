@@ -41,6 +41,12 @@ export type WorkflowNodeData = {
  */
 export type WorkflowFlowNode = Node<WorkflowNodeData, 'workflow' | 'boundary'>
 
+/**
+ * Width of a card on the editable canvas, in pixels, before its author resizes it. The execution-order
+ * view does not resize cards and takes this width from the stylesheet.
+ */
+export const CARD_WIDTH = 220
+
 /** Locale key of a rejected connection. */
 export type ConnectionError =
   | 'notice.connectPorts'
@@ -102,6 +108,7 @@ export function flowNodes(
         x: 80 + (index % 4) * 240,
         y: 80 + Math.floor(index / 4) * 180,
       },
+      width: node.width ?? CARD_WIDTH,
       data: {
         definition: node,
         ...(nodeType === undefined ? {} : { catalog: nodeType }),
@@ -145,10 +152,15 @@ export function toDefinition(
 ): DagWorkflowDefinition {
   return {
     ...previous,
-    nodes: nodes.map(node => ({
-      ...node.data.definition,
-      position: { x: node.position.x, y: node.position.y },
-    })),
+    nodes: nodes.map((node) => {
+      const { width: _previous, ...definition } = node.data.definition
+      // A card at the default width records none, so a saved workflow carries only the widths an author chose.
+      return {
+        ...definition,
+        position: { x: node.position.x, y: node.position.y },
+        ...(node.width === undefined || node.width === CARD_WIDTH ? {} : { width: node.width }),
+      }
+    }),
     edges: edges.map(edgeDefinition),
   }
 }
