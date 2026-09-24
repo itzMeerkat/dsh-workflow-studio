@@ -448,3 +448,9 @@ export interface WorkflowStudioSnapshot {
   }>
   readonly nodeTypes: readonly NodeTypeSummary[]
 }
+
+/** 一次保存的结果：工作流 ID，以及它有原子目录却写不出源码时的原因。 */
+export interface SavedWorkflow {
+  readonly workflowId: WorkflowId
+  readonly sourceError?: string
+}

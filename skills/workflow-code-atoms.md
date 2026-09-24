@@ -135,7 +135,7 @@ The file imports only the packages its own function names (here none: `math` sta
 1. Run `go vet` (or `go build`) in the folder. It compiles the atoms and the `*.workflow.go` files together, so a clash or a type mismatch between wired ports shows up here.
 2. Compare the function with the original: the same calls in the same order under the same conditions, and the same values returned. Fix the graph or an atom, not the generated file, and save again under the same name to rewrite it. `describe_workflow` returns the same source without writing it.
 
-Saving refuses, naming the node, when:
+The workflow is saved anyway, but its file is not written (the save reports why, naming the node) when:
 
 - a `code-atom` names a file that is not in the atom folder, or is not an atom (`missing-atom`);
 - a non-pointer parameter has no incoming edge;

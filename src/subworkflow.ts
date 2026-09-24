@@ -1,14 +1,14 @@
 /**
- * Host 侧的子工作流：保存时检查嵌入关系，运行开始时把子工作流节点展开成它嵌入的工作流的节点。
+ * Host 侧的子工作流：运行开始时把子工作流节点展开成它嵌入的工作流的节点。
  *
  * 展开后的图只含普通节点，调度、跳过传播、暂停、恢复和运行记录都不知道子工作流的存在。
  * @module dsh-workflow-studio
  */
 
 import { EXEC_THEN_PIN, execSourcePin, isDataEdge, isExecEdge } from './shared/graph.ts'
-import { languageOf, signaturePorts } from './shared/language.ts'
+import { signaturePorts } from './shared/language.ts'
 import {
-  SUBWORKFLOW_TYPE, embedFault, subworkflowOf, workflowSignature, type EmbedFault, type WorkflowLookup,
+  SUBWORKFLOW_TYPE, subworkflowOf, workflowSignature, type WorkflowLookup,
 } from './shared/subworkflow.ts'
 import {
   EdgeId, NodeId, type DagEdgeDefinition, type DagExecEdge, type DagNodeDefinition, type DagWorkflowDefinition,
@@ -26,32 +26,6 @@ export const SUBWORKFLOW_EXIT_TYPE = 'subworkflow-exit'
 
 /** 入口节点存放子工作流输入默认值的配置字段。 */
 export const SUBWORKFLOW_DEFAULTS = 'defaults'
-
-const FAULT_MESSAGE: Readonly<Record<EmbedFault, string>> = {
-  'other-kind': '种类不同',
-  'no-calls': '所在语言写不出函数调用',
-  'other-package': '不在同一语言和原子目录中，生成的函数无法互相调用',
-  'cycle': '会形成嵌入环',
-}
-
-/**
- * 检查一个待保存工作流嵌入的每个工作流。
- * @param id - 待保存工作流的 ID。
- * @param definition - 待保存的定义。
- * @param lookup - 读取已保存的工作流。
- * @throws 嵌入的工作流不存在，或不能嵌入时，指出节点和原因。
- */
-export function assertEmbeddings(id: WorkflowId, definition: DagWorkflowDefinition, lookup: WorkflowLookup): void {
-  const callable = languageOf(definition).functions !== undefined
-  for (const node of definition.nodes) {
-    if (node.type !== SUBWORKFLOW_TYPE) continue
-    const ref = subworkflowOf(node.config)
-    const child = lookup(ref)
-    if (child === undefined) throw new Error(`子工作流节点 ${node.id} 嵌入的工作流 ${ref} 不存在`)
-    const fault = embedFault(definition, id, ref, child, lookup, callable)
-    if (fault !== undefined) throw new Error(`子工作流节点 ${node.id} 不能嵌入工作流 "${child.name}"：${FAULT_MESSAGE[fault]}`)
-  }
-}
 
 /**
  * 把一个 `run` 工作流的子工作流节点展开成它们嵌入的工作流的节点，嵌套的子工作流一并展开。

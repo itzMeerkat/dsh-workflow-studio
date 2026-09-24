@@ -20,7 +20,7 @@ import { WorkflowId, RunId } from './shared/types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import { execKindOf, registerBuiltinNodes } from './flow-nodes.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf } from './shared/subworkflow.ts'
-import { assertEmbeddings, expandSubworkflows } from './subworkflow.ts'
+import { expandSubworkflows } from './subworkflow.ts'
 import { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 import { messageOf } from './shared/errors.ts'
 import { resolveExecutors, validateWorkflow } from './validation.ts'
@@ -122,7 +122,6 @@ export class DagEngineProvider extends DagEngine {
         throw new Error(`工作流名称 "${snapshot.name}" 已被一个 ${existing.kind} 工作流使用`)
       }
       const id = existing !== undefined ? existing.id : this.allocateId(snapshot.name)
-      this.assertEmbeddable(id, snapshot)
       await this.workflows.put(id, snapshot)
       return id
     })
@@ -149,7 +148,6 @@ export class DagEngineProvider extends DagEngine {
       if (named !== undefined && named.id !== id) {
         throw new Error(`工作流名称 "${snapshot.name}" 已存在`)
       }
-      this.assertEmbeddable(id, snapshot)
       if (current.name === snapshot.name) {
         await this.workflows.put(id, snapshot)
         return id
@@ -165,17 +163,6 @@ export class DagEngineProvider extends DagEngine {
       await this.workflows.delete(id)
       return renamed
     })
-  }
-
-  /**
-   * 检查一个待保存定义嵌入的工作流；`run` 工作流还按展开后的图校验，因此嵌入处读不到子工作流输出这类错误在保存时就被拒绝。
-   * @param id - 待保存定义的 ID。
-   * @param definition - 已通过 {@link validateWorkflow} 的定义。
-   * @throws 嵌入的工作流不存在、不能嵌入，或展开后的图不合法时。
-   */
-  private assertEmbeddable(id: WorkflowId, definition: DagWorkflowDefinition): void {
-    assertEmbeddings(id, definition, ref => this.workflows.get(ref))
-    if (definition.kind === 'run') resolveExecutors(this.registry, this.expand(definition))
   }
 
   /** 定义中的子工作流按当前保存的版本展开后的图。 */

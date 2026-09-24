@@ -59,15 +59,16 @@ export class WorkflowStudioController extends TypertRemoteService {
 
   /**
    * Parse, validate, and save one browser-authored definition. A code workflow with an atom folder is
-   * written into that folder as `<id>` plus its language's output suffix; a workflow that cannot be written is not saved.
+   * written into that folder as `<id>` plus its language's output suffix; a workflow whose source cannot be written is
+   * still saved, and its file is removed.
    * @param source - Complete workflow definition encoded as JSON.
-   * @returns The saved workflow ID.
+   * @returns JSON `{ workflowId, sourceError? }`: the saved workflow ID, and why its source could not be written.
    */
   @Remote
   async save(source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.save(definition))
+      return JSON.stringify(await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.save(definition)))
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
@@ -78,14 +79,14 @@ export class WorkflowStudioController extends TypertRemoteService {
    * its atom folder as {@link save} does.
    * @param workflowId - Existing workflow ID returned by {@link save}.
    * @param source - Complete replacement definition encoded as JSON.
-   * @returns The workflow ID after the save; renaming a workflow returns a new ID.
+   * @returns JSON `{ workflowId, sourceError? }` as {@link save} returns; renaming a workflow returns a new ID.
    */
   @Remote
   async update(workflowId: string, source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
       const id = WorkflowId(workflowId)
-      return await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.update(id, definition), id)
+      return JSON.stringify(await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.update(id, definition), id))
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

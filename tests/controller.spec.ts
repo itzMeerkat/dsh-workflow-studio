@@ -28,6 +28,9 @@ describe('WorkflowStudioController', () => {
     return new WorkflowStudioController(ctx)
   }
 
+  /** 保存结果中的工作流 ID。 */
+  const idOf = (saved: string): string => (JSON.parse(saved) as { workflowId: string }).workflowId
+
   /** 快照中第一个工作流保存下来的定义。 */
   function savedDefinition(controller: WorkflowStudioController): { nodes: Record<string, unknown>[] } {
     const snapshot = JSON.parse(controller.snapshot('run')) as { workflows: { definition: string }[] }
@@ -36,11 +39,11 @@ describe('WorkflowStudioController', () => {
 
   it('保存定义、列出节点并返回完整运行结果', async () => {
     const controller = await setup()
-    const workflowId = await controller.save(JSON.stringify(workflow({
+    const workflowId = idOf(await controller.save(JSON.stringify(workflow({
       left: { type: 'value', config: { value: 10 }, position: { x: 24, y: 48 } },
       right: { type: 'value', config: { value: 20 } },
       add: { type: 'sum', config: { offset: 0 } },
-    }, ['left>add:left', 'right>add:right'], { name: 'sum' })))
+    }, ['left>add:left', 'right>add:right'], { name: 'sum' }))))
 
     const snapshot = JSON.parse(controller.snapshot('run')) as {
       workflows: Array<{ id: string; name: string }>
@@ -96,9 +99,9 @@ describe('WorkflowStudioController', () => {
 
   it('等待中的请求经 signal Remote 校验后送达结果', async () => {
     const controller = await setup()
-    const workflowId = await controller.save(JSON.stringify(
+    const workflowId = idOf(await controller.save(JSON.stringify(
       workflow({ ask: 'ask' }, [], { name: 'ask' }),
-    ))
+    )))
     const asked = signalRequested(host)
     const runId = RunId(controller.start(workflowId))
     await asked
@@ -126,9 +129,9 @@ describe('WorkflowStudioController', () => {
   it('按 ID 更新返回改名后的新 ID，快照只列出改名后的工作流', async () => {
     const controller = await setup()
     const source = workflow({ input: { type: 'value', config: { value: 1 } } }, [], { name: 'before' })
-    assert.equal(await controller.save(JSON.stringify(source)), 'before')
+    assert.equal(idOf(await controller.save(JSON.stringify(source))), 'before')
 
-    const renamed = await controller.update('before', JSON.stringify({ ...source, name: 'after' }))
+    const renamed = idOf(await controller.update('before', JSON.stringify({ ...source, name: 'after' })))
 
     assert.equal(renamed, 'after')
     const snapshot = JSON.parse(controller.snapshot('run')) as {
@@ -171,7 +174,7 @@ describe('WorkflowStudioController', () => {
     )
   })
 
-  it('保存带原子目录的 Go 工作流时写出目录中的 <ID>.workflow.go，改名时换掉旧文件；写不出时不保存', async () => {
+  it('保存带原子目录的 Go 工作流时写出目录中的 <ID>.workflow.go，改名时换掉旧文件；写不出时照样保存并给出原因', async () => {
     const controller = await setup()
     const folder = await mkdtemp(join(tmpdir(), 'atoms-'))
     try {
@@ -181,8 +184,8 @@ describe('WorkflowStudioController', () => {
         say: { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: file }, inputs: [{ name: 'name', type: 'string' }] },
       }, ['in:name>say:name'], { name: 'hello', kind: 'code', language: 'go', atomFolder: folder })
 
-      await assert.rejects(controller.save(JSON.stringify(greet('gone.go'))), /写不出工作流 "hello" 的源码，工作流未保存/)
-      assert.deepEqual(JSON.parse(controller.snapshot('code')).workflows, [])
+      assert.match((JSON.parse(await controller.save(JSON.stringify(greet('gone.go')))) as { sourceError: string }).sourceError, /gone\.go/)
+      assert.deepEqual(await readdir(folder), ['greet.go'])
 
       await controller.save(JSON.stringify(greet('greet.go')))
       assert.equal(await readFile(join(folder, 'hello.workflow.go'), 'utf8'), [

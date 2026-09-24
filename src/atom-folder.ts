@@ -11,11 +11,10 @@ import type { DagEngine } from './engine.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { Callees } from './shared/callees.ts'
 import { analyzeWorkflow, indexNodeTypes } from './shared/analysis.ts'
-import { validateWorkflow } from './validation.ts'
 import { buildWorkflowIr } from './shared/ir.ts'
 import { atomLibrary, isAtomFile, languageOf, type AtomFile, type AtomLibrary, type AtomSyntax } from './shared/language.ts'
 import { RenderError, renderWorkflow } from './shared/source.ts'
-import type { DagWorkflowDefinition, FolderListing, WorkflowId } from './shared/types.ts'
+import type { DagWorkflowDefinition, FolderListing, SavedWorkflow, WorkflowId } from './shared/types.ts'
 
 /**
  * 一个目录中的原子文件和类型文件，不递归，按文件名排序。
@@ -77,26 +76,21 @@ export function workflowFilePath(definition: DagWorkflowDefinition, id: Workflow
 }
 
 /**
- * 一个 `code` 工作流写进它原子目录的源码，与原子同属一个包。
- *
- * 保存前调用：写不出源码的工作流不保存，已保存的工作流就总有与之一致的文件。
- * @param definition - 待保存的工作流定义。
- * @param host - 按保存的规则校验定义，并提供能调用的工作流。
- * @returns 源码；工作流没有原子目录时为 undefined。
- * @throws 定义不合法，或源码写不出时，说明要修改的节点。
+ * 一个有原子目录的 `code` 工作流写进该目录的源码，与原子同属一个包。
+ * @param definition - 已保存的工作流定义。
+ * @param host - 提供节点类型和能调用的工作流。
+ * @returns 源码，或写不出时说明要修改的节点。
  */
-export async function workflowSource(definition: DagWorkflowDefinition, host: WorkflowHost): Promise<string | undefined> {
-  const language = languageOf(definition)
-  if (definition.atomFolder === undefined || language.functions?.atoms === undefined) return undefined
-  validateWorkflow(host.registry, definition)
+async function workflowSource(
+  definition: DagWorkflowDefinition,
+  host: WorkflowHost,
+): Promise<{ readonly source: string } | { readonly error: string }> {
   const catalog = indexNodeTypes(host.registry.listTypes())
   const callees = await workflowCallees(definition, host.engine)
   try {
-    return renderWorkflow(buildWorkflowIr(definition, catalog, analyzeWorkflow(definition, catalog)), language, callees)
+    return { source: renderWorkflow(buildWorkflowIr(definition, catalog, analyzeWorkflow(definition, catalog)), languageOf(definition), callees) }
   } catch (error: unknown) {
-    if (error instanceof RenderError) {
-      throw new Error(`写不出工作流 "${definition.name}" 的源码，工作流未保存：${describeRenderFault(error.fault)}`)
-    }
+    if (error instanceof RenderError) return { error: describeRenderFault(error.fault) }
     throw error
   }
 }
@@ -104,28 +98,33 @@ export async function workflowSource(definition: DagWorkflowDefinition, host: Wo
 /**
  * 保存一个工作流，有原子目录时随后写出它的文件 `<ID><后缀>`。
  *
- * 替换已有工作流时，它原先的文件若不再是该工作流的文件（改了名或换了原子目录），就被删除。
+ * 源码写不出时工作流照样保存，它的文件被删除，免得包里留下与定义不一致的函数。
+ * 替换已有工作流时，它原先的文件若不再是该工作流的文件（改了名或换了原子目录），也被删除。
  * @param definition - 待保存的工作流定义。
  * @param host - 节点注册表和引擎。
  * @param save - 引擎的保存或更新。
  * @param replaces - 被替换的工作流 ID；新建时省略。
- * @returns 保存后的工作流 ID。
+ * @returns 保存后的工作流 ID，以及源码写不出时的原因。
  */
 export async function saveWithFile(
   definition: DagWorkflowDefinition,
   host: WorkflowHost,
   save: () => Promise<WorkflowId>,
   replaces?: WorkflowId,
-): Promise<WorkflowId> {
-  const source = await workflowSource(definition, host)
+): Promise<SavedWorkflow> {
   const previous = replaces === undefined ? undefined : { id: replaces, definition: host.engine.get(replaces) }
   const before = previous?.definition === undefined ? undefined : workflowFilePath(previous.definition, previous.id)
-  const id = await save()
-  const path = workflowFilePath(definition, id)
-  // 源码和路径都只在工作流有原子目录时存在。
-  if (source !== undefined) await writeFile(path!, source)
+  const workflowId = await save()
+  const path = workflowFilePath(definition, workflowId)
   if (before !== undefined && before !== path) await rm(before, { force: true })
-  return id
+  if (path === undefined) return { workflowId }
+  const written = await workflowSource(definition, host)
+  if ('error' in written) {
+    await rm(path, { force: true })
+    return { workflowId, sourceError: written.error }
+  }
+  await writeFile(path, written.source)
+  return { workflowId }
 }
 
 /**

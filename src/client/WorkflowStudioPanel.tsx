@@ -18,7 +18,8 @@ import { messageOf } from '../shared/errors.ts'
 import { withCallees, type Callees } from '../shared/callees.ts'
 import { SUBWORKFLOW_TYPE, embedFault } from '../shared/subworkflow.ts'
 import {
-  WorkflowId, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowKind, type WorkflowStudioSnapshot,
+  WorkflowId, type DagWorkflowDefinition, type NodeTypeSummary, type SavedWorkflow, type WorkflowKind,
+  type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, workflowInputPorts,
@@ -168,32 +169,36 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     if (JSON.stringify(signed) !== JSON.stringify(definition)) replaceDefinition(signed)
   }, [callees, revision])
 
-  /** Save the edited definition and return its workflow ID; failures show as the notice. */
-  const persist = async (): Promise<string | undefined> => {
+  /** Save the edited definition; failures show as the notice. */
+  const persist = async (): Promise<SavedWorkflow | undefined> => {
     const source = formatEditorDefinition(definition)
-    const workflowId = await callRemote(
+    const saved = await callRemote(
       () => selectedId === undefined ? remote.save(source) : remote.update(selectedId, source),
-      id => id,
+      json => JSON.parse(json) as SavedWorkflow,
       setNotice,
     )
-    if (workflowId !== undefined) setSelectedId(workflowId)
-    return workflowId
+    if (saved !== undefined) setSelectedId(saved.workflowId)
+    return saved
   }
 
   const save = async (): Promise<void> => {
     setPhase('saving')
     setNotice(undefined)
-    const workflowId = await persist()
-    if (workflowId === undefined) {
+    const saved = await persist()
+    if (saved === undefined) {
       setPhase('ready')
       return
     }
     // Saving a workflow with an atom folder also writes its function into that folder, in a file named after its ID.
     const written = definition.atomFolder === undefined || atomSyntax === undefined
       ? undefined
-      : `${workflowId}${atomSyntax.outputSuffix}`
-    await load(workflowId)
-    setNotice(written === undefined ? t('notice.saved') : `${t('notice.savedFile')} ${written}`)
+      : `${saved.workflowId}${atomSyntax.outputSuffix}`
+    await load(saved.workflowId)
+    setNotice(written === undefined
+      ? t('notice.saved')
+      : saved.sourceError === undefined
+        ? `${t('notice.savedFile')} ${written}`
+        : `${t('notice.savedNoFile')} ${saved.sourceError}`)
   }
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
@@ -201,10 +206,10 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     setRunPrompt(false)
     setPhase('running')
     setNotice(undefined)
-    const workflowId = await persist()
-    const runId = workflowId === undefined
+    const saved = await persist()
+    const runId = saved === undefined
       ? undefined
-      : await callRemote(() => remote.start(workflowId, inputs), id => id, setNotice)
+      : await callRemote(() => remote.start(saved.workflowId, inputs), id => id, setNotice)
     if (runId !== undefined) {
       runs.setFilter('workflow')
       setView('runs')

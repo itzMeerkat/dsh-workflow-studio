@@ -82,7 +82,7 @@ export function registerWorkflowTools(ctx: Context): void {
           nodeCount: { type: 'number', description: '节点数量' },
           warnings: {
             type: 'array',
-            description: '整图分析给出的告警；它们不阻止保存，但指出只在部分分支下成立的接线。',
+            description: '整图分析给出的告警，以及源码写不出的原因；它们不阻止保存。',
             items: { type: 'string' },
           },
         },
@@ -104,7 +104,7 @@ export function registerWorkflowTools(ctx: Context): void {
         ...(args.description === undefined ? {} : { description: args.description }),
       })
       const def = withCallees(parsed, await workflowCallees(parsed, engine))
-      const workflowId = await saveWithFile(
+      const { workflowId, sourceError } = await saveWithFile(
         def,
         { registry: ctx.workflowNodeRegistry, engine },
         () => engine.save(def),
@@ -114,7 +114,10 @@ export function registerWorkflowTools(ctx: Context): void {
         workflowId,
         name: args.name,
         nodeCount: args.nodes.length,
-        warnings: warningsOf(analyzeWorkflow(def, catalog())),
+        warnings: [
+          ...warningsOf(analyzeWorkflow(def, catalog())),
+          ...(sourceError === undefined ? [] : [`源码写不出，文件未写出: ${sourceError}`]),
+        ],
       }
     },
   })), 'workflow-tools:create_workflow')

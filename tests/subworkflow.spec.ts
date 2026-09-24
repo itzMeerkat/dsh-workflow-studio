@@ -19,6 +19,8 @@ import { NODE_TYPES, irOf, nodeType, workflow } from './graph-fixtures.ts'
 import { indexNodeTypes } from '../src/shared/analysis.ts'
 import { TestHosts, runEnded } from './host.ts'
 
+const idOf = (saved: string): string => (JSON.parse(saved) as { workflowId: string }).workflowId
+
 const embed = (id: string) => ({ type: SUBWORKFLOW_TYPE, config: { [SUBWORKFLOW_FIELD]: id } })
 
 /** 把 `x` 与 `offset` 相加；`offset` 有默认值 5。 */
@@ -127,7 +129,7 @@ describe('run 工作流中的子工作流', () => {
 
   it('运行时展开成被嵌入工作流的节点：未接线的输入取默认值，输出送回嵌入处', async () => {
     const controller = await setup()
-    const record = await runEnded(host, RunId(controller.start(await controller.save(JSON.stringify(parent(false))))))
+    const record = await runEnded(host, RunId(controller.start(idOf(await controller.save(JSON.stringify(parent(false)))))))
     assert.equal(record.status, 'completed')
     assert.deepEqual(record.outputs, { total: 15 })
     assert.deepEqual(record.nodes.find(node => node.nodeId === 'sub/add')?.outputs, { result: 15 })
@@ -135,7 +137,7 @@ describe('run 工作流中的子工作流', () => {
 
   it('子工作流节点被跳过时，被嵌入工作流的每个节点都被跳过', async () => {
     const controller = await setup()
-    const record = await runEnded(host, RunId(controller.start(await controller.save(JSON.stringify(parent(true))))))
+    const record = await runEnded(host, RunId(controller.start(idOf(await controller.save(JSON.stringify(parent(true)))))))
     assert.equal(record.status, 'completed')
     assert.deepEqual(record.outputs, {})
     assert.deepEqual(
@@ -144,14 +146,14 @@ describe('run 工作流中的子工作流', () => {
     )
   })
 
-  it('保存拒绝不存在的、成环的嵌入，以及被嵌入工作流改名', async () => {
+  it('不存在的、成环的嵌入照样保存，运行开始时失败；被嵌入的工作流不能改名', async () => {
     const controller = await setup()
-    await assert.rejects(controller.save(JSON.stringify(workflow({ sub: embed('nope') }, [], { name: 'broken' }))), /工作流 nope 不存在/)
-    await controller.save(JSON.stringify(parent(false)))
-    await assert.rejects(
-      controller.update('add-offset', JSON.stringify({ ...ADD_OFFSET, nodes: [...ADD_OFFSET.nodes, { id: NodeId('back'), ...embed('parent') }] })),
-      /会形成嵌入环/,
-    )
+    const broken = idOf(await controller.save(JSON.stringify(workflow({ sub: embed('nope') }, [], { name: 'broken' }))))
+    assert.throws(() => controller.start(broken), /工作流 nope 不存在/)
+    const embedder = idOf(await controller.save(JSON.stringify(parent(false))))
+    await controller.update('add-offset', JSON.stringify({ ...ADD_OFFSET, nodes: [...ADD_OFFSET.nodes, { id: NodeId('back'), ...embed('parent') }] }))
+    assert.throws(() => controller.start(embedder), /子工作流嵌入成环/)
+    await controller.update('add-offset', JSON.stringify(ADD_OFFSET))
     await assert.rejects(controller.update('add-offset', JSON.stringify({ ...ADD_OFFSET, name: 'renamed' })), /被 "parent" 作为子工作流嵌入，不能改名/)
   })
 })
