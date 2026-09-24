@@ -116,6 +116,9 @@ export class DagEngineProvider extends DagEngine {
 
     return this.enqueueMutation(async () => {
       const existing = this.findByName(snapshot.name)
+      if (existing !== undefined && existing.kind !== snapshot.kind) {
+        throw new Error(`工作流名称 "${snapshot.name}" 已被一个 ${existing.kind} 工作流使用`)
+      }
       const id = existing !== undefined ? existing.id : this.allocateId(snapshot.name)
       await this.workflows.put(id, snapshot)
       return id
@@ -135,6 +138,9 @@ export class DagEngineProvider extends DagEngine {
       const current = this.workflows.get(id)
       if (current === undefined) {
         throw new Error(`工作流 "${id}" 不存在`)
+      }
+      if (current.kind !== snapshot.kind) {
+        throw new Error(`工作流 "${id}" 是 ${current.kind} 工作流，不能改为 ${snapshot.kind} 工作流`)
       }
       const named = this.findByName(snapshot.name)
       if (named !== undefined && named.id !== id) {
@@ -181,6 +187,7 @@ export class DagEngineProvider extends DagEngine {
     if (this.closing) throw new Error('工作流引擎正在关闭')
     const authored = this.get(workflowId)
     if (authored === undefined) throw new Error(`工作流 ${workflowId} 未找到`)
+    if (authored.kind !== 'run') throw new Error(`工作流 ${workflowId} 是 ${authored.kind} 工作流，只写成源码，不能运行`)
     // 输入值写进边界节点的配置，因此运行快照自带它们，恢复时也不必重新提供。
     const definition = withRunInputs(authored, inputs)
     const executors = resolveExecutors(this.registry, definition)

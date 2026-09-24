@@ -98,13 +98,14 @@ export const workflowEdgeSchema = z.discriminatedUnion('kind', [
   z.object({ ...edgeIdentity, kind: z.literal('exec') }),
 ]) as unknown as z.ZodType<DagEdgeDefinition>
 
-const workflowKind = z.enum(['run', 'code'])
+/** 工作流种类的 JSON schema。 */
+export const workflowKindSchema = z.enum(['run', 'code'])
 
 /** 完整工作流定义的持久化和 Remote JSON schema。 */
 export const workflowDefinitionSchema = z.object({
   name: nonEmptyString,
   // 第二种工作流出现之前保存的记录没有这个字段，它们都是被执行的工作流。
-  kind: workflowKind.default(DEFAULT_WORKFLOW_KIND),
+  kind: workflowKindSchema.default(DEFAULT_WORKFLOW_KIND),
   language: nonEmptyString.optional(),
   atomFolder: nonEmptyString.optional(),
   description: nonEmptyString.optional(),
@@ -172,7 +173,7 @@ export const workflowStudioSnapshotSchema = z.object({
   workflows: z.array(z.object({
     id: z.string().min(1),
     name: z.string(),
-    kind: workflowKind,
+    kind: workflowKindSchema,
     description: z.string().optional(),
     definition: z.string(),
   })),
@@ -182,7 +183,7 @@ export const workflowStudioSnapshotSchema = z.object({
     description: z.string(),
     sourcePlugin: z.string(),
     execKind: z.enum(['plain', 'decision', 'join']),
-    kinds: z.array(workflowKind),
+    kinds: z.array(workflowKindSchema),
     inputs: z.array(workflowPortSchema),
     outputs: z.array(workflowPortSchema),
     execOutputs: z.array(z.string()),

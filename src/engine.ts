@@ -101,17 +101,19 @@ export abstract class DagEngine extends Service {
   }
 
   /**
-   * 创建或按名称替换一个工作流定义。
+   * 创建或按名称替换一个工作流定义。工作流的种类一经保存就不再改变，两种工作流共用一个名称空间。
    * @param definition - 完整定义；同名定义复用已有 ID。
    * @returns 持久化完成后的工作流 ID；新工作流的 ID 由名称派生。
+   * @throws 同名的已有工作流是另一种类时。
    */
   abstract save(definition: DagWorkflowDefinition): Promise<WorkflowId>
 
   /**
    * 按 ID 替换一个现有工作流定义。
    * @param id - 必须已存在的工作流 ID。
-   * @param definition - 完整的新定义；名称不得与其他工作流重复。
+   * @param definition - 完整的新定义；名称不得与其他工作流重复，种类与现有定义相同。
    * @returns 持久化完成后的工作流 ID；改名后为新名称派生的 ID，调用方必须改用返回值。
+   * @throws 工作流不存在、名称已被占用或种类改变时。
    */
   abstract update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId>
 
@@ -125,10 +127,11 @@ export abstract class DagEngine extends Service {
   abstract findByName(name: string): WorkflowSummary | undefined
 
   /**
-   * 启动一个已保存的工作流，返回运行 handle。
+   * 启动一个已保存的 `run` 工作流，返回运行 handle；`code` 工作流只写成源码，不能运行。
    * @param workflowId - 工作流 ID。
    * @param inputs - 工作流声明输入端口的值；未提供的端口使用声明的默认值。
    * @returns 运行 handle。
+   * @throws 工作流不存在、不是 `run` 工作流或输入不合法时。
    */
   abstract start(workflowId: WorkflowId, inputs?: JsonObject): DagRun
 

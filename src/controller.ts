@@ -8,7 +8,7 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
 import { NodeId, RunId, WorkflowId, type WorkflowStudioSnapshot } from './shared/types.ts'
-import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
+import { workflowDefinitionSchema, workflowKindSchema } from './shared/workflow-schema.ts'
 import { messageOf } from './shared/errors.ts'
 import { parseJsonObject } from './shared/json.ts'
 import { languageOf } from './shared/language.ts'
@@ -33,18 +33,28 @@ export class WorkflowStudioController extends TypertRemoteService {
     this.registry = ctx.workflowNodeRegistry
   }
 
-  /** Return all persisted definitions and the registered node types. */
+  /**
+   * Return what the editor of one workflow kind works with: the saved workflows of that kind and the node
+   * types usable in it. The two kinds share no workflow, so neither editor sees the other's.
+   * @param kind - `run` or `code`.
+   * @returns The snapshot encoded as JSON.
+   */
   @Remote
-  snapshot(): string {
-    const payload: WorkflowStudioSnapshot = {
-      // list() 与 get() 同步读取同一张表，列出的 ID 一定存在。
-      workflows: this.engine.list().map(summary => ({
-        ...summary,
-        definition: JSON.stringify(this.engine.get(summary.id)!, null, 2),
-      })),
-      nodeTypes: this.registry.listTypes(),
+  snapshot(kind: string): string {
+    try {
+      const own = workflowKindSchema.parse(kind)
+      const payload: WorkflowStudioSnapshot = {
+        // list() 与 get() 同步读取同一张表，列出的 ID 一定存在。
+        workflows: this.engine.list().filter(summary => summary.kind === own).map(summary => ({
+          ...summary,
+          definition: JSON.stringify(this.engine.get(summary.id)!, null, 2),
+        })),
+        nodeTypes: this.registry.listTypes().filter(type => type.kinds.includes(own)),
+      }
+      return JSON.stringify(payload)
+    } catch (error: unknown) {
+      throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
-    return JSON.stringify(payload)
   }
 
   /**

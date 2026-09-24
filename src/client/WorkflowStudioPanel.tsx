@@ -119,13 +119,13 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     setAtomsRead(value => value + 1)
     setPhase('loading')
     setNotice(undefined)
-    const next = await callRemote(() => remote.snapshot(), parseSnapshot, setNotice)
+    // The Host sends only this panel's kind of workflows, and only the node types usable in them.
+    const next = await callRemote(() => remote.snapshot(kind), parseSnapshot, setNotice)
     if (next !== undefined) {
       setSnapshot(next)
-      const own = next.workflows.filter(row => row.kind === kind)
-      const selected = own.find(row => row.id === preferredId)
-        ?? own.find(row => row.id === selectedId)
-        ?? own[0]
+      const selected = next.workflows.find(row => row.id === preferredId)
+        ?? next.workflows.find(row => row.id === selectedId)
+        ?? next.workflows[0]
       if (selected !== undefined) select(selected)
     }
     setPhase('ready')
@@ -226,14 +226,12 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   }
 
   const busy = phase !== 'ready'
-  // Each panel owns one kind of workflow, so it lists, creates and offers nodes for that kind only.
-  const workflows = snapshot.workflows.filter(row => row.kind === kind)
+  const { workflows } = snapshot
   const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
+  // A workflow has at most one boundary node per side, so the library stops offering a second.
   const addableNodeTypes = snapshot.nodeTypes.filter(type =>
-    type.kinds.includes(kind)
-    // A workflow has at most one boundary node per side, so the library stops offering a second.
-    && ((type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
-      || !definition.nodes.some(node => node.type === type.type)))
+    (type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
+    || !definition.nodes.some(node => node.type === type.type))
   const overlay = runs.record?.workflowId === selectedId ? runs.record : undefined
   const runRecords = overlay === undefined ? new Map() : runRecordsByNode(overlay)
   const runResult = overlay === undefined ? undefined : JSON.stringify(overlay.nodes, null, 2)
@@ -264,7 +262,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             t={t}
             onCreate={() => {
               setSelectedId(undefined)
-              replaceDefinition(emptyDefinition(nextWorkflowName(workflows), kind))
+              replaceDefinition(emptyDefinition(nextWorkflowName(workflows, kind), kind))
             }}
             onSelect={select}
           />

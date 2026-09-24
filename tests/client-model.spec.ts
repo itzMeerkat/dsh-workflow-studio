@@ -125,8 +125,9 @@ describe('workflow editor model', () => {
     assert.equal(filterWorkflows(workflows, '').length, 2)
   })
 
-  it('allocates the first available default workflow name', () => {
-    assert.equal(nextWorkflowName([{ name: 'workflow-1' }, { name: 'workflow-3' }]), 'workflow-2')
+  it('allocates the first available default workflow name, with a stem per kind', () => {
+    assert.equal(nextWorkflowName([{ name: 'workflow-1' }, { name: 'workflow-3' }], 'run'), 'workflow-2')
+    assert.equal(nextWorkflowName([{ name: 'code-workflow-1' }], 'code'), 'code-workflow-2')
   })
 
   it('appends one positioned node per explicit catalog selection', () => {

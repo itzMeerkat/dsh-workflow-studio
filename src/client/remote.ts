@@ -8,7 +8,7 @@ import { messageOf } from '../shared/errors.ts'
 
 /** Client view of the `workflowStudio` Remote; every result is a string, JSON where noted on the Host method. */
 export interface WorkflowStudioRemoteNamespace {
-  snapshot(): Promise<RemoteResult<string>>
+  snapshot(kind: string): Promise<RemoteResult<string>>
   save(source: string): Promise<RemoteResult<string>>
   update(workflowId: string, source: string): Promise<RemoteResult<string>>
   start(workflowId: string, inputs: string): Promise<RemoteResult<string>>
@@ -90,7 +90,7 @@ function descriptor(method: Method, parameters: readonly string[]): TypertRemote
 const contribution: TypertRemoteContribution = {
   package: 'dsh-workflow-studio',
   descriptors: [
-    descriptor('snapshot', []),
+    descriptor('snapshot', ['kind']),
     descriptor('save', ['source']),
     descriptor('update', ['workflowId', 'source']),
     descriptor('start', ['workflowId', 'inputs']),

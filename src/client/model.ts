@@ -71,12 +71,23 @@ export function filterWorkflows(
     workflow.name.toLocaleLowerCase().includes(needle))
 }
 
-/** Return the first available workflow-N name. */
-export function nextWorkflowName(workflows: readonly Pick<WorkflowRow, 'name'>[]): string {
+/**
+ * The stem of a new workflow's name. The kinds share one name space but each panel sees only its own
+ * workflows, so distinct stems keep a suggested name from belonging to the other kind.
+ */
+const NAME_STEM: Readonly<Record<WorkflowKind, string>> = { run: 'workflow', code: 'code-workflow' }
+
+/**
+ * The first available `<stem>-N` name for a new workflow of one kind.
+ * @param workflows - The panel's workflows, all of `kind`.
+ * @param kind - The kind of the new workflow.
+ */
+export function nextWorkflowName(workflows: readonly Pick<WorkflowRow, 'name'>[], kind: WorkflowKind): string {
   const names = new Set(workflows.map(workflow => workflow.name))
+  const stem = NAME_STEM[kind]
   let index = 1
-  while (names.has(`workflow-${index}`)) index += 1
-  return `workflow-${index}`
+  while (names.has(`${stem}-${index}`)) index += 1
+  return `${stem}-${index}`
 }
 
 /**

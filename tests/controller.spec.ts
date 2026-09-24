@@ -30,7 +30,7 @@ describe('WorkflowStudioController', () => {
 
   /** 快照中第一个工作流保存下来的定义。 */
   function savedDefinition(controller: WorkflowStudioController): { nodes: Record<string, unknown>[] } {
-    const snapshot = JSON.parse(controller.snapshot()) as { workflows: { definition: string }[] }
+    const snapshot = JSON.parse(controller.snapshot('run')) as { workflows: { definition: string }[] }
     return JSON.parse(snapshot.workflows[0]!.definition) as { nodes: Record<string, unknown>[] }
   }
 
@@ -42,7 +42,7 @@ describe('WorkflowStudioController', () => {
       add: { type: 'sum', config: { offset: 0 } },
     }, ['left>add:left', 'right>add:right'], { name: 'sum' })))
 
-    const snapshot = JSON.parse(controller.snapshot()) as {
+    const snapshot = JSON.parse(controller.snapshot('run')) as {
       workflows: Array<{ id: string; name: string }>
       nodeTypes: Array<{
         type: string
@@ -60,8 +60,7 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
       [
-        'ask', 'branch', 'code-atom', 'code-block', 'code-condition', 'greater', 'merge', 'sum', 'value',
-        'workflow-input', 'workflow-output',
+        'ask', 'branch', 'greater', 'merge', 'sum', 'value', 'workflow-input', 'workflow-output',
       ],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
@@ -132,13 +131,35 @@ describe('WorkflowStudioController', () => {
     const renamed = await controller.update('before', JSON.stringify({ ...source, name: 'after' }))
 
     assert.equal(renamed, 'after')
-    const snapshot = JSON.parse(controller.snapshot()) as {
+    const snapshot = JSON.parse(controller.snapshot('run')) as {
       workflows: Array<{ id: string; name: string }>
     }
     assert.deepEqual(
       snapshot.workflows.map(({ id, name }) => ({ id, name })),
       [{ id: 'after', name: 'after' }],
     )
+  })
+
+  it('两种工作流互不相见：快照只含一种，名称不跨种类复用，种类不能改变，code 工作流不能运行', async () => {
+    const controller = await setup()
+    const run = workflow({ input: { type: 'value', config: { value: 1 } } }, [], { name: 'shared' })
+    const code = workflow({}, [], { name: 'shared', kind: 'code', language: 'go' })
+    await controller.save(JSON.stringify(run))
+    await controller.save(JSON.stringify({ ...code, name: 'compiled' }))
+
+    const snapshot = (kind: string) => JSON.parse(controller.snapshot(kind)) as {
+      workflows: Array<{ id: string }>
+      nodeTypes: Array<{ type: string }>
+    }
+    assert.deepEqual(snapshot('run').workflows.map(({ id }) => id), ['shared'])
+    assert.deepEqual(snapshot('code').workflows.map(({ id }) => id), ['compiled'])
+    assert.ok(snapshot('code').nodeTypes.some(({ type }) => type === 'code-atom'))
+    assert.ok(!snapshot('code').nodeTypes.some(({ type }) => type === 'sum'))
+    assert.throws(() => controller.snapshot('other'), /run|code/)
+
+    await assert.rejects(controller.save(JSON.stringify(code)), /名称 "shared" 已被一个 run 工作流使用/)
+    await assert.rejects(controller.update('shared', JSON.stringify({ ...code, nodes: [] })), /是 run 工作流，不能改为 code 工作流/)
+    assert.throws(() => controller.start('compiled'), /是 code 工作流，只写成源码，不能运行/)
   })
 
   it('拒绝无效 JSON 和未注册节点', async () => {
@@ -161,7 +182,7 @@ describe('WorkflowStudioController', () => {
       }, ['in:name>say:name'], { name: 'hello', kind: 'code', language: 'go', atomFolder: folder })
 
       await assert.rejects(controller.save(JSON.stringify(greet('gone.go'))), /写不出 .*workflow\.go，工作流未保存/)
-      assert.deepEqual(JSON.parse(controller.snapshot()).workflows, [])
+      assert.deepEqual(JSON.parse(controller.snapshot('code')).workflows, [])
 
       await controller.save(JSON.stringify(greet('greet.go')))
       assert.equal(await readFile(join(folder, 'workflow.go'), 'utf8'), [
