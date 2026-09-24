@@ -9,9 +9,6 @@ import {
 } from '../shared/types.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, withBoundaryPorts } from '../shared/workflow-boundary.ts'
 
-/** The port types a declaration may use, in the order the editor offers them. */
-export const WORKFLOW_PORT_TYPES: readonly PortType[] = ['any', 'string', 'number', 'boolean']
-
 /** Which side of the workflow a declared port belongs to. */
 export type WorkflowPortSide = 'inputs' | 'outputs'
 

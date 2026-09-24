@@ -6,6 +6,7 @@ import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
 import { EXEC_RUN_PIN, execOutputPins } from '../shared/graph.ts'
+import { typeName, type Language } from '../shared/language.ts'
 import { diagnosticDetails } from './DiagnosticsView.tsx'
 import { handleId, nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
 import type { Translate } from './locale.ts'
@@ -23,6 +24,8 @@ export type NodeCardGraph = 'data' | 'execution'
 /** What the cards React Flow renders need from the view around them. */
 export interface NodeCardActions {
   readonly t: Translate
+  /** The workflow's language, which names the port types. */
+  readonly language: Language
   /** Set when the card may edit configuration; absent in a read-only graph. */
   readonly updateConfig?: (nodeId: string, name: string, value: unknown) => void
 }
@@ -55,7 +58,7 @@ export function NodeCard({
 }) {
   const actions = useContext(NodeCardContext)
   if (actions === undefined) throw new Error('Workflow node card rendered outside its view')
-  const { t, updateConfig } = actions
+  const { t, language, updateConfig } = actions
   const inputs = nodeInputPorts(data)
   const outputs = nodeOutputPorts(data)
   const controls = data.catalog?.controls ?? []
@@ -94,8 +97,8 @@ export function NodeCard({
         </div>
       </div>
       <div className={css.ports}>
-        <div>{inputs.map(port => <PortRow key={port.name} port={port} side="input" connectable={connectable} />)}</div>
-        <div>{outputs.map(port => <PortRow key={port.name} port={port} side="output" connectable={connectable} />)}</div>
+        <div>{inputs.map(port => <PortRow key={port.name} port={port} language={language} side="input" connectable={connectable} />)}</div>
+        <div>{outputs.map(port => <PortRow key={port.name} port={port} language={language} side="output" connectable={connectable} />)}</div>
       </div>
       {controls.length > 0 && (
         <div className={css.nodeControls}>
@@ -194,8 +197,9 @@ function ExecPin({ pin, side, connectable, branch = false }: {
   )
 }
 
-function PortRow({ port, side, connectable }: {
+function PortRow({ port, language, side, connectable }: {
   readonly port: PortDefinition
+  readonly language: Language
   readonly side: 'input' | 'output'
   readonly connectable: boolean
 }) {
@@ -215,8 +219,7 @@ function PortRow({ port, side, connectable }: {
         {port.name}
         {isInput && port.required !== false && <b className={css.requiredPort}>*</b>}
       </span>
-      {/* An optional output, such as a Go pointer result, may carry no value. */}
-      <small>{port.type}{!isInput && port.required === false && '?'}</small>
+      <small>{typeName(language, port.type)}</small>
     </div>
   )
 }

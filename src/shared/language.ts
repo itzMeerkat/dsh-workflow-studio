@@ -7,8 +7,10 @@
  * @module dsh-workflow-studio
  */
 
-import { goAtom, goImportName } from './go.ts'
-import type { DagNodeDefinition, DagWorkflowDefinition, PortDefinition, PortType } from './types.ts'
+import { GO_TYPES, goAtom, goImportName } from './go.ts'
+import type {
+  BuiltinPortType, DagNodeDefinition, DagWorkflowDefinition, PortDefinition, PortType,
+} from './types.ts'
 
 /** 代码节点存放代码的配置字段。 */
 export const CODE_FIELD = 'code'
@@ -25,14 +27,16 @@ export const CODE_ATOM_TYPE = 'code-atom'
 /** 原子节点存放原子文件名的配置字段。 */
 export const ATOM_FIELD = 'atom'
 
-/** 签名中的一个参数或结果。 */
+/** 签名中的一个结果，也是参数共有的部分。 */
 export interface TypedName {
   readonly name: string
-  /** 该语言中的类型。 */
-  readonly type: string
-  /** 能接收该类型值的端口类型。 */
-  readonly port: PortType
-  /** 该类型有表示"没有值"的写法，例如 Go 的指针可以是 nil：参数不必接线，结果可能没有值。 */
+  /** 端口类型，即该语言中的类型；见 {@link PortType}。 */
+  readonly type: PortType
+}
+
+/** 签名中的一个参数。 */
+export interface Parameter extends TypedName {
+  /** 参数的类型有表示"没有值"的写法，例如 Go 的指针可以是 nil，所以它不必接线。 */
   readonly optional: boolean
 }
 
@@ -40,12 +44,12 @@ export interface TypedName {
 export interface Signature {
   /** 函数自己的名字；匿名函数没有。 */
   readonly name?: string
-  readonly parameters: readonly TypedName[]
+  readonly parameters: readonly Parameter[]
   readonly results: readonly TypedName[]
 }
 
 /**
- * 原子：原子目录中的一个文件，恰好定义一个函数，连同它需要的导入和全局声明。
+ * 原子：原子目录中的一个文件，恰好导出一个函数；文件中的其余声明只供这个函数使用。
  *
  * 目录里的文件同属一个包，生成的工作流函数也写进这个包，所以它按名字调用原子，不必复制它们。
  */
@@ -56,20 +60,18 @@ export interface Atom {
   readonly package: string
   /** 导入项，按原文，例如 `"fmt"` 或 `str "strings"`。 */
   readonly imports: readonly string[]
-  /** 函数之外的顶层声明，按原文，各带文档注释。 */
-  readonly globals: readonly string[]
-  /** 函数的声明，按原文。 */
-  readonly code: string
-  /** 函数的签名；原子的函数总有名字，调用按名字进行。 */
+  /** 导出函数的签名；调用按名字进行。 */
   readonly signature: Signature & { readonly name: string }
 }
 
 /** 一个不能作为原子的文件。 */
-export interface AtomFault {
-  readonly file: string
-  /** `no-function`：没有函数；`several-functions`：不止一个函数；`unreadable-signature`：读不出函数的签名。 */
-  readonly fault: 'no-function' | 'several-functions' | 'unreadable-signature'
-}
+export type AtomFault =
+  /** 没有导出函数。 */
+  | { readonly file: string; readonly fault: 'no-exported-function' }
+  /** 导出了不止一个函数，`names` 是它们的名字。 */
+  | { readonly file: string; readonly fault: 'several-exported-functions'; readonly names: readonly string[] }
+  /** 读不出导出函数的签名。 */
+  | { readonly file: string; readonly fault: 'unreadable-signature' }
 
 /** 从原子目录读出的一个文件。 */
 export interface AtomFile {
@@ -81,6 +83,8 @@ export interface AtomFile {
 export interface AtomLibrary {
   readonly atoms: ReadonlyMap<string, Atom>
   readonly faults: readonly AtomFault[]
+  /** 目录中有没有 {@link AtomSyntax.types} 文件。 */
+  readonly types: boolean
 }
 
 /** 一种语言如何读原子目录，以及把生成的函数写进原子所在的包。 */
@@ -89,6 +93,8 @@ export interface AtomSyntax {
   readonly extension: string
   /** 生成的函数写进原子目录时的文件名；它不是原子。 */
   readonly output: string
+  /** 声明原子所用自定义类型的文件的文件名；它不是原子，内容不被解析，目录中可以没有它。 */
+  readonly types: string
   /** 一个导入项在代码中的包名；空白导入和点导入没有。 */
   readonly importName: (spec: string) => string | undefined
   /** 读一个原子文件。 */
@@ -107,8 +113,8 @@ export interface AtomSyntax {
  * 生成的函数在开头声明它读的每个原子结果，所以分支里赋的值在分支之后仍然可读。
  */
 export interface FunctionSyntax {
-  /** 每种端口类型的值在该语言中的类型。 */
-  readonly types: Readonly<Record<PortType, string>>
+  /** 每种内置端口类型在该语言中的类型；其余端口类型本身就是该语言的类型。 */
+  readonly types: Readonly<Record<BuiltinPortType, string>>
   /** 签名中带类型的一项，含 `{name}` 与 `{type}`。 */
   readonly typed: string
   /** 生成函数的结果，接在参数之后，含 `{results}`。 */
@@ -200,7 +206,7 @@ export const TYPESCRIPT: Language = {
   ],
 }
 
-/** Go；原子目录是一个 Go 包，每个文件定义一个具名函数或绑定到 `var` 的函数字面量。 */
+/** Go；原子目录是一个 Go 包，每个文件导出一个具名函数或绑定到 `var` 的函数字面量，自定义类型声明在 `types.go`。 */
 export const GO: Language = {
   name: 'go',
   indent: '\t',
@@ -216,7 +222,7 @@ export const GO: Language = {
     'struct', 'switch', 'type', 'var',
   ],
   functions: {
-    types: { number: 'float64', string: 'string', boolean: 'bool', any: 'any' },
+    types: GO_TYPES,
     typed: '{name} {type}',
     results: ' ({results})',
     declare: 'var {name} {type}',
@@ -227,6 +233,7 @@ export const GO: Language = {
     atoms: {
       extension: '.go',
       output: 'workflow.go',
+      types: 'types.go',
       importName: goImportName,
       read: goAtom,
       package: 'package {name}',
@@ -277,25 +284,57 @@ export function atomOf(config: Readonly<Record<string, unknown>>): string {
 }
 
 /**
- * 读出一个原子目录中的原子。
- * @param files - 目录中该语言扩展名的文件。
+ * 端口类型在一种语言中的写法。
+ * @param language - 工作流的语言。
+ * @param type - 端口类型。
+ * @returns 内置端口类型在该语言中的类型；没有类型的语言和其余端口类型原样返回。
+ */
+export function typeName(language: Language, type: PortType): string {
+  const types = language.functions?.types
+  return types !== undefined && Object.hasOwn(types, type) ? types[type as BuiltinPortType] : type
+}
+
+/**
+ * 目录中的一个文件是不是原子文件。
+ * @param file - 文件名。
  * @param syntax - 语言的原子读法。
- * @returns 按文件名索引的原子，以及不能作为原子的文件。
+ * @returns 该语言扩展名的文件为 true，但测试文件、生成的工作流文件和类型文件不是原子文件。
+ */
+export function isAtomFile(file: string, syntax: AtomSyntax): boolean {
+  return file.endsWith(syntax.extension) && !file.endsWith(`_test${syntax.extension}`)
+    && file !== syntax.output && file !== syntax.types
+}
+
+/**
+ * 读出一个原子目录中的原子。
+ * @param files - 目录中该语言扩展名的文件，含 {@link AtomSyntax.types} 文件。
+ * @param syntax - 语言的原子读法。
+ * @returns 按文件名索引的原子、不能作为原子的文件，以及有没有类型文件。
  */
 export function atomLibrary(files: readonly AtomFile[], syntax: AtomSyntax): AtomLibrary {
-  const read = files.map(({ file, text }) => syntax.read(file, text))
+  const read = files.filter(({ file }) => isAtomFile(file, syntax)).map(({ file, text }) => syntax.read(file, text))
   return {
     atoms: new Map(read.flatMap(atom => 'fault' in atom ? [] : [[atom.file, atom] as const])),
     faults: read.filter(atom => 'fault' in atom),
+    types: files.some(({ file }) => file === syntax.types),
   }
+}
+
+/**
+ * 原子目录中原子的参数和结果用到的端口类型，去重后排序。
+ * @param library - 原子目录读出的原子。
+ */
+export function atomTypes(library: AtomLibrary): PortType[] {
+  const types = [...library.atoms.values()].flatMap(({ signature }) => [...signature.parameters, ...signature.results])
+  return [...new Set(types.map(({ type }) => type))].sort()
 }
 
 /**
  * 签名对应的端口。
  * @param names - 签名中的参数或结果。
  */
-export function signaturePorts(names: readonly TypedName[]): PortDefinition[] {
-  return names.map(({ name, port, optional }) => optional ? { name, type: port, required: false } : { name, type: port })
+export function signaturePorts(names: readonly (TypedName & { readonly optional?: boolean })[]): PortDefinition[] {
+  return names.map(({ name, type, optional }) => optional === true ? { name, type, required: false } : { name, type })
 }
 
 /**

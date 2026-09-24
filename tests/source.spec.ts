@@ -130,7 +130,7 @@ describe('code 工作流写成它的语言', () => {
     assert.match(compile(definition, PYTHON), /def flagged\(arg2\):\n {4}if arg2:\n {8}go\(\)/)
   })
 
-  it('Go 只写出工作流函数：按名字调用原子，被读的结果先声明，分支合并共用一个变量，只导入函数写到的包', () => {
+  it('Go 只写出工作流函数：类型取自端口，按名字调用原子，被读的结果先声明，分支合并共用一个变量，只导入函数写到的包', () => {
     assert.equal(renderWorkflow(irOf(goDiscount(), CODE_CATALOG), GO, SHOP.atoms), [
       '// Code generated from workflow "折扣". DO NOT EDIT.',
       '',
@@ -214,7 +214,7 @@ function goDiscount(): DagWorkflowDefinition {
     wait: atom('wait.go'),
     out: {
       type: WORKFLOW_OUTPUT_TYPE,
-      inputs: [{ name: 'price', type: 'number', required: false }, { name: 'delay', type: 'any', required: false }],
+      inputs: [{ name: 'price', type: 'number', required: false }, { name: 'delay', type: 'time.Duration', required: false }],
     },
   }, [
     'in:amount>over:amount', 'over>gate:condition', 'gate.true>cut', 'gate.false>keep', 'in:amount>cut:amount',

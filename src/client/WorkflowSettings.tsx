@@ -1,13 +1,13 @@
 /** Side panel holding everything that belongs to the workflow rather than to one node. */
 
-import { Button, IconCloseOutlineRegular, IconPlusOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutlineRegular, IconPlusOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useState } from 'react'
-import { CODE_LANGUAGES, languageOf, withSignatures, type AtomLibrary } from '../shared/language.ts'
-import type { DagWorkflowDefinition, PortDefinition, PortType } from '../shared/types.ts'
+import {
+  CODE_LANGUAGES, atomTypes, languageOf, typeName, withSignatures, type AtomLibrary, type Language,
+} from '../shared/language.ts'
+import { BUILTIN_PORT_TYPES, type DagWorkflowDefinition, type PortDefinition, type PortType } from '../shared/types.ts'
 import { workflowInputPorts, workflowOutputPorts } from '../shared/workflow-boundary.ts'
-import { AtomFolderDialog } from './AtomFolderDialog.tsx'
 import type { Translate, WorkflowStudioKey } from './locale.ts'
-import type { WorkflowStudioRemoteNamespace } from './remote.ts'
 import {
   appendWorkflowPort,
   formatWorkflowPortDefault,
@@ -17,7 +17,6 @@ import {
   updateWorkflowPort,
   withWorkflowPorts,
   workflowPortFault,
-  WORKFLOW_PORT_TYPES,
   type WorkflowPortEdit,
   type WorkflowPortSide,
 } from './workflow-ports.ts'
@@ -29,29 +28,22 @@ const FAULT: Record<'empty' | 'duplicate', WorkflowStudioKey> = {
 }
 
 /**
- * The workflow's description, its language and atom folder when it is a code workflow, and the
- * inputs and outputs it declares.
+ * The workflow's description, its language when it is a code workflow, and the inputs and outputs it declares.
  * @param definition - The workflow being edited.
- * @param library - The atoms read from its atom folder, which give atom nodes their ports.
- * @param remote - The `workflowStudio` Remote, which lists Host folders for the folder dialog.
+ * @param library - The atoms read from its atom folder; the types they use are the types a port may declare.
  * @param t - Translate.
  * @param onChange - Receives the edited workflow.
  * @param onClose - Hides the panel.
  */
-export function WorkflowSettings({ definition, library, remote, t, onChange, onClose }: {
+export function WorkflowSettings({ definition, library, t, onChange, onClose }: {
   readonly definition: DagWorkflowDefinition
   readonly library: AtomLibrary | undefined
-  readonly remote: WorkflowStudioRemoteNamespace
   readonly t: Translate
   readonly onChange: (definition: DagWorkflowDefinition) => void
   readonly onClose: () => void
 }) {
-  const [folderPrompt, setFolderPrompt] = useState(false)
-  const atomSyntax = languageOf(definition).functions?.atoms
-  const setFolder = (folder: string | undefined): void => {
-    const { atomFolder: _previous, ...rest } = definition
-    onChange(folder === undefined ? rest : { ...rest, atomFolder: folder })
-  }
+  const language = languageOf(definition)
+  const types = [...new Set<PortType>([...BUILTIN_PORT_TYPES, ...library === undefined ? [] : atomTypes(library)])]
   return (
     <aside className={css.settingsPanel} aria-label={t('settings.title')}>
       <div className={css.detailsHeader}>
@@ -80,82 +72,58 @@ export function WorkflowSettings({ definition, library, remote, t, onChange, onC
           />
         </label>
         {definition.kind === 'code' && (
-          <>
-            <label className={css.settingsField}>
-              <span>{t('source.language')}</span>
-              <select
-                value={definition.language}
-                onChange={(event) => {
-                  // A language that cannot read atoms has no atom folder.
-                  const next: DagWorkflowDefinition = { ...definition, language: event.currentTarget.value }
-                  const { atomFolder: _dropped, ...withoutFolder } = next
-                  onChange(withSignatures(
-                    languageOf(next).functions?.atoms === undefined ? withoutFolder : next,
-                    library?.atoms ?? new Map(),
-                  ))
-                }}
-              >
-                {CODE_LANGUAGES.map(({ name }) => <option key={name} value={name}>{name}</option>)}
-              </select>
-            </label>
-            <div className={css.settingsField}>
-              <span>{t('atoms.title')}</span>
-              {atomSyntax === undefined
-                ? <small>{t('settings.noAtoms')}</small>
-                : (
-                  <>
-                    <code title={definition.atomFolder}>{definition.atomFolder ?? t('settings.noFolder')}</code>
-                    {library !== undefined && (
-                      <small>{library.atoms.size} {t('atoms.files')}{library.faults.length > 0 && ` · ${library.faults.length} ${t('settings.notAtoms')}`}</small>
-                    )}
-                    <div className={css.settingsActions}>
-                      <Button size="sm" variant="outline" onClick={() => { setFolderPrompt(true) }}>{t('settings.chooseFolder')}</Button>
-                      {definition.atomFolder !== undefined && (
-                        <Button size="sm" variant="outline" onClick={() => { setFolder(undefined) }}>{t('atoms.clear')}</Button>
-                      )}
-                    </div>
-                  </>
-                )}
-            </div>
-          </>
+          <label className={css.settingsField}>
+            <span>{t('source.language')}</span>
+            <select
+              value={definition.language}
+              onChange={(event) => {
+                // A language that cannot read atoms has no atom folder.
+                const next: DagWorkflowDefinition = { ...definition, language: event.currentTarget.value }
+                const { atomFolder: _dropped, ...withoutFolder } = next
+                onChange(withSignatures(
+                  languageOf(next).functions?.atoms === undefined ? withoutFolder : next,
+                  library?.atoms ?? new Map(),
+                ))
+              }}
+            >
+              {CODE_LANGUAGES.map(({ name }) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
         )}
         {(['inputs', 'outputs'] as const).map(side => (
           <PortList
             key={side}
             side={side}
             ports={side === 'inputs' ? workflowInputPorts(definition) : workflowOutputPorts(definition)}
+            types={types}
+            language={language}
+            // A code workflow is compiled, never run, so nothing would read a default.
+            defaults={side === 'inputs' && definition.kind === 'run'}
             t={t}
             onChange={(ports, edit) => { onChange(withWorkflowPorts(definition, side, ports, edit)) }}
           />
         ))}
       </div>
-      {folderPrompt && atomSyntax !== undefined && (
-        <AtomFolderDialog
-          folder={definition.atomFolder}
-          extension={atomSyntax.extension}
-          remote={remote}
-          t={t}
-          onCancel={() => { setFolderPrompt(false) }}
-          onChoose={(folder) => {
-            setFolderPrompt(false)
-            setFolder(folder)
-          }}
-        />
-      )}
     </aside>
   )
 }
 
-/** The ports one side of the workflow declares, each with its name, type and, for an input, default. */
-function PortList({ side, ports, t, onChange }: {
+/**
+ * The ports one side of the workflow declares, each with its name, type and, when `defaults` is set, default.
+ * @param types - The port types offered; a port keeps a declared type the list lacks.
+ */
+function PortList({ side, ports, types, language, defaults, t, onChange }: {
   readonly side: WorkflowPortSide
   readonly ports: readonly PortDefinition[]
+  readonly types: readonly PortType[]
+  readonly language: Language
+  readonly defaults: boolean
   readonly t: Translate
   readonly onChange: (ports: readonly PortDefinition[], edit: WorkflowPortEdit) => void
 }) {
   const isInput = side === 'inputs'
   return (
-    <section className={css.settingsPorts} data-side={side}>
+    <section className={css.settingsPorts} {...(defaults ? { 'data-defaults': '' } : {})}>
       <div className={css.settingsPortsHeader}>
         <h3>{t(isInput ? 'workflowPorts.inputs' : 'workflowPorts.outputs')}</h3>
         <button
@@ -187,12 +155,12 @@ function PortList({ side, ports, t, onChange }: {
                 value={port.type}
                 aria-label={t('workflowPorts.type')}
                 onChange={(event) => {
-                  onChange(updateWorkflowPort(ports, index, { type: event.currentTarget.value as PortType }), { kind: 'other' })
+                  onChange(updateWorkflowPort(ports, index, { type: event.currentTarget.value }), { kind: 'other' })
                 }}
               >
-                {WORKFLOW_PORT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+                {[...new Set([...types, port.type])].map(type => <option key={type} value={type}>{typeName(language, type)}</option>)}
               </select>
-              {isInput && (
+              {defaults && (
                 <DraftField
                   value={formatWorkflowPortDefault(port.default, port.type)}
                   label={t('workflowPorts.default')}

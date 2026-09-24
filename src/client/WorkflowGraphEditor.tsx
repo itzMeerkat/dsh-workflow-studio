@@ -18,7 +18,7 @@ import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type {
   DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary,
 } from '../shared/types.ts'
-import { withSignatures, type Atom } from '../shared/language.ts'
+import { languageOf, withSignatures, type Atom } from '../shared/language.ts'
 import {
   connectionError,
   flowEdges,
@@ -160,7 +160,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div className={css.canvas}>
-        <NodeCardContext.Provider value={{ t, updateConfig }}>
+        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}

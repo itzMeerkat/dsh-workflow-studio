@@ -10,6 +10,7 @@ import {
   IconPlayOutlineRegular,
   IconRefreshOutlineRegular,
   IconSettingsOutlineRegular,
+  IconWorkspaceTreeOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -25,6 +26,7 @@ import {
 } from '../shared/language.ts'
 import { atomFilesSchema } from '../shared/workflow-schema.ts'
 import { analyzeEditorGraph } from './analysis-model.ts'
+import { AtomsPanel } from './AtomsPanel.tsx'
 import { DiagnosticsView } from './DiagnosticsView.tsx'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
 import { SourceView } from './SourceView.tsx'
@@ -88,6 +90,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   const [library, setLibrary] = useState<AtomLibrary>()
   const [atomsRead, setAtomsRead] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(true)
+  const [atomsOpen, setAtomsOpen] = useState(true)
   const importInput = useRef<HTMLInputElement>(null)
 
   const replaceDefinition = (next: DagWorkflowDefinition): void => {
@@ -132,13 +135,13 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     void load()
   }, [])
 
-  const atomSyntax = languageOf(definition).functions?.atoms
+  const language = languageOf(definition)
+  const atomSyntax = language.functions?.atoms
   useEffect(() => {
     const folder = definition.atomFolder
-    if (folder === undefined || atomSyntax === undefined) {
-      setLibrary(undefined)
-      return
-    }
+    // The atoms panel shows the folder as being read until its atoms arrive.
+    setLibrary(undefined)
+    if (folder === undefined || atomSyntax === undefined) return
     let current = true
     void callRemote(
       () => remote.atomFiles(folder, definition.language!),
@@ -283,9 +286,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             <NodeLibraryMenu
               disabled={busy}
               nodeTypes={addableNodeTypes}
-              atoms={library}
               t={t}
-              onSelectAtom={(atom) => { replaceDefinition(appendAtomNode(definition, atom)) }}
               onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType)) }}
             />
           )}
@@ -301,6 +302,17 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             <button type="button" className={css.runBadge} data-status="waiting" onClick={showAllRuns}>
               {waitingRequests} {t('runs.waitingCount')}
             </button>
+          )}
+          {atomSyntax !== undefined && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<IconWorkspaceTreeOutlineRegular size={14} />}
+              aria-pressed={atomsOpen}
+              onClick={() => { setAtomsOpen(open => !open) }}
+            >
+              {t('atoms.panel')}
+            </Button>
           )}
           <Button
             size="sm"
@@ -368,6 +380,23 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
       </header>
 
       <div className={css.workspace}>
+        {atomsOpen && atomSyntax !== undefined && (
+          <AtomsPanel
+            definition={definition}
+            language={language}
+            syntax={atomSyntax}
+            library={library}
+            remote={remote}
+            t={t}
+            onChange={replaceDefinition}
+            onAdd={(atom) => {
+              replaceDefinition(appendAtomNode(definition, atom))
+              setView('canvas')
+            }}
+            onReload={() => { setAtomsRead(value => value + 1) }}
+            onClose={() => { setAtomsOpen(false) }}
+          />
+        )}
         <section className={css.editor}>
           {view === 'runs' && (
             <RunsView
@@ -409,7 +438,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             />
           )}
           {view === 'source' && (
-            <SourceView ir={analysis?.ir} language={languageOf(definition)} atoms={library?.atoms ?? new Map()} t={t} />
+            <SourceView ir={analysis?.ir} language={language} atoms={library?.atoms ?? new Map()} t={t} />
           )}
           {view === 'canvas' && <DiagnosticsView diagnostics={analysis?.diagnostics} t={t} />}
           {notice !== undefined && <p className={css.notice} role="alert">{notice}</p>}
@@ -427,7 +456,6 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
           <WorkflowSettings
             definition={definition}
             library={library}
-            remote={remote}
             t={t}
             onChange={replaceDefinition}
             onClose={() => { setSettingsOpen(false) }}

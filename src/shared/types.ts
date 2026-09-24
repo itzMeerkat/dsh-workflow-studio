@@ -54,8 +54,20 @@ export const DEFAULT_WORKFLOW_KIND: WorkflowKind = 'run'
  */
 export type NodeRecoveryPolicy = 'rerun' | 'hold'
 
-/** 端口类型约束（仅文档用途，运行时不检查）。 */
-export type PortType = 'number' | 'string' | 'boolean' | 'any'
+/** 内置端口类型，按编辑器列出的先后排列；`run` 工作流只用它们。 */
+export const BUILTIN_PORT_TYPES = ['any', 'string', 'number', 'boolean'] as const
+
+/** 内置端口类型；`any` 能接收任何值。 */
+export type BuiltinPortType = typeof BUILTIN_PORT_TYPES[number]
+
+/**
+ * 端口类型，运行时不检查。
+ *
+ * 内置类型之外，`code` 工作流的端口按它语言中的写法取类型，例如 Go 的 `int`、`*Order`、`[]string`；
+ * 类型按写法区分，写法相同才是同一个类型。语言把内置类型写成它自己的类型，例如 Go 把 `number` 写成 `float64`，
+ * 所以该语言的这些类型总以内置类型的名字出现。
+ */
+export type PortType = BuiltinPortType | (string & {})
 
 /** 端口描述。 */
 export interface PortDefinition {

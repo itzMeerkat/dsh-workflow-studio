@@ -27,12 +27,11 @@ import { DEFAULT_WORKFLOW_KIND } from './types.ts'
 const nonEmptyString = z.string().refine(value => value.trim() !== '', {
   error: '必须为非空字符串',
 })
-const portType = z.enum(['number', 'string', 'boolean', 'any'])
 
 /** 一个工作流端口的 JSON 表示。 */
 export const workflowPortSchema = z.object({
   name: nonEmptyString,
-  type: portType,
+  type: nonEmptyString,
   description: nonEmptyString.optional(),
   required: z.boolean().optional(),
   display: z.enum(['value', 'json']).optional(),

@@ -43,9 +43,11 @@ export function registerWorkflowTools(ctx: Context): void {
       },
       atomFolder: {
         type: 'string',
-        description: 'go 工作流的原子目录，Host 上的绝对路径，一个 Go 包。目录中每个 .go 文件定义一个函数（连同导入和全局声明），'
+        description: 'go 工作流的原子目录，Host 上的绝对路径，一个 Go 包。目录中每个 .go 文件导出一个函数，自定义类型声明在 types.go，'
           + '用 { type: "code-atom", config: { atom: "<文件名>" } } 的节点调用它；保存时按该函数的签名填写节点的 inputs 和 outputs，'
-          + '端口名就是参数名和结果名（未命名的结果为 output 或 output1、output2……），指针参数和结果是可选端口。'
+          + '端口名就是参数名和结果名（未命名的结果为 output 或 output1、output2……），指针参数是可选端口。'
+          + '端口类型就是 Go 类型的写法，例如 int、Order、*Coupon，但 float64、bool、string、any 写作 number、boolean、string、any；'
+          + '工作流边界端口也这样声明类型，数据边两端的类型必须相同，除非一端是 any。'
           + '保存还把工作流函数写成目录中的 workflow.go；写不出时不保存。',
       },
       nodes: {

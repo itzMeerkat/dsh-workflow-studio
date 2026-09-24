@@ -2,6 +2,7 @@
 
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useState } from 'react'
+import { isAtomFile, type AtomSyntax } from '../shared/language.ts'
 import type { FolderListing } from '../shared/types.ts'
 import { folderListingSchema } from '../shared/workflow-schema.ts'
 import type { Translate } from './locale.ts'
@@ -11,19 +12,19 @@ import css from './WorkflowStudioPanel.module.css'
 /**
  * Browse from the current atom folder, or the Host user's home folder when there is none.
  * @param folder - The workflow's current atom folder.
- * @param extension - Extension of an atom file, so each folder shows how many atoms it holds.
+ * @param syntax - How the workflow's language reads an atom folder, so each folder shows how many atom files it holds.
  * @param remote - The `workflowStudio` Remote, which lists Host folders.
  * @param t - Translate.
  * @param onCancel - Closes the dialog without changing the folder.
- * @param onChoose - Receives the chosen folder's absolute path, or undefined to clear it.
+ * @param onChoose - Receives the chosen folder's absolute path.
  */
-export function AtomFolderDialog({ folder, extension, remote, t, onCancel, onChoose }: {
+export function AtomFolderDialog({ folder, syntax, remote, t, onCancel, onChoose }: {
   readonly folder: string | undefined
-  readonly extension: string
+  readonly syntax: AtomSyntax
   readonly remote: WorkflowStudioRemoteNamespace
   readonly t: Translate
   readonly onCancel: () => void
-  readonly onChoose: (folder: string | undefined) => void
+  readonly onChoose: (folder: string) => void
 }) {
   const [path, setPath] = useState(folder ?? '')
   const [typed, setTyped] = useState(folder ?? '')
@@ -43,7 +44,7 @@ export function AtomFolderDialog({ folder, extension, remote, t, onCancel, onCho
     return () => { current = false }
   }, [path])
 
-  const atoms = listing?.files.filter(file => file.endsWith(extension) && !file.endsWith(`_test${extension}`)).length ?? 0
+  const atoms = listing?.files.filter(file => isAtomFile(file, syntax)).length ?? 0
   return (
     <Modal
       open
@@ -53,9 +54,6 @@ export function AtomFolderDialog({ folder, extension, remote, t, onCancel, onCho
       onClose={onCancel}
       footer={(
         <div className={css.runActions}>
-          {folder !== undefined && (
-            <Button size="sm" variant="outline" onClick={() => { onChoose(undefined) }}>{t('atoms.clear')}</Button>
-          )}
           <Button size="sm" variant="outline" onClick={onCancel}>{t('run.cancel')}</Button>
           <Button
             size="sm"
@@ -75,7 +73,7 @@ export function AtomFolderDialog({ folder, extension, remote, t, onCancel, onCho
         {error !== undefined && <p className={css.notice} role="alert">{error}</p>}
         {listing !== undefined && (
           <>
-            <small>{atoms} {t('atoms.files')} ({extension})</small>
+            <small>{atoms} {t('atoms.files')} ({syntax.extension})</small>
             <ul>
               {[
                 ...listing.parent === undefined ? [] : [{ name: '..', path: listing.parent }],

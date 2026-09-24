@@ -10,7 +10,6 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useRef, useState } from 'react'
-import type { Atom, AtomLibrary, TypedName } from '../shared/language.ts'
 import type { NodeTypeSummary } from '../shared/types.ts'
 import type { Translate } from './locale.ts'
 import { filterNodeTypes, filterWorkflows, type WorkflowRow } from './model.ts'
@@ -83,31 +82,20 @@ export function WorkflowPicker({
   )
 }
 
-/**
- * Pick a registered node type, or an atom from the workflow's atom folder, to add to the canvas.
- * @param atoms - The workflow's atom library; absent when it has no atom folder.
- */
+/** Pick a registered node type to add to the canvas; a workflow's atoms have a panel of their own. */
 export function NodeLibraryMenu({
   disabled,
   nodeTypes,
-  atoms,
   t,
   onSelect,
-  onSelectAtom,
 }: {
   readonly disabled: boolean
   readonly nodeTypes: readonly NodeTypeSummary[]
-  readonly atoms: AtomLibrary | undefined
   readonly t: Translate
   readonly onSelect: (nodeType: NodeTypeSummary) => void
-  readonly onSelectAtom: (atom: Atom) => void
 }) {
   const menu = useMenu()
   const matches = filterNodeTypes(nodeTypes, menu.query)
-  const needle = menu.query.trim().toLocaleLowerCase()
-  const found = (...values: string[]): boolean => values.some(value => value.toLocaleLowerCase().includes(needle))
-  const atomMatches = [...atoms?.atoms.values() ?? []].filter(atom => found(atom.signature.name, atom.file))
-  const faultMatches = atoms?.faults.filter(fault => found(fault.file)) ?? []
 
   return (
     <div className={css.nodePicker} ref={menu.rootRef}>
@@ -144,27 +132,6 @@ export function NodeLibraryMenu({
                     <small>{t('nodes.source')}: {node.sourcePlugin}</small>
                   </button>
                 ))}
-            {atoms !== undefined && <p className={css.menuGroup}>{t('atoms.group')}</p>}
-            {atomMatches.map(atom => (
-              <button
-                type="button"
-                className={css.nodeType}
-                key={atom.file}
-                onClick={() => { onSelectAtom(atom); menu.close() }}
-              >
-                <span className={css.nodeTypeTitle}>
-                  <strong>{atom.signature.name}</strong>
-                  <code>{atom.file}</code>
-                </span>
-                <span>({signatureText(atom.signature.parameters)}) ({signatureText(atom.signature.results)})</span>
-              </button>
-            ))}
-            {faultMatches.map(fault => (
-              <button type="button" className={css.nodeType} key={fault.file} disabled>
-                <span className={css.nodeTypeTitle}><code>{fault.file}</code></span>
-                <small>{t(`atoms.fault.${fault.fault}`)}</small>
-              </button>
-            ))}
           </div>
         </div>
       )}
@@ -228,9 +195,4 @@ function MenuSearch({ menu, label }: { readonly menu: Menu; readonly label: stri
       />
     </label>
   )
-}
-
-/** A signature's parameters or results as `name type` pairs. */
-function signatureText(names: readonly TypedName[]): string {
-  return names.map(({ name, type }) => `${name} ${type}`).join(', ')
 }

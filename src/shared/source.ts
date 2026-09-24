@@ -9,7 +9,7 @@
 
 import type { IrBlock, IrCall, IrGuard, IrOutputs, IrValue, WorkflowIr } from './ir.ts'
 import {
-  CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, atomOf, codeOf, type Atom, type Language,
+  CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, atomOf, codeOf, typeName, type Atom, type Language,
 } from './language.ts'
 import type { NodeId, PortDefinition } from './types.ts'
 
@@ -149,7 +149,7 @@ function runContent(ir: WorkflowIr, language: Language): Content {
  * `code` 工作流：节点携带的代码按类型写出，编译器只读原子的签名，不解析其余代码。
  *
  * 语句节点的代码按所在的块重新缩进后原样写出；表达式节点写进读它的值的地方；原子节点在图中的位置调用
- * 原子目录中的函数，实参按参数名取自数据边。生成的函数与原子同属一个包，所以只写它自己：
+ * 原子目录中的函数，实参按参数名取自数据边；函数的参数、结果和变量按端口类型写出类型。生成的函数与原子同属一个包，所以只写它自己：
  * 包声明取自原子目录，导入只含函数中用到包名的那些原子导入。函数的结果只有被读时才存进变量，
  * 这些变量在函数体开头声明；分支合并不产生代码，汇合到它的结果直接存进它的变量。决策节点按它的第一个输入决定，
  * 第一个引脚是条件成立的一侧，另一个是它的取反。
@@ -196,7 +196,7 @@ function codeContent(ir: WorkflowIr, language: Language, library: ReadonlyMap<st
       const key = valueKey(value)
       if (!read.has(key) || variables.has(key)) continue
       const stem = signatures.get(value.node)?.name ?? calls.get(value.node)!.label ?? value.node
-      variables.set(key, { name: identifiers.take(`${stem}_${value.port}`, 'value'), type: result.type })
+      variables.set(key, { name: identifiers.take(`${stem}_${value.port}`, 'value'), type: typeName(language, result.type) })
     }
   }
   const variableOf = (value: IrValue) => variables.get(valueKey(holder(value)))
@@ -230,23 +230,10 @@ function codeContent(ir: WorkflowIr, language: Language, library: ReadonlyMap<st
     })
   }
 
-  // 生成函数的参数和结果取所连原子参数、结果的类型；没有连到原子的端口按端口类型。
-  const parameterType = (port: PortDefinition): string => {
-    for (const [node, signature] of signatures) {
-      const arg = calls.get(node)!.args.find(candidate => candidate.value.kind === 'input' && candidate.value.port === port.name)
-      const parameter = signature.parameters.find(candidate => candidate.name === arg?.port)
-      if (parameter !== undefined) return parameter.type
-    }
-    return functions!.types[port.type]
-  }
-  const resultType = (port: PortDefinition): string => {
-    const binding = bindingsOf(items).find(candidate => candidate.port === port.name)
-    return (binding === undefined ? undefined : variableOf(binding.value))?.type ?? functions!.types[port.type]
-  }
-  const list = (ports: readonly PortDefinition[], names: ReadonlyMap<string, string>, typeOf: (port: PortDefinition) => string): string =>
+  const list = (ports: readonly PortDefinition[], names: ReadonlyMap<string, string>): string =>
     ports.map(port => functions === undefined
       ? names.get(port.name)!
-      : fill(functions.typed, { name: names.get(port.name)!, type: typeOf(port) })).join(', ')
+      : fill(functions.typed, { name: names.get(port.name)!, type: typeName(language, port.type) })).join(', ')
 
   const syntax = functions?.atoms
   const folder = [...library.values()]
@@ -269,10 +256,10 @@ function codeContent(ir: WorkflowIr, language: Language, library: ReadonlyMap<st
     },
     open: fill(language.functionOpen, {
       name,
-      parameters: list(ir.inputs, parameters, parameterType),
+      parameters: list(ir.inputs, parameters),
       results: functions === undefined || ir.outputs.length === 0
         ? ''
-        : fill(functions.results, { results: list(ir.outputs, results, resultType) }),
+        : fill(functions.results, { results: list(ir.outputs, results) }),
     }),
     prologue: functions === undefined
       ? []

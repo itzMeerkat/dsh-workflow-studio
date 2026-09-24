@@ -11,12 +11,12 @@ import type { WorkflowNodeRegistry } from './registry.ts'
 import { analyzeWorkflow, indexNodeTypes } from './shared/analysis.ts'
 import { validateWorkflow } from './validation.ts'
 import { buildWorkflowIr } from './shared/ir.ts'
-import { atomLibrary, languageOf, type AtomFile, type AtomLibrary, type AtomSyntax } from './shared/language.ts'
+import { atomLibrary, isAtomFile, languageOf, type AtomFile, type AtomLibrary, type AtomSyntax } from './shared/language.ts'
 import { RenderError, renderWorkflow } from './shared/source.ts'
 import type { DagWorkflowDefinition, FolderListing } from './shared/types.ts'
 
 /**
- * 一个目录中的原子文件：该语言扩展名的文件，不递归，按文件名排序；测试文件和生成的工作流文件不是原子。
+ * 一个目录中的原子文件和类型文件，不递归，按文件名排序。
  * @param folder - 目录的绝对路径。
  * @param syntax - 语言的原子读法。
  * @returns 每个文件的名字和全文。
@@ -24,11 +24,9 @@ import type { DagWorkflowDefinition, FolderListing } from './shared/types.ts'
  */
 export async function readAtomFiles(folder: string, syntax: AtomSyntax): Promise<AtomFile[]> {
   if (!isAbsolute(folder)) throw new Error(`原子目录必须是绝对路径: ${folder}`)
-  const { extension } = syntax
   const entries = await readdir(folder, { withFileTypes: true })
   const files = entries
-    .filter(entry => entry.isFile() && entry.name.endsWith(extension) && !entry.name.endsWith(`_test${extension}`)
-      && entry.name !== syntax.output)
+    .filter(entry => entry.isFile() && (isAtomFile(entry.name, syntax) || entry.name === syntax.types))
     .map(entry => entry.name)
     .sort()
   return Promise.all(files.map(async file => ({ file, text: await readFile(join(folder, file), 'utf8') })))
@@ -41,7 +39,7 @@ export async function readAtomFiles(folder: string, syntax: AtomSyntax): Promise
  */
 export async function workflowAtoms(definition: DagWorkflowDefinition): Promise<AtomLibrary> {
   const syntax = languageOf(definition).functions?.atoms
-  if (definition.atomFolder === undefined || syntax === undefined) return { atoms: new Map(), faults: [] }
+  if (definition.atomFolder === undefined || syntax === undefined) return { atoms: new Map(), faults: [], types: false }
   return atomLibrary(await readAtomFiles(definition.atomFolder, syntax), syntax)
 }
 

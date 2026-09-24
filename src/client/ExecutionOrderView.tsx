@@ -12,6 +12,7 @@ import {
 import type { Edge, Node, NodeProps } from '@xyflow/react'
 import { useMemo } from 'react'
 import type { DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
+import { languageOf } from '../shared/language.ts'
 import { isBoundaryNode } from '../shared/workflow-boundary.ts'
 import type { WorkflowNodeData } from './graph-model.ts'
 import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
@@ -68,7 +69,7 @@ export function ExecutionOrderView({
   return (
     <section className={css.executionView} aria-label={t('execution.title')}>
       <div className={`${css.canvas} ${css.executionCanvas}`}>
-        <NodeCardContext.Provider value={{ t }}>
+        <NodeCardContext.Provider value={{ t, language: languageOf(definition) }}>
           <ReactFlow<ExecutionFlowNode, Edge>
             nodes={nodes}
             edges={edges}

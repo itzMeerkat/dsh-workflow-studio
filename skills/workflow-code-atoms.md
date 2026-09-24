@@ -1,13 +1,14 @@
 # Split code into workflow atoms
 
-Turn existing Go code into a `code` workflow. Each step of the logic becomes an **atom**: one file in an atom folder, defining one function. The graph wires the atoms together, and saving the workflow writes the whole flow as one Go function, `workflow.go`, into the same folder. The graph then shows the program's data flow and branches, and anyone can rewire it in the Code Workflows panel.
+Turn existing Go code into a `code` workflow. Each step of the logic becomes an **atom**: one file in an atom folder, exporting one function. The graph wires the atoms together, and saving the workflow writes the whole flow as one Go function, `workflow.go`, into the same folder. The graph then shows the program's data flow and branches, and anyone can rewire it in the Code Workflows panel.
 
 ## 1. Read the code and choose atoms
 
 Read the whole function you are splitting, and every helper it calls. Then cut it along these lines:
 
 - **One atom is one Go function** with a single purpose: it reads its parameters, computes, and returns its results. Parameters become the node's input ports and results become its output ports, so give results names (`(price float64, err error)`); unnamed results become ports `output`, or `output1`, `output2`… when there are several.
-- **Pointer parameters and results are optional ports.** An unwired `*T` parameter receives `nil`, so make a dependency a pointer when the atom can run without it.
+- **A port's type is the exact Go type**, so a result connects only to a parameter of the same type, or to `any`: an `int` result does not feed a `float64` parameter, and a `*T` result feeds only a `*T` parameter. Convert inside an atom when two steps disagree.
+- **Pointer parameters are optional ports.** An unwired `*T` parameter receives `nil`, so make a dependency a pointer when the atom can run without it.
 - **Every `if`/`else` in the original that chooses between work becomes a `branch` node.** Pull its condition out into an atom that returns `bool`, and put each side's work into its own atoms.
 - **Keep loops, `switch`, early returns, `defer`, goroutines and error handling inside an atom.** The graph has no loops, and a branch only chooses between two sides. If a whole loop is one step of the algorithm, it is one atom.
 - **An error that decides what happens next** is a result (`err error`) followed by an atom `func Failed(err error) bool { return err != nil }` that feeds a `branch`.
@@ -17,27 +18,43 @@ Read the whole function you are splitting, and every helper it calls. Then cut i
 
 The atom folder is one Go package on the Host: use the folder the user names, or create a new package directory for the workflow. Write each atom as its own `.go` file there:
 
-- The file has the package clause, its own imports, and any package-level `var`, `const` and `type` declarations it needs (methods on those types are allowed).
-- It defines **exactly one function**: `func Name(…) … { … }` or `var Name = func(…) … { … }`. A file with no function or with two is not an atom, so a helper goes inside the atom's function or becomes an atom of its own. Methods and type parameters cannot be atoms.
-- Every file shares the package, so names must not clash across files, and no file may be called `workflow.go` (saving writes that file) or end in `_test.go` (those are not read).
+- The file has the package clause, its own imports, and any package-level `var` and `const` declarations it needs.
+- It **exports exactly one function**: `func Name(…) … { … }` or `var Name = func(…) … { … }`, with a name that starts with an upper-case letter. Unexported helpers (`func round(…)`) may sit beside it; a file that exports no function, or two, is not an atom. Methods and type parameters cannot be atoms.
+- **Every custom type the atoms use goes in `types.go`**, together with its methods. That file is part of the package but is not an atom, and the panel only reports whether it exists; a folder whose atoms use only built-in types does not need one.
+- Every file shares the package, so names must not clash across files, and no atom may be called `workflow.go` (saving writes that file) or `types.go`, or end in `_test.go` (those are not read).
 
-For example, `discounted.go`:
+For example, `types.go`:
+
+```go
+package checkout
+
+// Order is what the customer checks out.
+type Order struct {
+	Items []float64
+}
+
+// Coupon takes a fixed amount off.
+type Coupon struct {
+	Value float64
+}
+```
+
+and `discounted.go`:
 
 ```go
 package checkout
 
 import "math"
 
-// Coupon takes a fixed amount off.
-type Coupon struct {
-	Value float64
-}
-
 func Discounted(amount float64, coupon *Coupon) (price float64) {
 	price = amount * 0.9
 	if coupon != nil {
 		price -= coupon.Value
 	}
+	return floor(price)
+}
+
+func floor(price float64) float64 {
 	return math.Max(price, 0)
 }
 ```
@@ -46,11 +63,13 @@ func Discounted(amount float64, coupon *Coupon) (price float64) {
 
 | Need | Node | How to wire it |
 |---|---|---|
-| A value the original function received | `workflow-input` (at most one) | Declare one entry in its `outputs` per parameter; wire each to the atoms that read it |
-| A value the original function returned | `workflow-output` (at most one) | Declare one entry in its `inputs` per result, with `"required": false`; wire each from the atom or `merge` that produces it |
+| A value the original function received | `workflow-input` (at most one) | Declare one entry in its `outputs` per parameter, typed as below; wire each to the atoms that read it |
+| A value the original function returned | `workflow-output` (at most one) | Declare one entry in its `inputs` per result, typed as below, with `"required": false`; wire each from the atom or `merge` that produces it |
 | A step | `code-atom` | Set `config.atom` to the atom's file name, such as `"discounted.go"`; ports are read from the function's signature when the workflow is saved, so do not write `inputs` or `outputs` yourself |
 | A choice | `branch` | Wire a `bool` result to its `condition` input; draw `exec` edges from its `true` and `false` pins to the first atom of each side |
 | Two sides meeting again | `merge` | Wire one result from each side into `input1` and `input2`, draw an `exec` edge from the last atom of each side into it, and read its `output` afterwards |
+
+A declared port's `type` is the Go type of the parameter or result, written as in Go (`Order`, `int`, `[]string`, `*Coupon`), except the four built-in port types: `number` for `float64`, `boolean` for `bool`, `string`, and `any` (also for `interface{}`). The workflow's function is declared with exactly these types.
 
 A data edge names its ports: `sourcePort` is the result name and `targetPort` the parameter name. Every atom on a `branch` side needs an `exec` edge from the atom before it on that side (the first one from the `branch` pin); a data edge alone does not put it on the side, and saving refuses a required parameter whose source may have been skipped. Values from both sides reach later atoms only through a `merge`.
 
@@ -63,7 +82,7 @@ Example — a checkout that discounts large orders, with atoms `subtotal.go`, `i
   "language": "go",
   "atomFolder": "/home/me/shop/checkout",
   "nodes": [
-    { "id": "in", "type": "workflow-input", "outputs": [{ "name": "order", "type": "any" }] },
+    { "id": "in", "type": "workflow-input", "outputs": [{ "name": "order", "type": "Order" }] },
     { "id": "subtotal", "type": "code-atom", "config": { "atom": "subtotal.go" } },
     { "id": "large", "type": "code-atom", "config": { "atom": "is_large.go" } },
     { "id": "gate", "type": "branch" },
@@ -119,6 +138,7 @@ Saving refuses, naming the node, when:
 
 - a `code-atom` names a file that is not in the atom folder, or is not an atom (`missing-atom`);
 - a non-pointer parameter has no incoming edge;
+- a data edge joins two ports of different types, neither of them `any`;
 - a value is read from a `merge` that also collects something other than atom results (`no-value`);
 - a `branch` has nothing wired to `condition`.
 

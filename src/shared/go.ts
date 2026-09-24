@@ -7,7 +7,20 @@
  */
 
 import type { Atom, AtomFault, Signature, TypedName } from './language.ts'
-import type { PortType } from './types.ts'
+import type { BuiltinPortType, PortType } from './types.ts'
+
+/** 每种内置端口类型在 Go 中的类型。 */
+export const GO_TYPES: Readonly<Record<BuiltinPortType, string>> = {
+  any: 'any',
+  string: 'string',
+  number: 'float64',
+  boolean: 'bool',
+}
+
+const BUILTIN_OF = new Map<string, PortType>([
+  ...Object.entries(GO_TYPES).map(([builtin, type]) => [type, builtin] as const),
+  ['interface{}', 'any'],
+])
 
 /** 开头即是类型的关键字：`chan int` 是一个类型，而不是名为 `chan` 的参数。 */
 const TYPE_KEYWORDS = new Set(['chan', 'func', 'interface', 'map', 'struct'])
@@ -27,7 +40,8 @@ export function goSignature(code: string): Signature | undefined {
   const results = code.slice(close + 1, body).trim()
   return {
     ...(header[1] === undefined ? {} : { name: header[1] }),
-    parameters: entries(code.slice(open + 1, close), 'input'),
+    // 指针可以是 nil，所以指针参数不必接线。
+    parameters: entries(code.slice(open + 1, close), 'input').map(entry => ({ ...entry, optional: entry.type.startsWith('*') })),
     results: results.startsWith('(') ? entries(results.slice(1, -1), 'output') : entries(results, 'output'),
   }
 }
@@ -57,17 +71,10 @@ function entries(list: string, fallback: string): TypedName[] {
   return named
 }
 
-/** 指针可以是 nil，所以指针参数不必接线，指针结果也可能没有值。 */
+/** 一项的端口类型：Go 类型的写法，空白合并；对应内置端口类型的 Go 类型取内置类型的名字。 */
 function typed(name: string, type: string): TypedName {
-  const pointer = type.startsWith('*')
-  return { name, type, port: portType(pointer ? type.slice(1) : type), optional: pointer }
-}
-
-/** Go 类型对应的端口类型；其余类型都能接任何值。 */
-function portType(type: string): PortType {
-  if (type === 'bool') return 'boolean'
-  if (type === 'string') return 'string'
-  return /^(?:u?int(?:8|16|32|64)?|uintptr|float(?:32|64)|byte|rune)$/.test(type) ? 'number' : 'any'
+  const written = type.replaceAll(/\s+/g, ' ')
+  return { name, type: BUILTIN_OF.get(written) ?? written }
 }
 
 /** 按不在括号内的逗号拆开，去掉空项。 */
@@ -112,10 +119,10 @@ function bodyStart(code: string, from: number): number | undefined {
 }
 
 /**
- * 读一个原子文件：它声明的包、导入、全局声明，以及唯一的函数。
+ * 读一个原子文件：它声明的包、导入，以及唯一的导出函数的签名。
  *
- * 函数是一个没有接收者的具名函数，或值为函数字面量的顶层 `var`；方法、类型、常量和其余变量都是全局声明，
- * 原样随原子写出。文件开头 `package` 之前的内容（例如构建约束）不写出。
+ * 导出函数是名字以大写字母开头、没有接收者的具名函数，或值为函数字面量的顶层 `var`；
+ * 文件中的其余声明，包括未导出的函数，只供它使用。
  * @param file - 文件名，原子的 ID。
  * @param text - 文件全文。
  * @returns 原子，或它不能作为原子的原因。
@@ -123,23 +130,21 @@ function bodyStart(code: string, from: number): number | undefined {
 export function goAtom(file: string, text: string): Atom | AtomFault {
   let pkg = ''
   const imports: string[] = []
-  const globals: string[] = []
-  const functions: { code: string; signature: Signature | undefined; name: string }[] = []
+  const exported: { name: string; signature: Signature | undefined }[] = []
   for (const declaration of declarations(text)) {
     const body = declaration.replace(/^(?:\s*\/\/[^\n]*)*\s*/, '')
-    const named = /^func\s+([\p{L}_][\p{L}\p{N}_]*)/u.exec(body)
-    const closure = /^var\s+([\p{L}_][\p{L}\p{N}_]*)\s*=\s*(func\b[\s\S]*)$/u.exec(body)
+    const named = /^func\s+(\p{Lu}[\p{L}\p{N}_]*)/u.exec(body)
+    const closure = /^var\s+(\p{Lu}[\p{L}\p{N}_]*)\s*=\s*(func\b[\s\S]*)$/u.exec(body)
     if (body.startsWith('package')) pkg = body.slice('package'.length).trim()
     else if (body.startsWith('import')) imports.push(...importSpecs(body.slice('import'.length)))
-    else if (named !== null) functions.push({ code: declaration, signature: goSignature(body), name: named[1]! })
-    else if (closure !== null) functions.push({ code: declaration, signature: goSignature(closure[2]!), name: closure[1]! })
-    else globals.push(declaration)
+    else if (named !== null) exported.push({ name: named[1]!, signature: goSignature(body) })
+    else if (closure !== null) exported.push({ name: closure[1]!, signature: goSignature(closure[2]!) })
   }
-  if (functions.length === 0) return { file, fault: 'no-function' }
-  if (functions.length > 1) return { file, fault: 'several-functions' }
-  const [{ code, signature, name }] = functions as [typeof functions[number]]
+  if (exported.length === 0) return { file, fault: 'no-exported-function' }
+  if (exported.length > 1) return { file, fault: 'several-exported-functions', names: exported.map(({ name }) => name) }
+  const [{ name, signature }] = exported as [typeof exported[number]]
   if (signature === undefined) return { file, fault: 'unreadable-signature' }
-  return { file, package: pkg, imports, globals, code, signature: { ...signature, name } }
+  return { file, package: pkg, imports, signature: { ...signature, name } }
 }
 
 /** 一条 `import` 声明中的导入项，按原文，不含注释。 */
