@@ -6,7 +6,7 @@
  * @module dsh-workflow-studio
  */
 
-import { execSourcePin, inboundEdges, isDataEdge, topologicalLevels } from './graph.ts'
+import { execSourcePin, inboundEdges, isDataEdge, nodeExecPins, topologicalLevels } from './graph.ts'
 import { NodeId } from './types.ts'
 import { WORKFLOW_OUTPUT_TYPE } from './workflow-boundary.ts'
 import type {
@@ -138,10 +138,11 @@ export function analyzeWorkflow(
 ): WorkflowAnalysis {
   const nodes = new Map(definition.nodes.map(node => [node.id, node]))
   const typeOf = (node: NodeId): NodeTypeSummary => catalog.get(nodes.get(node)!.type)!
+  const pinsOf = (node: NodeId): readonly string[] => nodeExecPins(nodes.get(node)!, typeOf(node))
   const inbound = inboundEdges(definition.edges)
   // guard 与类型推断都沿同一个拓扑序自上而下求解，因此只排一次。
   const levels = topologicalLevels(definition.nodes, definition.edges).levels
-  const guards = computeGuards(levels, typeOf, inbound)
+  const guards = computeGuards(levels, typeOf, pinsOf, inbound)
   const outputTypes = inferOutputTypes(levels, typeOf, inbound)
 
   const diagnostics: WorkflowDiagnostic[] = []
@@ -150,7 +151,7 @@ export function analyzeWorkflow(
   }
   for (const node of definition.nodes) {
     if (typeOf(node.id).execKind === 'join') {
-      diagnostics.push(...checkJoin(node.id, guards, typeOf, inbound.data.get(node.id) ?? []))
+      diagnostics.push(...checkJoin(node.id, guards, typeOf, pinsOf, inbound.data.get(node.id) ?? []))
     }
   }
   return { order: levels.flat(), guards, diagnostics }
@@ -165,6 +166,7 @@ export function analyzeWorkflow(
 function computeGuards(
   levels: readonly (readonly DagNodeDefinition[])[],
   typeOf: (node: NodeId) => NodeTypeSummary,
+  pinsOf: (node: NodeId) => readonly string[],
   inbound: ReturnType<typeof inboundEdges>,
 ): ReadonlyMap<NodeId, Guard> {
   const guards = new Map<NodeId, Guard>()
@@ -173,7 +175,7 @@ function computeGuards(
       const execEdges = inbound.exec.get(node.id) ?? []
       const reached = execEdges.map((edge) => {
         const pins = new Set(guards.get(edge.source)!)
-        if (typeOf(edge.source).execOutputs.length > 1) {
+        if (pinsOf(edge.source).length > 1) {
           pins.add(pinAtom(edge.source, execSourcePin(edge)))
         }
         return pins
@@ -304,6 +306,7 @@ function checkJoin(
   node: NodeId,
   guards: ReadonlyMap<NodeId, Guard>,
   typeOf: (node: NodeId) => NodeTypeSummary,
+  pinsOf: (node: NodeId) => readonly string[],
   sources: readonly DagDataEdge[],
 ): WorkflowDiagnostic[] {
   if (sources.length === 0) return []
@@ -323,7 +326,7 @@ function checkJoin(
       })
     }
   }
-  if (!covers(remainders, typeOf, isDecision)) {
+  if (!covers(remainders, pinsOf, isDecision)) {
     diagnostics.push({ code: 'merge-gap', nodeId: node })
   }
   return diagnostics
@@ -344,20 +347,20 @@ function excludes(a: Guard, b: Guard, isDecision: (atom: string) => boolean): bo
  */
 function covers(
   remainders: readonly Guard[],
-  typeOf: (node: NodeId) => NodeTypeSummary,
+  pinsOf: (node: NodeId) => readonly string[],
   isDecision: (atom: string) => boolean,
 ): boolean {
   if (remainders.some(remainder => remainder.size === 0)) return true
   const chosen = remainders.flatMap(remainder => [...remainder]).find(isDecision)
   if (chosen === undefined) return false
   const decision = atomNode(chosen)
-  return typeOf(decision).execOutputs.every((pin) => {
+  return pinsOf(decision).every((pin) => {
     const atom = pinAtom(decision, pin)
     return covers(
       remainders
         .filter(remainder => [...remainder].every(item => atomNode(item) !== decision || item === atom))
         .map(remainder => new Set([...remainder].filter(item => item !== atom))),
-      typeOf,
+      pinsOf,
       isDecision,
     )
   })

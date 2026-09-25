@@ -5,10 +5,9 @@
  * @module dsh-workflow-studio
  */
 
-import { execOutputPins } from '../shared/graph.ts'
 import type { NodeId } from '../shared/types.ts'
 import { boundaryPorts, WORKFLOW_OUTPUT_TYPE } from '../shared/workflow-boundary.ts'
-import { CARD_WIDTH, nodeInputPorts, nodeOutputPorts, type WorkflowNodeData } from './graph-model.ts'
+import { CARD_WIDTH, nodeInputPorts, nodeOutputPins, nodeOutputPorts, type WorkflowNodeData } from './graph-model.ts'
 import { workflowResultValues } from './workflow-ports.ts'
 
 /** Stage column geometry in pixels; the cards keep their default width, {@link CARD_WIDTH}. */
@@ -67,7 +66,7 @@ export interface ExecutionLayout {
  * @returns The estimated height in pixels.
  */
 export function estimateNodeCardHeight(data: WorkflowNodeData): number {
-  const pins = Math.max(1, execOutputPins(data.catalog ?? {}).length)
+  const pins = Math.max(1, nodeOutputPins(data).length)
   const ports = Math.max(nodeInputPorts(data).length, nodeOutputPorts(data).length)
   const controls = data.catalog?.controls.length ?? 0
   const outputs = displayedOutputCount(data)

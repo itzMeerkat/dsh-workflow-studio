@@ -55,7 +55,7 @@ export {
   EXEC_RUN_PIN, EXEC_THEN_PIN, execOutputPins, execSourcePin, execTargetPin, isDataEdge, isExecEdge,
 } from './shared/graph.ts'
 export { NodeFailure, WorkflowNode, toFailureResult } from './node.ts'
-export { BRANCH_FALSE_PIN, BRANCH_TRUE_PIN, BranchNode, MergeNode } from './flow-nodes.ts'
+export { BRANCH_FALSE_PIN, BRANCH_TRUE_PIN, BranchNode, MergeNode, SwitchNode } from './flow-nodes.ts'
 export {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, boundaryPorts, boundarySide, isBoundaryNode, withBoundaryPorts,
   withRunInputs, workflowInputNode, workflowInputPorts, workflowOutputNode, workflowOutputPorts,

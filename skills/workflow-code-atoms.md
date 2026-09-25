@@ -10,7 +10,8 @@ Read the whole function you are splitting, and every helper it calls. Then cut i
 - **A port's type is the exact Go type**, so a result connects only to a parameter of the same type, or to `any`: an `int` result does not feed a `float64` parameter, and a `*T` result feeds only a `*T` parameter. Convert inside an atom when two steps disagree.
 - **Pointer parameters are optional ports.** An unwired `*T` parameter receives `nil`, so make a dependency a pointer when the atom can run without it.
 - **Every `if`/`else` in the original that chooses between work becomes a `branch` node.** Pull its condition out into an atom that returns `bool`, and put each side's work into its own atoms.
-- **Keep loops, `switch`, early returns, `defer`, goroutines and error handling inside an atom.** The graph has no loops, and a branch only chooses between two sides. If a whole loop is one step of the algorithm, it is one atom.
+- **A `switch` in the original that chooses between work becomes a `switch` node** whose cases are the `case` values; its `default` pin is the `default` clause.
+- **Keep loops, early returns, `defer`, goroutines and error handling inside an atom.** The graph has no loops. If a whole loop is one step of the algorithm, it is one atom.
 - **An error that decides what happens next** is a result (`err error`) followed by an atom `func Failed(err error) bool { return err != nil }` that feeds a `branch`.
 - **Keep atoms small but meaningful.** A good atom is a step you would name in a code review ("compute subtotal", "apply coupon"). Do not make an atom for a single assignment; do not leave several steps in one atom when the graph should show a choice between them.
 
@@ -67,6 +68,7 @@ func floor(price float64) float64 {
 | A value the original function returned | `workflow-output` (at most one) | Declare one entry in its `inputs` per result, typed as below, with `"required": false`; wire each from the atom or `merge` that produces it |
 | A step | `code-atom` | Set `config.atom` to the atom's file name, such as `"discounted.go"`; ports are read from the function's signature when the workflow is saved, so do not write `inputs` or `outputs` yourself |
 | A choice | `branch` | Wire a `bool` result to its `condition` input; draw `exec` edges from its `true` and `false` pins to the first atom of each side |
+| A choice among values | `switch` | Put the case values in `config.cases` (`["a", "b"]`); wire the value to its `value` input; draw `exec` edges from each case's pin, and from `default`, to the first atom of that side. A `string` value's cases are quoted; any other type's are written as they are, so a case can name a constant |
 | A step that is itself a saved code workflow in the same folder | `subworkflow` | Set `config.workflow` to that workflow's ID; its ports are that workflow's inputs and outputs, filled in when saved, and the call goes to the function it generated |
 | Two sides meeting again | `merge` | Wire one result from each side into `input1` and `input2`, draw an `exec` edge from the last atom of each side into it, and read its `output` afterwards |
 

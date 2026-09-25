@@ -7,7 +7,7 @@
  */
 
 import { atomNode, atomPin, type WorkflowAnalysis } from './analysis.ts'
-import { isDataEdge } from './graph.ts'
+import { isDataEdge, nodeExecPins } from './graph.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './workflow-boundary.ts'
 import type {
   DagNodeDefinition, DagWorkflowDefinition, NodeExecKind, NodeId, NodeTypeSummary, PortDefinition,
@@ -37,7 +37,7 @@ export interface IrCall {
   readonly execKind: NodeExecKind
   /** 节点配置，例如代码节点携带的代码。 */
   readonly config: Record<string, unknown>
-  /** 节点声明的执行输出引脚，按声明顺序。 */
+  /** 节点的执行输出引脚，按声明顺序。 */
   readonly pins: readonly string[]
   /** 已接线的输入端口及其来源，按端口声明顺序；未接线的端口不出现。 */
   readonly args: readonly IrArgument[]
@@ -60,8 +60,8 @@ export interface IrArm {
 /**
  * 由一个节点的执行引脚守卫的块。
  *
- * 有两个 arm 时它们是一个双引脚决策节点的两个引脚，任何一次运行恰好执行其中一个，因此可以写成 if/else；
- * 其他情况下只有一个 arm。
+ * 有多个 arm 时它们是同一个决策节点的不同引脚，任何一次运行至多执行其中一个，因此可以写成 if/else if；
+ * arm 覆盖了决策节点的全部引脚时最后一个写成 else。其他情况下只有一个 arm。
  */
 export interface IrGuard {
   readonly kind: 'guard'
@@ -144,13 +144,11 @@ export function buildWorkflowIr(
 
 type MutableItem = IrCall | IrOutputs | { readonly kind: 'guard'; readonly gate: IrCall; readonly arms: IrArm[] }
 
-/** `atom` 是否是 `guard` 已有 arm 的另一侧：同一个双引脚决策节点的另一个引脚。 */
+/** `atom` 是否是 `guard` 已有 arm 之外的一侧：同一个决策节点的另一个引脚。 */
 function complements(guard: { readonly gate: IrCall; readonly arms: readonly IrArm[] }, atom: string): boolean {
   return guard.gate.node === atomNode(atom)
     && guard.gate.execKind === 'decision'
-    && guard.gate.pins.length === 2
-    && guard.arms.length === 1
-    && guard.arms[0]!.pin !== atomPin(atom)
+    && guard.arms.every(arm => arm.pin !== atomPin(atom))
 }
 
 function commonPrefix(left: readonly string[], right: readonly string[]): number {
@@ -164,7 +162,7 @@ function commonPrefix(left: readonly string[], right: readonly string[]): number
  *
  * 每一步只从上游都已排好的节点中选，所以结果总是合法的拓扑序；选哪个由与上一个节点的条件路径
  * 共同前缀的长度决定，留在当前块中的优先；路径在分叉处落到同一决策节点另一引脚的次之，
- * 使两侧相邻写成 if/else；其余按原拓扑序。
+ * 使各侧相邻写成 if/else if；其余按原拓扑序。
  */
 function schedule(
   definition: DagWorkflowDefinition,
@@ -236,7 +234,7 @@ class Lowering {
       ...(node.label === undefined ? {} : { label: node.label }),
       execKind: summary.execKind,
       config: node.config,
-      pins: summary.execOutputs,
+      pins: nodeExecPins(node, summary),
       args: this.argumentsOf(node),
       results: this.outputsOf(node),
     }

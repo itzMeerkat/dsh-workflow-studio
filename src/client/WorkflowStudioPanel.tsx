@@ -172,33 +172,33 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   /** Save the edited definition; failures show as the notice. */
   const persist = async (): Promise<SavedWorkflow | undefined> => {
     const source = formatEditorDefinition(definition)
-    const saved = await callRemote(
+    const result = await callRemote(
       () => selectedId === undefined ? remote.save(source) : remote.update(selectedId, source),
       json => JSON.parse(json) as SavedWorkflow,
       setNotice,
     )
-    if (saved !== undefined) setSelectedId(saved.workflowId)
-    return saved
+    if (result !== undefined) setSelectedId(result.workflowId)
+    return result
   }
 
   const save = async (): Promise<void> => {
     setPhase('saving')
     setNotice(undefined)
-    const saved = await persist()
-    if (saved === undefined) {
+    const result = await persist()
+    if (result === undefined) {
       setPhase('ready')
       return
     }
     // Saving a workflow with an atom folder also writes its function into that folder, in a file named after its ID.
     const written = definition.atomFolder === undefined || atomSyntax === undefined
       ? undefined
-      : `${saved.workflowId}${atomSyntax.outputSuffix}`
-    await load(saved.workflowId)
+      : `${result.workflowId}${atomSyntax.outputSuffix}`
+    await load(result.workflowId)
     setNotice(written === undefined
       ? t('notice.saved')
-      : saved.sourceError === undefined
+      : result.sourceError === undefined
         ? `${t('notice.savedFile')} ${written}`
-        : `${t('notice.savedNoFile')} ${saved.sourceError}`)
+        : `${t('notice.savedNoFile')} ${result.sourceError}`)
   }
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
@@ -206,10 +206,10 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     setRunPrompt(false)
     setPhase('running')
     setNotice(undefined)
-    const saved = await persist()
-    const runId = saved === undefined
+    const result = await persist()
+    const runId = result === undefined
       ? undefined
-      : await callRemote(() => remote.start(saved.workflowId, inputs), id => id, setNotice)
+      : await callRemote(() => remote.start(result.workflowId, inputs), id => id, setNotice)
     if (runId !== undefined) {
       runs.setFilter('workflow')
       setView('runs')

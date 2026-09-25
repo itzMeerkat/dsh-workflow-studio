@@ -3,8 +3,9 @@
  * @module dsh-workflow-studio
  */
 
+import { SWITCH_TYPE, switchPins } from './switch.ts'
 import type {
-  DagDataEdge, DagEdgeDefinition, DagExecEdge, PortDefinition, WorkflowNodeExecutor,
+  DagDataEdge, DagEdgeDefinition, DagExecEdge, DagNodeDefinition, PortDefinition, WorkflowNodeExecutor,
 } from './types.ts'
 
 /** 每个节点的执行输入引脚名；执行边默认连到该引脚。 */
@@ -35,6 +36,18 @@ export function isDataEdge(edge: DagEdgeDefinition): edge is DagDataEdge {
  */
 export function execOutputPins(executor: Pick<WorkflowNodeExecutor, 'execOutputs'>): readonly string[] {
   return executor.execOutputs ?? [EXEC_THEN_PIN]
+}
+
+/**
+ * 一个节点的执行输出引脚：多路分支节点的引脚取自它的 case，其余节点的引脚取自节点类型。
+ * @param node - 节点。
+ * @param executor - 节点的执行器，或浏览器目录中的节点类型。
+ */
+export function nodeExecPins(
+  node: Pick<DagNodeDefinition, 'type' | 'config'>,
+  executor: Pick<WorkflowNodeExecutor, 'execOutputs'>,
+): readonly string[] {
+  return node.type === SWITCH_TYPE ? switchPins(node.config) : execOutputPins(executor)
 }
 
 /** 按目标节点分组的入边，数据边与执行边分开。 */

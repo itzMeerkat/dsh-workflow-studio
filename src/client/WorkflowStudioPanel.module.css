@@ -1055,7 +1055,8 @@
 
 .nodeControl input[type='number'],
 .nodeControl input[type='text'],
-.nodeControl select {
+.nodeControl select,
+.switchCase input {
   width: 100%;
   min-width: 0;
   height: 25px;
@@ -1070,6 +1071,38 @@
 
 .nodeControl:has(input[type='checkbox']) {
   display: flex;
+}
+
+.switchCases {
+  display: grid;
+  gap: 5px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.switchCase {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+}
+
+.switchCase input[aria-invalid='true'] {
+  border-color: #b83232;
+}
+
+.switchCase button,
+.addCase {
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.addCase {
+  justify-self: start;
+  padding: 3px 8px;
 }
 
 .nodeOutput {

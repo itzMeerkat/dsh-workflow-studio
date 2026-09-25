@@ -144,10 +144,16 @@ export interface Language {
   readonly functionOpen: string
   /** 开启条件块的一行，含 `{condition}`。 */
   readonly conditionOpen: string
-  /** 开启同一条件另一侧的一行；用 {@link blockEnd} 闭合块的语言在这一行闭合上一侧。 */
+  /** 开启同一条件最后一侧的一行；用 {@link blockEnd} 闭合块的语言在这一行闭合上一侧。 */
   readonly otherwiseOpen: string
+  /** 开启同一决策节点另一个引脚一侧的一行，含 `{condition}`；闭合上一侧同 {@link otherwiseOpen}。 */
+  readonly otherwiseIfOpen: string
   /** 条件取反的表达式，含 `{condition}`。 */
   readonly negation: string
+  /** 两个值相等的表达式，含 `{left}` 和 `{right}`。 */
+  readonly equality: string
+  /** 连接多个条件、任一成立即成立的运算符，含两侧空白。 */
+  readonly or: string
   /** 闭合函数或条件块的一行；靠缩进闭合块的语言没有。 */
   readonly blockEnd?: string
   /** 空块中必须写的一行；允许空块的语言没有。 */
@@ -166,7 +172,10 @@ export const PSEUDOCODE: Language = {
   functionOpen: 'workflow {name}({parameters}):',
   conditionOpen: 'if {condition}:',
   otherwiseOpen: 'else:',
+  otherwiseIfOpen: 'else if {condition}:',
   negation: 'not {condition}',
+  equality: '{left} == {right}',
+  or: ' or ',
   reserved: [],
 }
 
@@ -178,7 +187,10 @@ export const PYTHON: Language = {
   functionOpen: 'def {name}({parameters}):',
   conditionOpen: 'if {condition}:',
   otherwiseOpen: 'else:',
+  otherwiseIfOpen: 'elif {condition}:',
   negation: 'not ({condition})',
+  equality: '{left} == {right}',
+  or: ' or ',
   emptyBlock: 'pass',
   reserved: [
     'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
@@ -196,7 +208,10 @@ export const TYPESCRIPT: Language = {
   functionOpen: 'export function {name}({parameters}) {',
   conditionOpen: 'if ({condition}) {',
   otherwiseOpen: '} else {',
+  otherwiseIfOpen: '} else if ({condition}) {',
   negation: '!({condition})',
+  equality: '{left} === {right}',
+  or: ' || ',
   blockEnd: '}',
   reserved: [
     'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
@@ -214,7 +229,10 @@ export const GO: Language = {
   functionOpen: 'func {name}({parameters}){results} {',
   conditionOpen: 'if {condition} {',
   otherwiseOpen: '} else {',
+  otherwiseIfOpen: '} else if {condition} {',
   negation: '!({condition})',
+  equality: '{left} == {right}',
+  or: ' || ',
   blockEnd: '}',
   reserved: [
     'break', 'case', 'chan', 'const', 'continue', 'default', 'defer', 'else', 'fallthrough', 'for',

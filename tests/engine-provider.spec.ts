@@ -140,7 +140,7 @@ describe('DagEngineProvider', () => {
     assert.deepEqual(
       ctx.workflowNodeRegistry.listTypes().map(node => node.type).sort(),
       [
-        'branch', 'code-atom', 'code-block', 'code-condition', 'merge', 'subworkflow', 'subworkflow-entry', 'subworkflow-exit',
+        'branch', 'code-atom', 'code-block', 'code-condition', 'merge', 'subworkflow', 'subworkflow-entry', 'subworkflow-exit', 'switch',
         'workflow-input', 'workflow-output',
       ],
     )

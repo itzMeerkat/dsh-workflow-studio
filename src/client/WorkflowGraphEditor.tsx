@@ -21,10 +21,14 @@ import type {
 import { withCallees, type Callees } from '../shared/callees.ts'
 import { languageOf } from '../shared/language.ts'
 import { SUBWORKFLOW_FIELD, subworkflowOf } from '../shared/subworkflow.ts'
+import { SWITCH_CASES } from '../shared/switch.ts'
 import {
   connectionError,
   flowEdges,
   flowNodes,
+  handleId,
+  nodeOutputPins,
+  parseHandle,
   toDefinition,
   withRunRecord,
   type WorkflowFlowNode,
@@ -107,10 +111,15 @@ export function WorkflowGraphEditor({
   }
 
   /**
-   * Replace one node's definition. An atom node's ports follow its atom, so the edit rereads them and
-   * drops the edges on ports the atom no longer declares.
+   * Replace one node's definition. A node calling an atom or a workflow takes its ports from it, and a switch
+   * takes its pins from its cases, so the edit rereads both and drops the edges on ports and pins that are gone.
+   * @param renamed - A pin whose name changed, so the edges on it follow.
    */
-  const updateNode = (nodeId: string, update: (node: DagNodeDefinition) => DagNodeDefinition): void => {
+  const updateNode = (
+    nodeId: string,
+    update: (node: DagNodeDefinition) => DagNodeDefinition,
+    renamed?: { readonly from: string; readonly to: string },
+  ): void => {
     const edited = nodes.map(node => node.id === nodeId
       ? { ...node, data: { ...node.data, definition: update(node.data.definition) } }
       : node)
@@ -118,10 +127,17 @@ export function WorkflowGraphEditor({
     const signed = next.nodes.find(node => node.id === nodeId)!
     const kept = new Set<string>(next.edges.map(edge => edge.id))
     const nextNodes = edited.map(node => node.id === nodeId ? { ...node, data: { ...node.data, definition: signed } } : node)
-    const nextEdges = edges.filter(edge => kept.has(edge.id))
+    const pins = nodeOutputPins(nextNodes.find(node => node.id === nodeId)!.data)
+    const nextEdges = edges.flatMap((edge) => {
+      if (!kept.has(edge.id)) return []
+      const handle = edge.source === nodeId ? parseHandle(edge.sourceHandle) : undefined
+      if (handle?.kind !== 'exec') return [edge]
+      const pin = handle.name === renamed?.from ? renamed.to : handle.name
+      return pins.includes(pin) ? [{ ...edge, sourceHandle: handleId({ kind: 'exec', name: pin }) }] : []
+    })
     setNodes(nextNodes)
     setEdges(nextEdges)
-    onChange(next)
+    onChange(toDefinition(definition, nextNodes, nextEdges))
   }
 
   const updateConfig = (nodeId: string, name: string, value: unknown): void => {
@@ -141,6 +157,14 @@ export function WorkflowGraphEditor({
       if (nodeId === selectedNodeId) setConfigSource(JSON.stringify(config, null, 2))
       return { ...node, ...(named ? { label: callees.workflows.get(workflow)!.name } : {}), config }
     })
+  }
+
+  const editCases = (nodeId: string, cases: readonly string[], renamed?: { readonly from: string; readonly to: string }): void => {
+    updateNode(nodeId, (node) => {
+      const config = { ...node.config, [SWITCH_CASES]: cases }
+      if (nodeId === selectedNodeId) setConfigSource(JSON.stringify(config, null, 2))
+      return { ...node, config }
+    }, renamed)
   }
 
   /** Show why a connection is rejected, or clear the notice when it is allowed. */
@@ -177,7 +201,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div className={css.canvas}>
-        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow } }}>
+        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow }, editCases }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}

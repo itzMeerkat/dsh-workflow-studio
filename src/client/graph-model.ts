@@ -5,11 +5,11 @@ import { MarkerType, type Connection, type Edge, type Node } from '@xyflow/react
 import {
   EXEC_RUN_PIN,
   EXEC_THEN_PIN,
-  execOutputPins,
   execPinFault,
   execSourcePin,
   execTargetPin,
   isExecEdge,
+  nodeExecPins,
   portsAreCompatible,
 } from '../shared/graph.ts'
 import { isBoundaryNode } from '../shared/workflow-boundary.ts'
@@ -195,6 +195,11 @@ export function nodeOutputPorts(data: WorkflowNodeData): readonly PortDefinition
   return data.definition.outputs ?? data.catalog?.outputs ?? []
 }
 
+/** Execution output pins of a canvas node: a switch's cases, or the catalog's pins. */
+export function nodeOutputPins(data: WorkflowNodeData): readonly string[] {
+  return nodeExecPins(data.definition, data.catalog ?? {})
+}
+
 /**
  * Why a connection may not be added.
  * @param ignoredEdgeId - An edge being reconnected, which does not occupy its target port.
@@ -213,7 +218,7 @@ export function connectionError(
   const sourceNode = nodes.find(node => node.id === connection.source)
   const targetNode = nodes.find(node => node.id === connection.target)
   if (source.kind === 'exec' && target.kind === 'exec') {
-    const declared = sourceNode === undefined ? [] : execOutputPins(sourceNode.data.catalog ?? {})
+    const declared = sourceNode === undefined ? [] : nodeOutputPins(sourceNode.data)
     if (execPinFault(declared, source.name, target.name) !== undefined) return 'notice.connectPorts'
     // An execution input joins every edge that reaches it, so only an identical edge is rejected.
     const duplicate = edges.some(edge =>

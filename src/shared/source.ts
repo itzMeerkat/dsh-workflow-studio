@@ -13,7 +13,8 @@ import {
   CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, atomOf, codeOf, typeName, type Atom, type Language, type Signature,
 } from './language.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf, workflowSignature } from './subworkflow.ts'
-import type { NodeId, PortDefinition } from './types.ts'
+import { SWITCH_DEFAULT_PIN, SWITCH_TYPE, switchCases } from './switch.ts'
+import type { NodeId, PortDefinition, PortType } from './types.ts'
 
 /** 一种语言写不出的图，`node` 是需要修改的节点。 */
 export type RenderFault =
@@ -59,13 +60,14 @@ export function renderWorkflow(ir: WorkflowIr, language: Language, callees: Call
     return lines.length > 0 || language.emptyBlock === undefined ? lines : [line(depth, language.emptyBlock)]
   }
   // 另一侧的开启行自带上一侧的闭合（例如 `} else {`），所以块只在最后一侧之后闭合。
+  // arm 覆盖了决策节点的每个引脚时，最后一侧不必写条件。
+  const armOpen = (item: IrGuard, index: number): string => {
+    if (index > 0 && index === item.arms.length - 1 && item.arms.length === item.gate.pins.length) return language.otherwiseOpen
+    const condition = content.condition(item.gate, item.arms[index]!.pin)
+    return fill(index === 0 ? language.conditionOpen : language.otherwiseIfOpen, { condition })
+  }
   const guard = (item: IrGuard, depth: number): string[] => [
-    ...item.arms.flatMap((arm, index) => [
-      line(depth, index === 0
-        ? fill(language.conditionOpen, { condition: content.condition(item.gate, arm.pin) })
-        : language.otherwiseOpen),
-      ...block(arm.body, depth + 1),
-    ]),
+    ...item.arms.flatMap((arm, index) => [line(depth, armOpen(item, index)), ...block(arm.body, depth + 1)]),
     ...close(depth),
   ]
 
@@ -161,8 +163,9 @@ function runContent(ir: WorkflowIr, language: Language, callees: Callees): Conte
  * 原子目录中的函数，子工作流节点调用它嵌入的工作流生成的函数，实参按参数名取自数据边；
  * 函数的参数、结果和变量按端口类型写出类型。生成的函数与原子同属一个包，所以只写它自己：
  * 包声明取自原子目录，导入只含函数中用到包名的那些原子导入。函数的结果只有被读时才存进变量，
- * 这些变量在函数体开头声明；分支合并不产生代码，汇合到它的结果直接存进它的变量。决策节点按它的第一个输入决定，
- * 第一个引脚是条件成立的一侧，另一个是它的取反。
+ * 这些变量在函数体开头声明；分支合并不产生代码，汇合到它的结果直接存进它的变量。决策节点按它的第一个输入决定：
+ * 条件分支的第一个引脚是条件成立的一侧，另一个是它的取反；多路分支的 case 引脚是值等于该 case，`default` 是
+ * 不等于任何 case。case 按值的类型写成字面量：字符串类型加引号，其他类型原样写出，因此 Go 中可以写常量名。
  */
 function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Content {
   const functions = language.functions
@@ -210,6 +213,9 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
     }
   }
   const variableOf = (value: IrValue) => variables.get(valueKey(holder(value)))
+  const typeOf = (value: IrValue): PortType => value.kind === 'input'
+    ? ir.inputs.find(port => port.name === value.port)!.type
+    : signatures.get(value.node)?.results.find(result => result.name === value.port)?.type ?? 'any'
 
   const expression = (call: IrCall): string => {
     const lines = codeLines(call)
@@ -291,9 +297,32 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
       if (gate.execKind !== 'decision') throw new RenderError({ code: 'not-a-decision', node: gate.node })
       const source = gate.args[0]
       if (source === undefined) throw new RenderError({ code: 'no-condition', node: gate.node })
+      if (gate.type === SWITCH_TYPE) return switchCondition(switchCases(gate.config), pin, valueOf(source.value), typeOf(source.value), language)
       return pin === gate.pins[0] ? valueOf(source.value) : fill(language.negation, { condition: valueOf(source.value) })
     },
   }
+}
+
+/**
+ * 多路分支触发 `pin` 的条件：值等于该 case；`default` 引脚是值不等于任何 case。
+ * @param cases - 节点的 case。
+ * @param pin - 触发的引脚。
+ * @param value - 值的表达式。
+ * @param type - 值的类型，决定 case 写成什么字面量。
+ * @param language - 工作流的语言。
+ */
+function switchCondition(cases: readonly string[], pin: string, value: string, type: PortType, language: Language): string {
+  const equals = (item: string): string => fill(language.equality, { left: value, right: caseLiteral(item, type) })
+  return pin === SWITCH_DEFAULT_PIN
+    ? fill(language.negation, { condition: cases.map(equals).join(language.or) })
+    : equals(pin)
+}
+
+/** case 的字面量：字符串加引号，数字和布尔值原样；类型未知时按文本像什么写，其他类型原样写出。 */
+function caseLiteral(item: string, type: PortType): string {
+  if (type === 'string') return JSON.stringify(item)
+  if (type === 'any' && !/^(true|false|-?\d+(\.\d+)?)$/.test(item)) return JSON.stringify(item)
+  return item
 }
 
 /** 生成文件的第一行；Go 的工具按 `Code generated … DO NOT EDIT.` 认出生成的文件。 */

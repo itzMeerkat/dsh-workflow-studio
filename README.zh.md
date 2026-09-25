@@ -76,7 +76,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 <a id="use-this-package"></a>
 ## 使用此包
 
-包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio` 插件插入 Harness profile。该插件只注册引擎和生成器依赖的节点——`branch`、`merge`、两个边界节点和 `code` 节点；其余节点由节点插件提供，例如单独的 `dsh-workflow-demo-node` 插件，其中包含 agent 提示词、人工审批和基础示例节点。该插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
+包内的 [`cordis.patch.yml`](cordis.patch.yml) 将 `dsh-workflow-studio` 插件插入 Harness profile。该插件只注册引擎和生成器依赖的节点——`branch`、`switch`、`merge`、两个边界节点和 `code` 节点；其余节点由节点插件提供，例如单独的 `dsh-workflow-demo-node` 插件，其中包含 agent 提示词、人工审批和基础示例节点。该插件依赖 `ctx.tools` 和 `ctx.storageDomain`，并提供 `ctx.workflowNodeRegistry` 和 `ctx.dagEngine`。基础 bundle 提供 JSON 后端并将 domain 路由到该后端。
 
 工作流分为两种，除了最终去向不同，其余完全一致。
 
@@ -149,7 +149,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 每条边都要声明 `kind`。`data` 边把一个输出端口的值送到一个输入端口，`sourcePort` 和 `targetPort` 默认为 `output` 和 `input`。`exec` 边不传递数据，只约束执行顺序：目标节点在源节点完成后才执行，`sourcePort` 和 `targetPort` 默认为每个节点都有的 `then` 和 `run` 执行引脚。执行边用于表达数据依赖无法表达的顺序——两个节点写同一条外部记录、一项检查必须先于它所保护的工作被记录，或两个人工提问不能同时发出。没有入执行边的节点在运行到达时即执行；有入执行边的节点只在该边的源节点完成后执行，源节点被跳过时该边失效，目标节点不被调用而直接跳过，因此跳过沿执行边传递。数据边不传递这一信号。同一个节点的 `run` 引脚可以接入多条执行边，全部触发后节点才执行；而数据输入端口仍然只接受一条边。引擎会拒绝引用不存在引脚的执行边、同一对引脚之间的重复执行边，以及数据边与执行边共同构成的环。
 
-分支节点通过 `execOutputs` 声明自己的执行引脚，并用返回值中的 `next` 选择本次触发哪些；声明引脚会替代 `then`，省略 `next` 时全部触发。引擎注册两种行为本身即执行语义的节点类型：`branch` 接收布尔 `condition` 并触发 `true` 或 `false` 之一；`merge` 是唯一的 OR 连接点——只要有一条入执行边触发它就执行，全部失效时才被跳过，并透传唯一送达的输入。其余节点一律是 AND 连接，因此无论走哪条分支都必须执行的节点应接在 `merge` 之后，而不是接在某一条分支之后。
+分支节点通过 `execOutputs` 声明自己的执行引脚，并用返回值中的 `next` 选择本次触发哪些；声明引脚会替代 `then`，省略 `next` 时全部触发。引擎注册行为本身即执行语义的节点类型：`branch` 接收布尔 `condition` 并触发 `true` 或 `false` 之一；`switch` 接收 `value`，触发与它相等的 case 的引脚，都不相等时触发 `default`，它的 case 就是节点的 `config.cases`，每个 case 是自己引脚的名字，与字符串、数字或布尔值按文本比较，在卡片上编辑，改名的 case 保留它的边；`merge` 是唯一的 OR 连接点——只要有一条入执行边触发它就执行，全部失效时才被跳过，并透传唯一送达的输入。其余节点一律是 AND 连接，因此无论走哪条分支都必须执行的节点应接在 `merge` 之后，而不是接在某一条分支之后。
 
 工作流通过两个普通节点接收和交出值。`workflow-input` 节点的输出端口就是工作流接受的输入，`workflow-output` 节点的输入端口就是工作流产出的输出——方向按数据在图中的流向，而不是按工作流签名。每侧最多一个，这也是它们带来的唯一新规则：端口、边、坐标、调度、跳过传递和运行记录都把它们当普通节点对待。声明的输入端口可以带 `default`，这正是工作流参数与常量的共同之处：`start(workflowId, values)` 优先使用调用方提供的值，其次使用默认值，两者都没有时拒绝启动运行并指出是哪个端口。提供未声明的输入同样被拒绝，因此调用方会得知端口被改名，而不是悄悄什么都没传。输出节点收到的值成为运行记录的 `outputs`；它的端口通常声明为可选，因此只由一条未执行的分支供给的端口会缺席，而不是让保存失败。
 
@@ -187,7 +187,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/run-state.ts`](src/run-state.ts) | 运行的内存状态与运行记录转换 |
 | [`src/persistence.ts`](src/persistence.ts) | 定义与运行的 per-record storage domain |
 | [`src/node.ts`](src/node.ts) | `WorkflowNode` 基类和 `NodeFailure` |
-| [`src/flow-nodes.ts`](src/flow-nodes.ts) | 引擎自有的 `branch`、`merge` 和边界节点，以及 OR 连接判断 |
+| [`src/flow-nodes.ts`](src/flow-nodes.ts) | 引擎自有的 `branch`、`switch`、`merge` 和边界节点，以及 OR 连接判断 |
 | [`src/shared/json.ts`](src/shared/json.ts) | 节点输出、notepad 值和信号负载的 JSON 检查 |
 | [`src/shared/questions.ts`](src/shared/questions.ts) | `questions` 请求格式：`askUser`、答案校验和审批辅助函数 |
 | [`src/tools.ts`](src/tools.ts) | 模型工具注册 |

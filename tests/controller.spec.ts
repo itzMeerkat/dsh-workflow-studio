@@ -63,7 +63,7 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
       [
-        'ask', 'branch', 'greater', 'merge', 'subworkflow', 'sum', 'value', 'workflow-input', 'workflow-output',
+        'ask', 'branch', 'greater', 'merge', 'subworkflow', 'sum', 'switch', 'value', 'workflow-input', 'workflow-output',
       ],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')

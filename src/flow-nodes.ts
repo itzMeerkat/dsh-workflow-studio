@@ -2,7 +2,7 @@
  * 引擎自有的流程控制节点。
  *
  * 这些节点的行为本身就是执行语义，因此由核心插件注册，而不是交给节点插件：
- * {@link BranchNode} 是唯一产生条件分支的节点，{@link MergeNode} 是唯一的 OR 连接点。
+ * {@link BranchNode} 和 {@link SwitchNode} 是仅有的产生条件分支的节点，{@link MergeNode} 是唯一的 OR 连接点。
  * 其余节点类型一律是 AND 连接，且只能通过完成与否影响下游。
  * @module dsh-workflow-studio
  */
@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createCodeNodes } from './code-nodes.ts'
 import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from './node.ts'
 import { SUBWORKFLOW_TYPE } from './shared/subworkflow.ts'
+import { SWITCH_DEFAULT_PIN, SWITCH_TYPE, switchCases, switchPin } from './shared/switch.ts'
 import { SUBWORKFLOW_DEFAULTS, SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE } from './subworkflow.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_INPUT_VALUES, WORKFLOW_OUTPUT_TYPE,
@@ -51,6 +52,29 @@ export class BranchNode implements WorkflowNodeExecutor {
       outputs: {},
       next: [inputs.condition ? BRANCH_TRUE_PIN : BRANCH_FALSE_PIN],
     }
+  }
+}
+
+/**
+ * 按值等于哪个 case 触发同名执行引脚的多路分支节点；都不等时触发 `default`。
+ *
+ * 类型只声明 `default` 引脚，每个节点的 case 引脚写在它的 `cases` 配置里，由 `nodeExecPins` 读出。
+ */
+export class SwitchNode implements WorkflowNodeExecutor {
+  readonly type = SWITCH_TYPE
+  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
+  readonly label = '多路分支'
+  readonly description = '按值等于哪个 case 触发同名执行引脚，都不等时触发 default'
+  readonly execOutputs: readonly string[] = [SWITCH_DEFAULT_PIN]
+  readonly inputs: readonly PortDefinition[] = [
+    { name: 'value', type: 'any', description: '与每个 case 比较的字符串、数字或布尔值' },
+  ]
+  readonly outputs: readonly PortDefinition[] = []
+
+  execute({ config, inputs }: NodeExecutionContext): NodeExecutionResult {
+    const pin = switchPin(inputs.value, switchCases(config))
+    if (pin === undefined) return { status: 'failed', error: 'value 输入必须为字符串、数字或布尔值' }
+    return { status: 'completed', outputs: {}, next: [pin] }
   }
 }
 
@@ -180,6 +204,7 @@ export class SubworkflowExitNode implements WorkflowNodeExecutor {
 }
 
 const branchNode = new BranchNode()
+const switchNode = new SwitchNode()
 const mergeNode = new MergeNode()
 
 /**
@@ -190,7 +215,7 @@ const mergeNode = new MergeNode()
  */
 export function execKindOf(executor: WorkflowNodeExecutor): NodeExecKind {
   if (executor === mergeNode) return 'join'
-  if (executor === branchNode) return 'decision'
+  if (executor === branchNode || executor === switchNode) return 'decision'
   return 'plain'
 }
 
@@ -200,7 +225,7 @@ export function execKindOf(executor: WorkflowNodeExecutor): NodeExecKind {
  */
 export function registerBuiltinNodes(ctx: Context): void {
   const nodes: readonly WorkflowNodeExecutor[] = [
-    branchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(),
+    branchNode, switchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(),
     new SubworkflowNode(), new SubworkflowEntryNode(), new SubworkflowExitNode(), ...createCodeNodes(),
   ]
   for (const node of nodes) {

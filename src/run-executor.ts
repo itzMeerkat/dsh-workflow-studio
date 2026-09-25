@@ -9,7 +9,7 @@ import type {
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { messageOf } from './shared/errors.ts'
-import { execOutputPins, execSourcePin, inboundEdges, type InboundEdges } from './shared/graph.ts'
+import { execSourcePin, inboundEdges, nodeExecPins, type InboundEdges } from './shared/graph.ts'
 import { execKindOf } from './flow-nodes.ts'
 import { TERMINAL_NODE_STATUSES, cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
 
@@ -370,7 +370,7 @@ function resultEnd(node: DagNodeDefinition, executor: WorkflowNodeExecutor, resu
       if (unproduced.length > 0) {
         return { status: 'failed', error: `节点 ${node.id} 完成时未产生输出端口 ${unproduced.join(', ')}；无内容时写 null` }
       }
-      const pins = execOutputPins(executor)
+      const pins = nodeExecPins(node, executor)
       const fired = result.next ?? pins
       const unknown = fired.find(pin => !pins.includes(pin))
       if (unknown !== undefined) {

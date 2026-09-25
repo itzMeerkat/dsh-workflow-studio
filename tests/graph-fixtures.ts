@@ -44,6 +44,11 @@ export const NODE_TYPES: NodeTypeSummary[] = [
     execOutputs: ['true', 'false'],
     inputs: [{ name: 'condition', type: 'boolean' }],
   }),
+  nodeType('switch', {
+    execKind: 'decision',
+    execOutputs: ['default'],
+    inputs: [{ name: 'value', type: 'any' }],
+  }),
   nodeType('merge', {
     execKind: 'join',
     variadicInputs: { min: 2, outputType: 'same' },

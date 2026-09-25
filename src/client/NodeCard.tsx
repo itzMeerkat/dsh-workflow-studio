@@ -1,16 +1,18 @@
 /** The node card both graphs render: identity, ports, inline controls, and displayed run outputs. */
 
-import { Handle, NodeResizeControl, Position, ResizeControlVariant, type NodeProps } from '@xyflow/react'
-import { createContext, useContext } from 'react'
+import { Handle, NodeResizeControl, Position, ResizeControlVariant, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
+import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
-import { EXEC_RUN_PIN, execOutputPins } from '../shared/graph.ts'
+import { EXEC_RUN_PIN } from '../shared/graph.ts'
 import { typeName, type Language } from '../shared/language.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf } from '../shared/subworkflow.ts'
+import { SWITCH_TYPE, invalidCase, switchCases } from '../shared/switch.ts'
 import type { WorkflowId } from '../shared/types.ts'
 import { diagnosticDetails } from './DiagnosticsView.tsx'
-import { handleId, nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
+import { handleId, nodeInputPorts, nodeOutputPins, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
 import type { Translate } from './locale.ts'
 import type { WorkflowRow } from './model.ts'
 import css from './WorkflowStudioPanel.module.css'
@@ -37,6 +39,11 @@ export interface NodeCardActions {
     readonly choices: readonly WorkflowRow[]
     readonly link: (nodeId: string, workflow: WorkflowId) => void
   }
+  /**
+   * Set when a switch card may edit its cases; absent in a read-only graph.
+   * @param renamed - The case whose text changed, so the edges on its pin follow it.
+   */
+  readonly editCases?: (nodeId: string, cases: readonly string[], renamed?: { readonly from: string; readonly to: string }) => void
 }
 
 /** Provides {@link NodeCardActions} to the cards React Flow renders. */
@@ -66,8 +73,12 @@ export function NodeCard({
   readonly branchPins?: readonly string[]
 }) {
   const actions = useContext(NodeCardContext)
+  const pins = nodeOutputPins(data)
+  const updateNodeInternals = useUpdateNodeInternals()
+  // A switch's pins follow its cases; React Flow measures a card's handles again only when told they changed.
+  useEffect(() => { updateNodeInternals(data.definition.id) }, [pins.join('\u0000')])
   if (actions === undefined) throw new Error('Workflow node card rendered outside its view')
-  const { t, language, updateConfig, linkWorkflow } = actions
+  const { t, language, updateConfig, linkWorkflow, editCases } = actions
   const inputs = nodeInputPorts(data)
   const outputs = nodeOutputPorts(data)
   const controls = data.catalog?.controls ?? []
@@ -96,7 +107,7 @@ export function NodeCard({
       <div className={css.execPins}>
         <ExecPin pin={EXEC_RUN_PIN} side="input" connectable={connectable} />
         <div className={css.execPinGroup}>
-          {execOutputPins(data.catalog ?? {}).map(pin => (
+          {pins.map(pin => (
             <ExecPin
               key={pin}
               pin={pin}
@@ -118,6 +129,15 @@ export function NodeCard({
             choices={linkWorkflow.choices}
             t={t}
             onLink={(workflow) => { linkWorkflow.link(data.definition.id, workflow) }}
+          />
+        </div>
+      )}
+      {data.definition.type === SWITCH_TYPE && editCases !== undefined && (
+        <div className={css.nodeControls}>
+          <SwitchCases
+            cases={switchCases(data.definition.config)}
+            t={t}
+            onChange={(cases, renamed) => { editCases(data.definition.id, cases, renamed) }}
           />
         </div>
       )}
@@ -298,6 +318,70 @@ function WorkflowLink({ linked, choices, t, onLink }: {
         {choices.map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
       </select>
     </label>
+  )
+}
+
+/** A switch's cases, each the name of the execution pin it fires. */
+function SwitchCases({ cases, t, onChange }: {
+  readonly cases: readonly string[]
+  readonly t: Translate
+  readonly onChange: (cases: readonly string[], renamed?: { readonly from: string; readonly to: string }) => void
+}) {
+  const fresh = (): string => {
+    let index = cases.length + 1
+    while (cases.includes(`case${index}`)) index += 1
+    return `case${index}`
+  }
+  return (
+    <div className={`${css.switchCases} nodrag`}>
+      <span>{t('node.cases')}</span>
+      {cases.map((item, index) => (
+        <div key={item} className={css.switchCase}>
+          <CaseInput
+            value={item}
+            others={cases.filter((_, position) => position !== index)}
+            t={t}
+            onCommit={(next) => { onChange(cases.map(value => value === item ? next : value), { from: item, to: next }) }}
+          />
+          <button
+            type="button"
+            aria-label={t('node.removeCase')}
+            title={t('node.removeCase')}
+            onClick={() => { onChange(cases.filter(value => value !== item)) }}
+          >
+            <IconCloseOutlineRegular size={10} />
+          </button>
+        </div>
+      ))}
+      <button type="button" className={css.addCase} onClick={() => { onChange([...cases, fresh()]) }}>{t('node.addCase')}</button>
+    </div>
+  )
+}
+
+/** One case's text, committed on blur or Enter; text that would not name a distinct pin is refused and restored. */
+function CaseInput({ value, others, t, onCommit }: {
+  readonly value: string
+  readonly others: readonly string[]
+  readonly t: Translate
+  readonly onCommit: (value: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  const invalid = invalidCase([...others, draft]) !== undefined
+  const commit = (): void => {
+    if (invalid) setDraft(value)
+    else if (draft !== value) onCommit(draft)
+  }
+  return (
+    <input
+      type="text"
+      value={draft}
+      aria-label={t('node.case')}
+      aria-invalid={invalid}
+      title={invalid ? t('node.caseInvalid') : undefined}
+      onChange={(event) => { setDraft(event.currentTarget.value) }}
+      onBlur={commit}
+      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+    />
   )
 }
 

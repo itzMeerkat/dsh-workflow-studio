@@ -7,16 +7,17 @@ import { DIAGNOSTIC_SEVERITY, analyzeWorkflow, indexNodeTypes } from './shared/a
 import { describeDiagnostic } from './diagnostic-message.ts'
 import {
   assertUniquePortNames,
-  execOutputPins,
   execPinFault,
   execSourcePin,
   execTargetPin,
   isExecEdge,
+  nodeExecPins,
   portsAreCompatible,
   topologicalLevels,
 } from './shared/graph.ts'
 import { isAbsolute } from 'node:path'
 import { languageOf } from './shared/language.ts'
+import { SWITCH_TYPE, invalidCase, switchCases } from './shared/switch.ts'
 import { DEFAULT_WORKFLOW_KIND } from './shared/types.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './shared/workflow-boundary.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
@@ -83,6 +84,7 @@ function assertSingleBoundary(definition: DagWorkflowDefinition, type: string, k
 interface ResolvedNodePorts {
   inputs: readonly PortDefinition[]
   outputs: readonly PortDefinition[]
+  execPins: readonly string[]
 }
 
 /**
@@ -108,8 +110,11 @@ export function resolveExecutors(
     assertUniquePortNames(`节点 ${node.id}`, '输入', inputs)
     assertUniquePortNames(`节点 ${node.id}`, '输出', outputs)
     validateVariadicInputs(node, executor, inputs, outputs)
+    // case 就是执行引脚的名字，所以它们与端口名一样必须互不相同。
+    const invalid = node.type === SWITCH_TYPE ? invalidCase(switchCases(node.config)) : undefined
+    if (invalid !== undefined) throw new Error(`节点 ${node.id} 的 case "${invalid}" 为空、重复或与 default 引脚同名`)
     executors.set(node.id, executor)
-    nodePorts.set(node.id, { inputs, outputs })
+    nodePorts.set(node.id, { inputs, outputs, execPins: nodeExecPins(node, executor) })
   }
 
   const edgeIds = new Set<string>()
@@ -125,7 +130,7 @@ export function resolveExecutors(
     if (target === undefined) throw new Error(`边 ${edge.id} 引用不存在的目标节点 ${edge.target}`)
 
     if (isExecEdge(edge)) {
-      validateExecEdge(edge, executors.get(edge.source)!, execEdgeKeys)
+      validateExecEdge(edge, source.execPins, execEdgeKeys)
       continue
     }
     validateDataEdge(edge, source, target, connectedInputs)
@@ -166,14 +171,14 @@ function assertNoAnalysisErrors(registry: WorkflowNodeRegistry, definition: DagW
  *
  * 引脚规则由 {@link execPinFault} 与浏览器连线共用；此处只把不成立的一端翻译成错误信息。
  * @param edge - 待校验的执行边。
- * @param source - 源节点的执行器。
+ * @param sourcePins - 源节点的执行输出引脚。
  * @param seen - 已出现的 `源/源引脚/目标/目标引脚` 组合，就地记录。
  * @throws 引脚不存在或组合重复时。
  */
-function validateExecEdge(edge: DagExecEdge, source: WorkflowNodeExecutor, seen: Set<string>): void {
+function validateExecEdge(edge: DagExecEdge, sourcePins: readonly string[], seen: Set<string>): void {
   const sourcePin = execSourcePin(edge)
   const targetPin = execTargetPin(edge)
-  const fault = execPinFault(execOutputPins(source), sourcePin, targetPin)
+  const fault = execPinFault(sourcePins, sourcePin, targetPin)
   if (fault === 'source') {
     throw new Error(`执行边 ${edge.id} 引用节点 ${edge.source} 不存在的执行输出引脚 ${sourcePin}`)
   }
