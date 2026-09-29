@@ -1,5 +1,5 @@
 /**
- * 多路分支：执行引脚取自节点的 case，运行时触发值匹配的 case 或 default，code 工作流写成 if/else if/else。
+ * 多路分支：执行引脚取自节点的 case，运行时触发值匹配的 case 或 default，Go 写成 switch 语句。
  */
 
 import { afterEach, describe, it } from 'node:test'
@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import { WorkflowStudioController } from '../src/controller.ts'
 import { analyzeWorkflow, indexNodeTypes } from '../src/shared/analysis.ts'
-import { CODE_BLOCK_TYPE, CODE_FIELD, GO } from '../src/shared/language.ts'
+import { CODE_BLOCK_TYPE, CODE_FIELD, GO, PSEUDOCODE } from '../src/shared/language.ts'
 import { renderWorkflow } from '../src/shared/source.ts'
 import { SWITCH_CASES, switchPin } from '../src/shared/switch.ts'
 import { RunId } from '../src/shared/types.ts'
@@ -39,35 +39,45 @@ describe('多路分支', () => {
     assert.deepEqual(analyzeWorkflow(partial, CATALOG).diagnostics.map(item => item.code), ['merge-gap'])
   })
 
-  it('code 工作流写成 if/else if/else；字符串类型的 case 加引号', () => {
+  it('Go 写成 switch 语句：没事可做的 case 在 default 有事可做时合并列出，否则省略', () => {
     const catalog = indexNodeTypes([
       ...NODE_TYPES.map(type => ({ ...type, kinds: ['run', 'code'] as const })),
       nodeType(CODE_BLOCK_TYPE, { kinds: ['code'] }),
     ])
     const block = (text: string) => ({ type: CODE_BLOCK_TYPE, config: { [CODE_FIELD]: text } })
     const definition = workflow({
-      in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'kind', type: 'string' }] },
-      s: sw('a', 'b'),
-      x: block('println("a")'), y: block('println("b")'), z: block('println("?")'),
-      only: sw('a'), w: block('println("not a")'),
-    }, ['in:kind>s:value', 's.a>x', 's.b>y', 's.default>z', 'in:kind>only:value', 'only.default>w'], { kind: 'code', language: 'go' })
+      in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'kind', type: 'string' }, { name: 'size', type: 'number' }] },
+      s: sw('a', 'b', 'c', 'd'),
+      x: block('println("b")'), z: block('println("?")'),
+      n: sw('1', '2'), y: block('println(2)'),
+    }, ['in:kind>s:value', 's.b>x', 's.default>z', 'in:size>n:value', 'n.2>y'], { kind: 'code', language: 'go' })
     assert.equal(renderWorkflow(irOf(definition, catalog), GO), [
       '// Code generated from workflow "test". DO NOT EDIT.',
       '',
-      'func test(kind string) {',
-      '\tif kind == "a" {',
-      '\t\tprintln("a")',
-      '\t} else if kind == "b" {',
+      'func test(kind string, size float64) (err error) {',
+      '\tswitch kind {',
+      '\tcase "b":',
       '\t\tprintln("b")',
-      '\t} else {',
+      '\tcase "a", "c", "d":',
+      '\tdefault:',
       '\t\tprintln("?")',
       '\t}',
-      '\tif !(kind == "a") {',
-      '\t\tprintln("not a")',
+      '\tswitch size {',
+      '\tcase 2:',
+      '\t\tprintln(2)',
       '\t}',
+      '\treturn',
       '}',
       '',
     ].join('\n'))
+  })
+
+  it('没有 switch 语句的语言写成条件链：default 是不等于任何 case', () => {
+    const definition = workflow({
+      in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'kind', type: 'string' }] },
+      s: sw('a', 'b'), x: 'value', z: 'value',
+    }, ['in:kind>s:value', 's.a>x', 's.default>z'])
+    assert.match(renderWorkflow(irOf(definition), PSEUDOCODE), /  if switch\.a:\n.*\n  else if switch\.default:/)
   })
 })
 

@@ -27,13 +27,14 @@ describe('Go 签名', () => {
       results: [
         { name: 'output1', type: '*Order' },
         { name: 'output2', type: 'number' },
-        { name: 'output3', type: 'error' },
       ],
+      fails: true,
     })
     assert.deepEqual(goSignature('  func Check(chan int) interface{ Ok() bool } { return nil }'), {
       name: 'Check',
       parameters: [{ name: 'input', type: 'chan int', optional: false }],
       results: [{ name: 'output', type: 'interface{ Ok() bool }' }],
+      fails: false,
     })
     assert.equal(goSignature('x := 1'), undefined)
     assert.equal(goSignature('func(a int'), undefined)
@@ -92,6 +93,7 @@ describe('Go 签名', () => {
         name: 'Discount',
         parameters: [{ name: 'order', type: 'Order', optional: false }],
         results: [{ name: 'price', type: 'number' }],
+        fails: false,
       },
     })
     assert.deepEqual(goAtom('none.go', 'package p\n\nvar X = 1\n\nfunc helper() {}\n'), { file: 'none.go', fault: 'no-exported-function' })
@@ -127,20 +129,21 @@ describe('Go 签名', () => {
       { file: 'a.go', text: `package p\n\n${text}\n` },
       { file: 'b.go', text: 'package p\n' },
     ], GO.functions!.atoms!)
-    const library = read('func Fetch(url string, retries *int) (body string, err error) { return "", nil }')
+    const library = read('func Fetch(url string, retries *int) (body string, size int, err error) { return "", 0, nil }')
     assert.deepEqual(library.faults, [{ file: 'b.go', fault: 'no-exported-function' }])
     const node = { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: 'a.go' } }
     const definition = workflow({
       fetch: node,
       gone: { ...node, config: { [ATOM_FIELD]: 'gone.go' } },
-      out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'body', type: 'string' }, { name: 'err', type: 'error' }] },
-    }, ['fetch:body>out:body', 'fetch:err>out:err'], { kind: 'code', language: GO.name })
+      out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'body', type: 'string' }, { name: 'size', type: 'int' }] },
+    }, ['fetch:body>out:body', 'fetch:size>out:size'], { kind: 'code', language: GO.name })
     const signed = withCallees(definition, { atoms: library.atoms, workflows: new Map() })
     assert.deepEqual(signed.nodes[0]?.inputs, [{ name: 'url', type: 'string' }, { name: 'retries', type: '*int', required: false }])
-    assert.deepEqual(signed.nodes[0]?.outputs, [{ name: 'body', type: 'string' }, { name: 'err', type: 'error' }])
+    // 最后一个 error 结果报告失败，不是结果端口。
+    assert.deepEqual(signed.nodes[0]?.outputs, [{ name: 'body', type: 'string' }, { name: 'size', type: 'int' }])
     assert.equal(signed.nodes[1]?.inputs, undefined)
 
-    const renamed = withCallees(signed, { atoms: read('func Fetch(url string) (text string, err error) { return "", nil }').atoms, workflows: new Map() })
+    const renamed = withCallees(signed, { atoms: read('func Fetch(url string) (text string, size int, err error) { return "", 0, nil }').atoms, workflows: new Map() })
     assert.deepEqual(renamed.edges.map(edge => edge.id), ['e1'])
   })
 

@@ -262,7 +262,7 @@ function ExecPin({ pin, side, connectable, branch = false }: {
           isConnectable={false}
         />
       )}
-      <span>{pin}</span>
+      <span title={pin}>{pin}</span>
     </div>
   )
 }

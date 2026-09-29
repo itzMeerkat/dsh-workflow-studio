@@ -49,8 +49,17 @@
   cursor: pointer;
 }
 
-.nodeType:hover {
+.nodeType:hover:enabled {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.nodeType:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.nodeType:disabled small {
+  white-space: normal;
 }
 
 .nodeType > span {
@@ -935,7 +944,9 @@
 
 .execPinGroup {
   display: flex;
+  min-width: 0;
   flex-direction: column;
+  align-items: flex-end;
   gap: 4px;
 }
 
@@ -943,6 +954,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 8px;
   margin-top: 9px;
   padding-top: 7px;
   border-top: 0.5px solid var(--dsw-alias-border-l3);
@@ -951,11 +963,19 @@
 .execPin {
   display: flex;
   position: relative;
+  max-width: 100%;
   align-items: center;
   color: #3f5185;
   font-size: 11px;
   font-weight: 600;
   line-height: 16px;
+}
+
+.execPin > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .execPinInput {

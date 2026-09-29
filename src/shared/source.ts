@@ -66,10 +66,32 @@ export function renderWorkflow(ir: WorkflowIr, language: Language, callees: Call
     const condition = content.condition(item.gate, item.arms[index]!.pin)
     return fill(index === 0 ? language.conditionOpen : language.otherwiseIfOpen, { condition })
   }
-  const guard = (item: IrGuard, depth: number): string[] => [
+  const chain = (item: IrGuard, depth: number): string[] => [
     ...item.arms.flatMap((arm, index) => [line(depth, armOpen(item, index)), ...block(arm.body, depth + 1)]),
     ...close(depth),
   ]
+  // case 按作者写下的顺序，default 在最后。default 有事可做时，没事可做的 case 仍要列出，否则它们的值会落进 default；
+  // default 没事可做时它们整个省略。
+  const statement = (item: IrGuard, head: SwitchHead, depth: number): string[] => {
+    const syntax = language.switch!
+    const cases = switchCases(item.gate.config)
+    const arms = [...item.arms].sort((left, right) => item.gate.pins.indexOf(left.pin) - item.gate.pins.indexOf(right.pin))
+    const idle = cases.filter(pin => arms.every(arm => arm.pin !== pin))
+    const clause = (pins: readonly string[]): string => fill(syntax.case, { values: pins.map(head.literal).join(', ') })
+    const fallback = arms.at(-1)?.pin === SWITCH_DEFAULT_PIN ? arms.pop() : undefined
+    return [
+      line(depth, fill(syntax.open, { value: head.value })),
+      ...arms.flatMap(arm => [line(depth, clause([arm.pin])), ...block(arm.body, depth + 1)]),
+      ...fallback === undefined
+        ? []
+        : [...idle.length === 0 ? [] : [line(depth, clause(idle))], line(depth, syntax.default), ...block(fallback.body, depth + 1)],
+      ...close(depth),
+    ]
+  }
+  const guard = (item: IrGuard, depth: number): string[] => {
+    const head = item.gate.type === SWITCH_TYPE && language.switch !== undefined ? content.switchHead(item.gate) : undefined
+    return head === undefined ? chain(item, depth) : statement(item, head, depth)
+  }
 
   const body = [
     content.open,
@@ -95,6 +117,14 @@ interface Content {
   statement(item: IrCall | IrOutputs): readonly string[]
   /** `gate` 触发 `pin` 的条件表达式。 */
   condition(gate: IrCall, pin: string): string
+  /** 多路分支写成 switch 语句时比较的值和 case 的字面量；这种工作流不写 switch 语句时为 undefined。 */
+  switchHead(gate: IrCall): SwitchHead | undefined
+}
+
+/** switch 语句比较的值，以及把 case 写成字面量的方法。 */
+interface SwitchHead {
+  readonly value: string
+  literal(item: string): string
 }
 
 function contentOf(ir: WorkflowIr, language: Language, callees: Callees): Content {
@@ -153,6 +183,7 @@ function runContent(ir: WorkflowIr, language: Language, callees: Callees): Conte
       return [name === item.type ? call : `${name}: ${call}`]
     },
     condition: (gate, pin) => `${names.get(gate.node)!}.${pin}`,
+    switchHead: () => undefined,
   }
 }
 
@@ -185,6 +216,7 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
   }
   const parameters = new Map(ir.inputs.map(port => [port.name, identifiers.take(port.name, 'arg')]))
   const results = new Map(ir.outputs.map(port => [port.name, identifiers.take(port.name, 'result')]))
+  const error = functions === undefined ? undefined : identifiers.take(functions.error.name, 'err')
 
   // 只汇合原子结果的分支合并由每一侧的结果写入同一个变量；汇合了其他值的合并没有变量。
   const merged = new Map<string, NodeValue>()
@@ -230,7 +262,7 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
     if (variable === undefined) throw new RenderError({ code: 'no-value', node: value.node })
     return variable.name
   }
-  const invoke = (call: IrCall, signature: Callable): string => {
+  const invoke = (call: IrCall, signature: Callable): string[] => {
     const args = signature.parameters.map((parameter) => {
       const arg = call.args.find(candidate => candidate.port === parameter.name)
       if (arg !== undefined) return valueOf(arg.value)
@@ -238,18 +270,22 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
       throw new RenderError({ code: 'unwired-parameter', node: call.node, port: parameter.name })
     })
     const invocation = `${signature.name}(${args.join(', ')})`
-    const targets = signature.results.map(result => variableOf({ kind: 'output', node: call.node, port: result.name })?.name)
-    if (targets.every(target => target === undefined)) return invocation
-    return fill(functions!.assign, {
-      targets: targets.map(target => target ?? functions!.discard).join(', '),
-      value: invocation,
-    })
+    const targets = [
+      ...signature.results.map(result => variableOf({ kind: 'output', node: call.node, port: result.name })?.name),
+      ...signature.fails ? [error] : [],
+    ]
+    const statement = targets.every(target => target === undefined)
+      ? invocation
+      : fill(functions!.assign, { targets: targets.map(target => target ?? functions!.discard).join(', '), value: invocation })
+    if (!signature.fails) return [statement]
+    const step = JSON.stringify(`${call.label ?? signature.name}: %w`)
+    return [statement, ...functions!.exit.map(line => fill(line, { error: error!, step }))]
   }
 
-  const list = (ports: readonly PortDefinition[], names: ReadonlyMap<string, string>): string =>
+  const list = (ports: readonly PortDefinition[], names: ReadonlyMap<string, string>): string[] =>
     ports.map(port => functions === undefined
       ? names.get(port.name)!
-      : fill(functions.typed, { name: names.get(port.name)!, type: typeName(language, port.type) })).join(', ')
+      : fill(functions.typed, { name: names.get(port.name)!, type: typeName(language, port.type) }))
 
   const syntax = functions?.atoms
   const folder = [...library.values()]
@@ -257,7 +293,8 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
     preamble(body) {
       const text = body.join('\n')
       // 函数只导入它写到的包；原子里的导入如果函数用不到，写进来 Go 会拒绝编译。
-      const imports = [...new Set(folder.flatMap(atom => atom.imports))].sort().filter((spec) => {
+      const candidates = functions === undefined ? [] : [...folder.flatMap(atom => atom.imports), functions.exitImport]
+      const imports = [...new Set(candidates)].sort().filter((spec) => {
         const used = syntax!.importName(spec)
         return used !== undefined && new RegExp(`(?<![\\p{L}\\p{N}_.])${used}\\.`, 'u').test(text)
       })
@@ -272,15 +309,17 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
     },
     open: fill(language.functionOpen, {
       name,
-      parameters: list(ir.inputs, parameters),
-      results: functions === undefined || ir.outputs.length === 0
+      parameters: list(ir.inputs, parameters).join(', '),
+      results: functions === undefined
         ? ''
-        : fill(functions.results, { results: list(ir.outputs, results) }),
+        : fill(functions.results, {
+          results: [...list(ir.outputs, results), fill(functions.typed, { name: error!, type: functions.error.type })].join(', '),
+        }),
     }),
     prologue: functions === undefined
       ? []
       : [...variables.values()].map(variable => fill(functions.declare, variable)),
-    epilogue: functions === undefined || ir.outputs.length === 0 ? [] : [functions.return],
+    epilogue: functions === undefined ? [] : [functions.return],
     statement(item) {
       if (item.kind === 'outputs') {
         return functions === undefined
@@ -289,7 +328,7 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
       }
       if (item.type === CODE_BLOCK_TYPE) return codeLines(item)
       const signature = signatures.get(item.node)
-      if (signature !== undefined) return [invoke(item, signature)]
+      if (signature !== undefined) return invoke(item, signature)
       // 表达式写进读它的地方；流程控制和边界节点没有代码。
       return []
     },
@@ -299,6 +338,11 @@ function codeContent(ir: WorkflowIr, language: Language, callees: Callees): Cont
       if (source === undefined) throw new RenderError({ code: 'no-condition', node: gate.node })
       if (gate.type === SWITCH_TYPE) return switchCondition(switchCases(gate.config), pin, valueOf(source.value), typeOf(source.value), language)
       return pin === gate.pins[0] ? valueOf(source.value) : fill(language.negation, { condition: valueOf(source.value) })
+    },
+    switchHead(gate) {
+      const source = gate.args[0]
+      if (source === undefined) throw new RenderError({ code: 'no-condition', node: gate.node })
+      return { value: valueOf(source.value), literal: item => caseLiteral(item, typeOf(source.value)) }
     },
   }
 }
@@ -371,10 +415,15 @@ export function workflowFunctionName(name: string, language: Language, atoms: Re
   return functionIdentifiers(language, atoms).take(name, 'workflow')
 }
 
-/** 生成的函数所在的文件的标识符：原子与生成的函数同在一个包，所以包里每个原子的名字都已被占用。 */
+/**
+ * 生成的函数所在的文件的标识符：原子与生成的函数同在一个包，所以包里每个原子的名字都已被占用；
+ * 提前返回用到的包名也被占用，局部变量不能遮住它。
+ */
 function functionIdentifiers(language: Language, atoms: ReadonlyMap<string, Atom>): Identifiers {
   const identifiers = new Identifiers(language.reserved)
   for (const atom of atoms.values()) identifiers.reserve(atom.signature.name)
+  const functions = language.functions
+  if (functions !== undefined) identifiers.reserve(functions.atoms.importName(functions.exitImport)!)
   return identifiers
 }
 

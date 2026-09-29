@@ -6,13 +6,14 @@ Turn existing Go code into a `code` workflow. Each step of the logic becomes an 
 
 Read the whole function you are splitting, and every helper it calls. Then cut it along these lines:
 
-- **One atom is one Go function** with a single purpose: it reads its parameters, computes, and returns its results. Parameters become the node's input ports and results become its output ports, so give results names (`(price float64, err error)`); unnamed results become ports `output`, or `output1`, `output2`… when there are several.
+- **One atom is one Go function** with a single purpose: it reads its parameters, computes, and returns its results. Parameters become the node's input ports and results become its output ports, so give results names (`(price float64, saved float64)`); unnamed results become ports `output`, or `output1`, `output2`… when there are several.
 - **A port's type is the exact Go type**, so a result connects only to a parameter of the same type, or to `any`: an `int` result does not feed a `float64` parameter, and a `*T` result feeds only a `*T` parameter. Convert inside an atom when two steps disagree.
 - **Pointer parameters are optional ports.** An unwired `*T` parameter receives `nil`, so make a dependency a pointer when the atom can run without it.
 - **Every `if`/`else` in the original that chooses between work becomes a `branch` node.** Pull its condition out into an atom that returns `bool`, and put each side's work into its own atoms.
 - **A `switch` in the original that chooses between work becomes a `switch` node** whose cases are the `case` values; its `default` pin is the `default` clause.
-- **Keep loops, early returns, `defer`, goroutines and error handling inside an atom.** The graph has no loops. If a whole loop is one step of the algorithm, it is one atom.
-- **An error that decides what happens next** is a result (`err error`) followed by an atom `func Failed(err error) bool { return err != nil }` that feeds a `branch`.
+- **Keep loops, `defer`, goroutines and recovering from errors inside an atom.** The graph has no loops. If a whole loop is one step of the algorithm, it is one atom.
+- **An error that ends the work is the atom's last result, `err error`.** It is not a port: when the atom returns an error, the workflow returns at once with it, wrapped in the node's name, so an original `if err != nil { return …, err }` needs no node of its own. Every generated function ends with an `err error` result.
+- **An error that decides what happens next** is recovered inside the atom, which returns a result such as `found bool` that feeds a `branch`.
 - **Keep atoms small but meaningful.** A good atom is a step you would name in a code review ("compute subtotal", "apply coupon"). Do not make an atom for a single assignment; do not leave several steps in one atom when the graph should show a choice between them.
 
 ## 2. Write the atom folder
@@ -113,10 +114,10 @@ Example — a checkout that discounts large orders, with atoms `subtotal.go`, `i
 
 ## 4. Save and check
 
-Call `create_workflow` with that JSON: `kind` is `code`, `language` is `go`, and `atomFolder` is the folder's absolute path. Saving validates the graph, writes the workflow's function into the folder as `<id>.workflow.go`, and refuses to save a workflow whose function cannot be written, naming the edge, port or node to fix. For the example, `checkout.workflow.go` holds the package clause and:
+Call `create_workflow` with that JSON: `kind` is `code`, `language` is `go`, and `atomFolder` is the folder's absolute path. Saving validates the graph, and writes the workflow's function into the folder as `<id>.workflow.go`. A workflow whose function cannot be written is still saved, but its file is removed and the result's warnings say why, naming the node to fix. For the example, `checkout.workflow.go` holds the package clause and:
 
 ```go
-func Checkout(order Order) (price float64) {
+func Checkout(order Order) (price float64, err error) {
 	var Subtotal_amount float64
 	var IsLarge_output bool
 	var join_output float64

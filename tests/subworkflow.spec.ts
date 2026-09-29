@@ -36,6 +36,7 @@ describe('子工作流的端口与嵌入规则', () => {
       name: 'add-offset',
       parameters: [{ name: 'x', type: 'number', optional: false }, { name: 'offset', type: 'number', optional: true }],
       results: [{ name: 'y', type: 'number' }],
+      fails: false,
     })
     assert.equal(workflowSignature({ ...ADD_OFFSET, kind: 'code' }).parameters[1]?.optional, false)
 
@@ -79,13 +80,21 @@ describe('code 工作流中的子工作流', () => {
     out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'price', type: 'number', required: false }] },
   }, ['in:amount>cut:amount', 'cut:price>out:price'], { name: 'Checkout', kind: 'code', language: 'go' }), callees)
 
-  it('写成对被嵌入工作流生成的函数的调用，函数名与它自己生成时相同', () => {
+  it('写成对被嵌入工作流生成的函数的调用，函数名与它自己生成时相同，它返回的错误让嵌入方提前返回', () => {
     assert.equal(renderWorkflow(irOf(checkout, CATALOG), GO, callees), [
       '// Code generated from workflow "Checkout". DO NOT EDIT.',
       '',
-      'func Checkout(amount float64) (price float64) {',
+      'import (',
+      '\t"fmt"',
+      ')',
+      '',
+      'func Checkout(amount float64) (price float64, err error) {',
       '\tvar Discount_price float64',
-      '\tDiscount_price = Discount(amount)',
+      '\tDiscount_price, err = Discount(amount)',
+      '\tif err != nil {',
+      '\t\terr = fmt.Errorf("Discount: %w", err)',
+      '\t\treturn',
+      '\t}',
       '\tprice = Discount_price',
       '\treturn',
       '}',

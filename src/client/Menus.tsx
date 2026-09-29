@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { SUBWORKFLOW_TYPE } from '../shared/subworkflow.ts'
 import type { NodeTypeSummary } from '../shared/types.ts'
 import type { Translate } from './locale.ts'
-import { filterNodeTypes, filterWorkflows, type WorkflowRow } from './model.ts'
+import { filterNodeTypes, filterWorkflows, type EmbedChoice, type WorkflowRow } from './model.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 /** Pick a saved workflow or start a new one. */
@@ -98,7 +98,8 @@ export function NodeLibraryMenu({
 }: {
   readonly disabled: boolean
   readonly nodeTypes: readonly NodeTypeSummary[]
-  readonly workflows: readonly WorkflowRow[]
+  /** Every other saved workflow of the kind, with why it cannot be embedded; one that cannot is shown disabled. */
+  readonly workflows: readonly EmbedChoice[]
   readonly t: Translate
   readonly onSelect: (nodeType: NodeTypeSummary) => void
   readonly onSelectWorkflow: (workflow: WorkflowRow) => void
@@ -142,17 +143,19 @@ export function NodeLibraryMenu({
               </button>
             ))}
             {workflowMatches.length > 0 && <p className={css.menuGroup}>{t('nodes.workflows')}</p>}
-            {workflowMatches.map(workflow => (
+            {workflowMatches.map(({ fault, ...workflow }) => (
               <button
                 type="button"
                 className={css.nodeType}
                 key={workflow.id}
+                disabled={fault !== undefined}
                 onClick={() => { onSelectWorkflow(workflow); menu.close() }}
               >
                 <span className={css.nodeTypeTitle}>
                   <strong>{workflow.name}</strong>
                   <code>{SUBWORKFLOW_TYPE}</code>
                 </span>
+                {fault !== undefined && <small>{t(`embed.${fault}`)}</small>}
               </button>
             ))}
           </div>

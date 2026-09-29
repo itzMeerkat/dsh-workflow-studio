@@ -193,8 +193,9 @@ describe('WorkflowStudioController', () => {
         '',
         'package hello',
         '',
-        'func hello(name string) {',
+        'func hello(name string) (err error) {',
         '\tGreet(name)',
+        '\treturn',
         '}',
         '',
       ].join('\n'))

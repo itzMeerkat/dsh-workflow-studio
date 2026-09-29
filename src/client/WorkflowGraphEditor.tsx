@@ -11,8 +11,8 @@ import {
   applyNodeChanges,
   reconnectEdge,
 } from '@xyflow/react'
-import type { Connection, Edge, EdgeChange, NodeChange } from '@xyflow/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Connection, Edge, EdgeChange, NodeChange, ReactFlowInstance, XYPosition } from '@xyflow/react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type {
@@ -42,6 +42,12 @@ import css from './WorkflowStudioPanel.module.css'
 
 const nodeTypes = { workflow: WorkflowNodeCard, boundary: WorkflowBoundaryCard }
 
+/** The canvas's nodes and edges, replaced together. */
+interface CanvasGraph {
+  readonly nodes: WorkflowFlowNode[]
+  readonly edges: Edge[]
+}
+
 interface WorkflowGraphEditorProps {
   readonly definition: DagWorkflowDefinition
   /** Changing it discards the canvas graph and reloads `definition`. */
@@ -58,6 +64,8 @@ interface WorkflowGraphEditorProps {
   readonly t: Translate
   readonly onChange: (definition: DagWorkflowDefinition) => void
   readonly onError: (message: string | undefined) => void
+  /** Set, while the canvas is shown, to where in the graph the middle of its view is. */
+  readonly viewCenter: MutableRefObject<(() => XYPosition) | undefined>
 }
 
 /** Render and edit one workflow definition as a connected node graph. */
@@ -73,41 +81,64 @@ export function WorkflowGraphEditor({
   t,
   onChange,
   onError,
+  viewCenter,
 }: WorkflowGraphEditorProps) {
   const catalog = useMemo(() => new Map(catalogTypes.map(node => [node.type, node])), [catalogTypes])
-  const [nodes, setNodes] = useState<WorkflowFlowNode[]>(() => flowNodes(definition, catalog, runRecords, diagnostics))
-  const [edges, setEdges] = useState<Edge[]>(() => flowEdges(definition))
+  const [graph, setGraph] = useState<CanvasGraph>(() => ({
+    nodes: flowNodes(definition, catalog, runRecords, diagnostics),
+    edges: flowEdges(definition),
+  }))
+  // React Flow reports one deletion as a node change and an edge change in the same event, so each edit builds on
+  // the graph the previous edit left, which state updated later in the event does not hold yet.
+  const latest = useRef(graph)
+  const { nodes, edges } = graph
   const [selectedNodeId, setSelectedNodeId] = useState<string>()
   const [configSource, setConfigSource] = useState('{}')
   const reconnectingEdgeId = useRef<string>()
+  const canvas = useRef<HTMLDivElement>(null)
+  const flow = useRef<ReactFlowInstance<WorkflowFlowNode, Edge>>()
 
   useEffect(() => {
-    setNodes(flowNodes(definition, catalog, runRecords, diagnostics))
-    setEdges(flowEdges(definition))
+    viewCenter.current = () => {
+      const bounds = canvas.current!.getBoundingClientRect()
+      return flow.current!.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 })
+    }
+    return () => { viewCenter.current = undefined }
+  }, [])
+
+  const show = (next: CanvasGraph): void => {
+    latest.current = next
+    setGraph(next)
+  }
+
+  /** Show an edited graph and report its definition; an edge goes with the node at either end. */
+  const commit = (nextNodes: WorkflowFlowNode[], nextEdges: Edge[]): void => {
+    const ids = new Set(nextNodes.map(node => node.id))
+    const kept = nextEdges.filter(edge => ids.has(edge.source) && ids.has(edge.target))
+    show({ nodes: nextNodes, edges: kept })
+    onChange(toDefinition(definition, nextNodes, kept))
+  }
+
+  useEffect(() => {
+    show({ nodes: flowNodes(definition, catalog, runRecords, diagnostics), edges: flowEdges(definition) })
     setSelectedNodeId(undefined)
   }, [revision, catalog])
 
   useEffect(() => {
-    setNodes(current => current.map(node =>
-      ({ ...node, data: withRunRecord(node.data, runRecords.get(node.id)) })))
+    show({
+      ...latest.current,
+      nodes: latest.current.nodes.map(node => ({ ...node, data: withRunRecord(node.data, runRecords.get(node.id)) })),
+    })
   }, [runRecords])
 
   const selectedNode = nodes.find(node => node.id === selectedNodeId)
 
   const commitNodes = (update: (current: WorkflowFlowNode[]) => WorkflowFlowNode[]): void => {
-    setNodes((current) => {
-      const next = update(current)
-      onChange(toDefinition(definition, next, edges))
-      return next
-    })
+    commit(update(latest.current.nodes), latest.current.edges)
   }
 
   const commitEdges = (update: (current: Edge[]) => Edge[]): void => {
-    setEdges((current) => {
-      const next = update(current)
-      onChange(toDefinition(definition, nodes, next))
-      return next
-    })
+    commit(latest.current.nodes, update(latest.current.edges))
   }
 
   /**
@@ -120,6 +151,7 @@ export function WorkflowGraphEditor({
     update: (node: DagNodeDefinition) => DagNodeDefinition,
     renamed?: { readonly from: string; readonly to: string },
   ): void => {
+    const { nodes, edges } = latest.current
     const edited = nodes.map(node => node.id === nodeId
       ? { ...node, data: { ...node.data, definition: update(node.data.definition) } }
       : node)
@@ -135,9 +167,7 @@ export function WorkflowGraphEditor({
       const pin = handle.name === renamed?.from ? renamed.to : handle.name
       return pins.includes(pin) ? [{ ...edge, sourceHandle: handleId({ kind: 'exec', name: pin }) }] : []
     })
-    setNodes(nextNodes)
-    setEdges(nextEdges)
-    onChange(toDefinition(definition, nextNodes, nextEdges))
+    commit(nextNodes, nextEdges)
   }
 
   const updateConfig = (nodeId: string, name: string, value: unknown): void => {
@@ -190,17 +220,13 @@ export function WorkflowGraphEditor({
 
   const deleteSelected = (): void => {
     if (selectedNodeId === undefined) return
-    const nextNodes = nodes.filter(node => node.id !== selectedNodeId)
-    const nextEdges = edges.filter(edge => edge.source !== selectedNodeId && edge.target !== selectedNodeId)
-    setNodes(nextNodes)
-    setEdges(nextEdges)
+    commitNodes(current => current.filter(node => node.id !== selectedNodeId))
     setSelectedNodeId(undefined)
-    onChange(toDefinition(definition, nextNodes, nextEdges))
   }
 
   return (
     <div className={css.graphLayout}>
-      <div className={css.canvas}>
+      <div ref={canvas} className={css.canvas}>
         <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow }, editCases }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
@@ -239,6 +265,7 @@ export function WorkflowGraphEditor({
               setConfigSource(JSON.stringify(node.data.definition.config, null, 2))
             }}
             onPaneClick={() => { setSelectedNodeId(undefined) }}
+            onInit={(instance) => { flow.current = instance }}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.4}

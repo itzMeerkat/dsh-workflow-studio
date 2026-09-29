@@ -1,8 +1,9 @@
 /** Browser-side workflow editing helpers used by the visual editor. */
 
+import type { XYPosition } from '@xyflow/react'
 import { execSourcePin, isExecEdge, topologicalLevels } from '../shared/graph.ts'
 import { ATOM_FIELD, CODE_ATOM_TYPE, CODE_LANGUAGES, signaturePorts, type Atom } from '../shared/language.ts'
-import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE, workflowSignature } from '../shared/subworkflow.ts'
+import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE, workflowSignature, type EmbedFault } from '../shared/subworkflow.ts'
 import {
   NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowId, type WorkflowKind,
   type WorkflowStudioSnapshot,
@@ -61,11 +62,14 @@ export function filterNodeTypes(
   ].some(value => value.toLocaleLowerCase().includes(needle)))
 }
 
+/** A saved workflow offered for embedding, with why it cannot be embedded in the edited one. */
+export type EmbedChoice = WorkflowRow & { readonly fault?: EmbedFault }
+
 /** Filter workflow rows by name for the toolbar picker. */
-export function filterWorkflows(
-  workflows: readonly WorkflowRow[],
+export function filterWorkflows<W extends Pick<WorkflowRow, 'name'>>(
+  workflows: readonly W[],
   query: string,
-): readonly WorkflowRow[] {
+): readonly W[] {
   const needle = query.trim().toLocaleLowerCase()
   if (needle === '') return workflows
   return workflows.filter(workflow =>
@@ -95,11 +99,13 @@ export function nextWorkflowName(workflows: readonly Pick<WorkflowRow, 'name'>[]
  * Append one catalog node to an editor definition.
  * @param definition - Current editor definition.
  * @param nodeType - Catalog entry selected by the user.
+ * @param at - Where the node's top-left corner goes, unless a node already sits there.
  * @returns A new definition containing the positioned node.
  */
 export function appendEditorNode(
   definition: DagWorkflowDefinition,
   nodeType: NodeTypeSummary,
+  at: XYPosition,
 ): DagWorkflowDefinition {
   const id = NodeId(nextEditorNodeId(nodeType.type, definition.nodes))
   return {
@@ -112,7 +118,7 @@ export function appendEditorNode(
         config: Object.fromEntries(
           nodeType.controls.map(control => [control.name, control.defaultValue]),
         ),
-        position: nextEditorNodePosition(definition.nodes),
+        position: freePosition(definition.nodes, at),
         ...(nodeType.variadicInputs === undefined
           ? {}
           : {
@@ -128,9 +134,10 @@ export function appendEditorNode(
  * Append one atom from the workflow's atom folder as a node named after its function.
  * @param definition - Current editor definition.
  * @param atom - The atom the node calls.
+ * @param at - Where the node's top-left corner goes, unless a node already sits there.
  * @returns A new definition containing the positioned node, its ports read from the atom's signature.
  */
-export function appendAtomNode(definition: DagWorkflowDefinition, atom: Atom): DagWorkflowDefinition {
+export function appendAtomNode(definition: DagWorkflowDefinition, atom: Atom, at: XYPosition): DagWorkflowDefinition {
   return {
     ...definition,
     nodes: [
@@ -140,7 +147,7 @@ export function appendAtomNode(definition: DagWorkflowDefinition, atom: Atom): D
         type: CODE_ATOM_TYPE,
         label: atom.signature.name,
         config: { [ATOM_FIELD]: atom.file },
-        position: nextEditorNodePosition(definition.nodes),
+        position: freePosition(definition.nodes, at),
         inputs: signaturePorts(atom.signature.parameters),
         outputs: signaturePorts(atom.signature.results),
       },
@@ -153,12 +160,14 @@ export function appendAtomNode(definition: DagWorkflowDefinition, atom: Atom): D
  * @param definition - Current editor definition.
  * @param id - The embedded workflow's ID, which the node links to.
  * @param child - The embedded workflow.
+ * @param at - Where the node's top-left corner goes, unless a node already sits there.
  * @returns A new definition containing the positioned node, its ports read from the embedded workflow's inputs and outputs.
  */
 export function appendSubworkflowNode(
   definition: DagWorkflowDefinition,
   id: WorkflowId,
   child: DagWorkflowDefinition,
+  at: XYPosition,
 ): DagWorkflowDefinition {
   const signature = workflowSignature(child)
   return {
@@ -170,7 +179,7 @@ export function appendSubworkflowNode(
         type: SUBWORKFLOW_TYPE,
         label: child.name,
         config: { [SUBWORKFLOW_FIELD]: id },
-        position: nextEditorNodePosition(definition.nodes),
+        position: freePosition(definition.nodes, at),
         inputs: signaturePorts(signature.parameters),
         outputs: signaturePorts(signature.results),
       },
@@ -217,20 +226,16 @@ function nextEditorNodeId(type: string, nodes: readonly DagNodeDefinition[]): st
   return `${type}-${index}`
 }
 
-function nextEditorNodePosition(nodes: readonly DagNodeDefinition[]): { x: number; y: number } {
-  const occupiedPositions = nodes.map((node, index) => node.position ?? {
-    x: 80 + (index % 4) * 240,
-    y: 80 + Math.floor(index / 4) * 180,
-  })
-  for (let row = 0; ; row += 1) {
-    for (let column = 0; column < 4; column += 1) {
-      const candidate = { x: 80 + column * 260, y: 80 + row * 190 }
-      const occupied = occupiedPositions.some(position =>
-        Math.abs(position.x - candidate.x) < 230
-        && Math.abs(position.y - candidate.y) < 160)
-      if (!occupied) return candidate
-    }
-  }
+/**
+ * `at`, moved down and to the right past every node already placed there, so a node added twice at the same spot
+ * does not hide the first.
+ */
+function freePosition(nodes: readonly DagNodeDefinition[], at: XYPosition): XYPosition {
+  const taken = (position: XYPosition): boolean => nodes.some(node => node.position !== undefined
+    && Math.abs(node.position.x - position.x) < 16 && Math.abs(node.position.y - position.y) < 16)
+  let position = at
+  while (taken(position)) position = { x: position.x + 32, y: position.y + 32 }
+  return position
 }
 
 /**

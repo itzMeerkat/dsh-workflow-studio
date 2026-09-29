@@ -93,7 +93,7 @@ describe('workflow tools', () => {
     assert.deepEqual(await describeTool.execute({ name: 'code-flow' }, {}), {
       name: 'code-flow',
       language: 'go',
-      source: '// Code generated from workflow "code-flow". DO NOT EDIT.\n\nfunc code_flow() {\n}\n',
+      source: '// Code generated from workflow "code-flow". DO NOT EDIT.\n\nfunc code_flow() (err error) {\n\treturn\n}\n',
       warnings: [],
     })
   })

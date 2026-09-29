@@ -31,6 +31,7 @@ export function subworkflowOf(config: Readonly<Record<string, unknown>>): Workfl
  * 一个工作流作为节点时的签名：输入是参数，输出是结果。
  *
  * `run` 工作流的输入有默认值时可以不接线；`code` 工作流从不运行，输入没有默认值可用，因此都必须接线。
+ * `code` 工作流生成的函数总是另外返回一个错误，所以调用它可能失败。
  * @param definition - 被嵌入的工作流。
  * @returns 以工作流名称命名的签名。
  */
@@ -40,6 +41,7 @@ export function workflowSignature(definition: DagWorkflowDefinition): Signature 
     parameters: workflowInputPorts(definition).map(({ name, type, default: value }) =>
       ({ name, type, optional: definition.kind === 'run' && value !== undefined })),
     results: workflowOutputPorts(definition).map(({ name, type }) => ({ name, type })),
+    fails: definition.kind === 'code',
   }
 }
 

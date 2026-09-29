@@ -45,7 +45,10 @@ export interface Signature {
   /** 函数自己的名字；匿名函数没有。 */
   readonly name?: string
   readonly parameters: readonly Parameter[]
+  /** 调用产生的值，不含它返回的错误。 */
   readonly results: readonly TypedName[]
+  /** 调用可能失败：它另外返回一个错误，工作流遇到错误即提前返回，所以这个错误不是结果端口。 */
+  readonly fails: boolean
 }
 
 /**
@@ -127,8 +130,17 @@ export interface FunctionSyntax {
   readonly discard: string
   /** 可选参数没有接线时传入的值。 */
   readonly absent: string
-  /** 有结果的生成函数的最后一行。 */
+  /** 生成函数的最后一行。 */
   readonly return: string
+  /** 生成函数的最后一个结果：它返回的错误；没有调用失败时为零值。 */
+  readonly error: { readonly name: string; readonly type: string }
+  /**
+   * 可能失败的调用之后的行：调用失败时把错误加上 `{step}`（调用的名字）后提前返回。含 `{error}` 与 `{step}`，
+   * 用到的导入项是 {@link exitImport}。
+   */
+  readonly exit: readonly string[]
+  /** {@link exit} 用到的导入项，只在生成的函数用到它时导入。 */
+  readonly exitImport: string
   /** 原子目录的读法。 */
   readonly atoms: AtomSyntax
 }
@@ -154,6 +166,11 @@ export interface Language {
   readonly equality: string
   /** 连接多个条件、任一成立即成立的运算符，含两侧空白。 */
   readonly or: string
+  /**
+   * 多路分支写成的 switch 语句，`open` 含 `{value}`，`case` 含逗号分隔的 `{values}`，语句由 {@link blockEnd} 闭合；
+   * 没有它的语言把多路分支写成条件链。
+   */
+  readonly switch?: { readonly open: string; readonly case: string; readonly default: string }
   /** 闭合函数或条件块的一行；靠缩进闭合块的语言没有。 */
   readonly blockEnd?: string
   /** 空块中必须写的一行；允许空块的语言没有。 */
@@ -233,6 +250,7 @@ export const GO: Language = {
   negation: '!({condition})',
   equality: '{left} == {right}',
   or: ' || ',
+  switch: { open: 'switch {value} {', case: 'case {values}:', default: 'default:' },
   blockEnd: '}',
   reserved: [
     'break', 'case', 'chan', 'const', 'continue', 'default', 'defer', 'else', 'fallthrough', 'for',
@@ -248,6 +266,9 @@ export const GO: Language = {
     discard: '_',
     absent: 'nil',
     return: 'return',
+    error: { name: 'err', type: 'error' },
+    exit: ['if {error} != nil {', '\t{error} = fmt.Errorf({step}, {error})', '\treturn', '}'],
+    exitImport: '"fmt"',
     atoms: {
       extension: '.go',
       outputSuffix: '.workflow.go',

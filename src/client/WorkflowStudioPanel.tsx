@@ -13,6 +13,7 @@ import {
   IconWorkspaceTreeOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { XYPosition } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import { withCallees, type Callees } from '../shared/callees.ts'
@@ -29,6 +30,7 @@ import {
 } from '../shared/language.ts'
 import { atomFilesSchema } from '../shared/workflow-schema.ts'
 import { analyzeEditorGraph } from './analysis-model.ts'
+import { CARD_WIDTH } from './graph-model.ts'
 import { AtomsPanel } from './AtomsPanel.tsx'
 import { DiagnosticsView } from './DiagnosticsView.tsx'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
@@ -44,6 +46,7 @@ import {
   openFault,
   parseEditorDefinition,
   parseSnapshot,
+  type EmbedChoice,
   type WorkflowRow,
 } from './model.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
@@ -96,6 +99,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   const [settingsOpen, setSettingsOpen] = useState(true)
   const [atomsOpen, setAtomsOpen] = useState(true)
   const importInput = useRef<HTMLInputElement>(null)
+  const viewCenter = useRef<() => XYPosition>()
 
   const replaceDefinition = (next: DagWorkflowDefinition): void => {
     setDefinition(next)
@@ -242,11 +246,22 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     setView('runs')
   }
 
+  // A new node is centred in the canvas's view. Added from another view, it goes at the origin, and the canvas
+  // fits every node into view when it is shown again.
+  const placement = (): XYPosition => {
+    const center = viewCenter.current?.()
+    // A new card's height is unknown until it renders, so it is centred on a typical one.
+    return center === undefined ? { x: 0, y: 0 } : { x: center.x - CARD_WIDTH / 2, y: center.y - 60 }
+  }
+
   const busy = phase !== 'ready'
   const { workflows } = snapshot
   const parentId = selectedId === undefined ? undefined : WorkflowId(selectedId)
-  const embeddable = workflows.filter(row =>
-    embedFault(definition, parentId, row.id, saved.get(row.id)!, id => saved.get(id), language.functions !== undefined) === undefined)
+  const embedChoices = workflows.filter(row => row.id !== parentId).map((row): EmbedChoice => {
+    const fault = embedFault(definition, parentId, row.id, saved.get(row.id)!, id => saved.get(id), language.functions !== undefined)
+    return fault === undefined ? row : { ...row, fault }
+  })
+  const embeddable = embedChoices.filter(choice => choice.fault === undefined)
   const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
   // A workflow has at most one boundary node per side, so the library stops offering a second; a subworkflow
   // node is added from the menu's workflows, so the node types do not offer one linked to nothing.
@@ -305,10 +320,10 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             <NodeLibraryMenu
               disabled={busy}
               nodeTypes={addableNodeTypes}
-              workflows={embeddable}
+              workflows={embedChoices}
               t={t}
-              onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType)) }}
-              onSelectWorkflow={(row) => { replaceDefinition(appendSubworkflowNode(definition, row.id, saved.get(row.id)!)) }}
+              onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType, placement())) }}
+              onSelectWorkflow={(row) => { replaceDefinition(appendSubworkflowNode(definition, row.id, saved.get(row.id)!, placement())) }}
             />
           )}
         </div>
@@ -411,7 +426,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             t={t}
             onChange={replaceDefinition}
             onAdd={(atom) => {
-              replaceDefinition(appendAtomNode(definition, atom))
+              replaceDefinition(appendAtomNode(definition, atom, placement()))
               setView('canvas')
             }}
             onReload={() => { setAtomsRead(value => value + 1) }}
@@ -448,6 +463,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
               t={t}
               onChange={setDefinition}
               onError={setNotice}
+              viewCenter={viewCenter}
               {...(runResult === undefined ? {} : { runResult })}
             />
           )}

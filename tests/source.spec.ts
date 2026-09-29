@@ -131,17 +131,18 @@ describe('code 工作流写成它的语言', () => {
     assert.match(compile(definition, PYTHON), /def flagged\(arg2\):\n {4}if arg2:\n {8}go\(\)/)
   })
 
-  it('Go 只写出工作流函数：类型取自端口，按名字调用原子，被读的结果先声明，分支合并共用一个变量，只导入函数写到的包', () => {
+  it('Go 只写出工作流函数：类型取自端口，按名字调用原子，被读的结果先声明，分支合并共用一个变量，失败的原子带上名字提前返回错误，只导入函数写到的包', () => {
     assert.equal(renderWorkflow(irOf(goDiscount(), CODE_CATALOG), GO, { atoms: SHOP.atoms, workflows: new Map() }), [
       '// Code generated from workflow "折扣". DO NOT EDIT.',
       '',
       'package shop',
       '',
       'import (',
+      '\t"fmt"',
       '\t"time"',
       ')',
       '',
-      'func 折扣(amount float64) (price float64, delay time.Duration) {',
+      'func 折扣(amount float64) (price float64, delay time.Duration, err error) {',
       '\tvar Over_output bool',
       '\tvar join_output float64',
       '\tvar Wait_delay time.Duration',
@@ -151,7 +152,11 @@ describe('code 工作流写成它的语言', () => {
       '\t} else {',
       '\t\tjoin_output = Keep(amount, nil)',
       '\t}',
-      '\tWait_delay = Wait(join_output)',
+      '\tWait_delay, err = Wait(join_output)',
+      '\tif err != nil {',
+      '\t\terr = fmt.Errorf("Wait: %w", err)',
+      '\t\treturn',
+      '\t}',
       '\tprice = join_output',
       '\tdelay = Wait_delay',
       '\treturn',
@@ -198,7 +203,7 @@ const SHOP = atomLibrary([
   },
   {
     file: 'wait.go',
-    text: 'package shop\n\nimport "time"\n\nfunc Wait(price float64) (delay time.Duration) {\n\treturn time.Duration(price) * time.Millisecond\n}\n',
+    text: 'package shop\n\nimport "time"\n\nfunc Wait(price float64) (delay time.Duration, err error) {\n\treturn time.Duration(price) * time.Millisecond, nil\n}\n',
   },
 ], GO.functions!.atoms)
 

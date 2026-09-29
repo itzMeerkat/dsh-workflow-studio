@@ -130,15 +130,15 @@ describe('workflow editor model', () => {
     assert.equal(nextWorkflowName([{ name: 'code-workflow-1' }], 'code'), 'code-workflow-2')
   })
 
-  it('appends one positioned node per explicit catalog selection', () => {
+  it('appends one node per explicit catalog selection at the requested spot, moved past a node already there', () => {
     const worker = nodeType('worker', {
       inputs: [],
       outputs: [],
       controls: [{ name: 'enabled', label: 'Enabled', kind: 'boolean', defaultValue: true }],
     })
     const initial = { name: 'editor', kind: 'run' as const, nodes: [], edges: [] }
-    const first = appendEditorNode(initial, worker)
-    const second = appendEditorNode(first, worker)
+    const first = appendEditorNode(initial, worker, { x: 80, y: 80 })
+    const second = appendEditorNode(first, worker, { x: 80, y: 80 })
 
     assert.deepEqual(initial.nodes, [])
     assert.deepEqual(first.nodes, [{
@@ -149,7 +149,8 @@ describe('workflow editor model', () => {
     }])
     assert.equal(second.nodes.length, 2)
     assert.equal(second.nodes[1]?.id, 'worker-2')
-    assert.notDeepEqual(second.nodes[1]?.position, first.nodes[0]?.position)
+    // A node added where another already sits moves aside so it does not hide it.
+    assert.deepEqual(second.nodes[1]?.position, { x: 112, y: 112 })
   })
 
   /** 一个图的执行计划；节点类型只影响展示，因此都用 `input`。 */

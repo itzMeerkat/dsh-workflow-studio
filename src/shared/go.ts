@@ -37,12 +37,16 @@ export function goSignature(code: string): Signature | undefined {
   const close = closing(code, open)
   const body = close === undefined ? undefined : bodyStart(code, close + 1)
   if (close === undefined || body === undefined) return undefined
-  const results = code.slice(close + 1, body).trim()
+  const list = code.slice(close + 1, body).trim()
+  const results = list.startsWith('(') ? entries(list.slice(1, -1), 'output') : entries(list, 'output')
+  // 按 Go 的惯例，最后一个结果是 error 的函数以它报告失败。
+  const fails = results.at(-1)?.type === 'error'
   return {
     ...(header[1] === undefined ? {} : { name: header[1] }),
     // 指针可以是 nil，所以指针参数不必接线。
     parameters: entries(code.slice(open + 1, close), 'input').map(entry => ({ ...entry, optional: entry.type.startsWith('*') })),
-    results: results.startsWith('(') ? entries(results.slice(1, -1), 'output') : entries(results, 'output'),
+    results: fails ? results.slice(0, -1) : results,
+    fails,
   }
 }
 
