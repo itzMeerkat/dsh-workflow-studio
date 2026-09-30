@@ -247,7 +247,7 @@ describe('workflow import and export', () => {
     const dangling = workflow({ a: 'value' }, ['a>gone'])
     assert.deepEqual(openFault(dangling, 'code'), { key: 'open.otherKind', detail: 'run' })
     assert.deepEqual(openFault(dangling, 'run'), { key: 'open.danglingEdge', detail: 'e0 (a → gone)' })
-    assert.deepEqual(openFault({ ...definition, kind: 'code' }, 'code'), { key: 'open.language', detail: 'go, python, typescript' })
+    assert.deepEqual(openFault({ ...definition, kind: 'code' }, 'code'), { key: 'open.language', detail: 'go' })
     assert.equal(openFault({ ...definition, kind: 'code', language: 'go' }, 'code'), undefined)
   })
 })

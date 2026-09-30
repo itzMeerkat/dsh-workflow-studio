@@ -104,7 +104,7 @@ export function registerWorkflowTools(ctx: Context): void {
         ...(args.description === undefined ? {} : { description: args.description }),
       })
       const def = withCallees(parsed, await workflowCallees(parsed, engine))
-      const { workflowId, sourceError } = await saveWithFile(
+      const { workflowId, sourceError, embedderErrors = [] } = await saveWithFile(
         def,
         { registry: ctx.workflowNodeRegistry, engine },
         () => engine.save(def),
@@ -117,6 +117,7 @@ export function registerWorkflowTools(ctx: Context): void {
         warnings: [
           ...warningsOf(analyzeWorkflow(def, catalog())),
           ...(sourceError === undefined ? [] : [`源码写不出，文件未写出: ${sourceError}`]),
+          ...embedderErrors.map(({ name, error }) => `嵌入它的工作流 "${name}" 源码写不出，文件已删除: ${error}`),
         ],
       }
     },

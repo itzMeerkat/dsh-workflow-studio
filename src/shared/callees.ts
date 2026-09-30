@@ -15,6 +15,8 @@ export interface Callees {
   readonly atoms: ReadonlyMap<string, Atom>
   /** 已保存的工作流，按 ID 索引。 */
   readonly workflows: ReadonlyMap<WorkflowId, DagWorkflowDefinition>
+  /** 原子目录的包，生成的函数写进它；没有原子目录时不存在，生成的只是一个函数，而不是一个文件。 */
+  readonly package?: string
 }
 
 /** 什么也不能调用。 */

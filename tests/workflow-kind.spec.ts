@@ -71,7 +71,7 @@ describe('工作流种类', () => {
     assert.throws(() => { validateWorkflow(fixture.registry, asCode) }, /语言必须是/)
     validateWorkflow(fixture.registry, { ...asCode, language: 'go' })
     assert.throws(() => { validateWorkflow(fixture.registry, { ...asCode, language: 'go', atomFolder: 'atoms' }) }, /原子目录/)
-    assert.throws(() => { validateWorkflow(fixture.registry, { ...asCode, language: 'python', atomFolder: '/atoms' }) }, /原子目录/)
+    assert.throws(() => { validateWorkflow(fixture.registry, { ...definition, nodes: [], atomFolder: '/atoms' }) }, /原子目录/)
     await fixture.dispose()
   })
 })

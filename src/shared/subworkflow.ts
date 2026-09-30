@@ -48,11 +48,10 @@ export function workflowSignature(definition: DagWorkflowDefinition): Signature 
 /**
  * 一个工作流为什么不能嵌入另一个。
  * - `other-kind`：两者种类不同。
- * - `no-calls`：`code` 工作流的语言写不出函数调用。
  * - `other-package`：`code` 工作流按名字调用被嵌入工作流生成的函数，所以两者必须是同一语言、同一原子目录。
  * - `cycle`：被嵌入的工作流直接或间接嵌入了嵌入它的工作流。
  */
-export type EmbedFault = 'other-kind' | 'no-calls' | 'other-package' | 'cycle'
+export type EmbedFault = 'other-kind' | 'other-package' | 'cycle'
 
 /**
  * 判断 `child` 能否嵌入 `parent`。
@@ -61,7 +60,6 @@ export type EmbedFault = 'other-kind' | 'no-calls' | 'other-package' | 'cycle'
  * @param childId - 被嵌入的工作流的 ID。
  * @param child - 被嵌入的工作流。
  * @param lookup - 读取已保存的工作流，用于沿嵌入关系查找环。
- * @param callable - `parent` 的语言能否写出函数调用；只对 `code` 工作流有意义。
  * @returns 不能嵌入的原因；能嵌入时为 undefined。
  */
 export function embedFault(
@@ -70,10 +68,8 @@ export function embedFault(
   childId: WorkflowId,
   child: DagWorkflowDefinition,
   lookup: WorkflowLookup,
-  callable: boolean,
 ): EmbedFault | undefined {
   if (child.kind !== parent.kind) return 'other-kind'
-  if (parent.kind === 'code' && !callable) return 'no-calls'
   if (parent.kind === 'code' && (child.language !== parent.language || child.atomFolder !== parent.atomFolder)) {
     return 'other-package'
   }

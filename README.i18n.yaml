@@ -1,6 +1,49 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write dsh-workflow-studio/README.md
-README.md: 44c90b657ea22b5ca8f17767b32f0267c7f3a158
-README.zh.md: 9f056db2c1795ebf24bc8b45303ab9e72f381cec
+/:
+  en: 6146e248039d1de3
+  zh: a3326e933f1f214b
+/dsh-workflow-studio:
+  en: 3f5c8131c2a8ae74
+  zh: 791eae30143cb07e
+/dsh-workflow-studio/summary:
+  en: b01d68679806ced2
+  zh: 78fd32d57eedd471
+/dsh-workflow-studio/table-of-contents:
+  en: 7fa0ee8d2c7e270c
+  zh: 46239df019b8d8ec
+/dsh-workflow-studio/install:
+  en: 33d9dc1e4a4a8aff
+  zh: 78b9d26f8a104299
+/dsh-workflow-studio/install/install-from-github:
+  en: c096865efcb168c0
+  zh: 3a4290099f64a8db
+/dsh-workflow-studio/install/install-from-a-local-checkout:
+  en: d06a94c82a27a4e3
+  zh: faa9466807bac0f8
+/dsh-workflow-studio/use-this-package:
+  en: edee83a225641f44
+  zh: 1161d8035d5f3b5f
+/dsh-workflow-studio/understand-the-implementation:
+  en: 6d2ad279d402b253
+  zh: b2df62765f6e285a
+/dsh-workflow-studio/further-exploration:
+  en: c4686ccfdb896110
+  zh: dc88621018fb00d5
+/dsh-workflow-studio/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/dsh-workflow-studio/model-experience/tool-surface:
+  en: 1a3e03eb40fe48e4
+  zh: 1febf4e5d5402042
+/dsh-workflow-studio/model-experience/token-and-cache-effect:
+  en: cd7b68f2944c1b65
+  zh: c013e10afb89acca
+/dsh-workflow-studio/known-limitations-and-deferred-work:
+  en: 9b21fdad32362833
+  zh: 748182bede5953a1
+/dsh-workflow-studio/known-limitations-and-deferred-work/dev-note:
+  en: ebcd15af603774e7
+  zh: c8c1dffb8a8a0923

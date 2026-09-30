@@ -9,8 +9,10 @@ import type {
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { messageOf } from './shared/errors.ts'
+import { errorPolicyOf } from './shared/error-policy.ts'
 import { execSourcePin, inboundEdges, nodeExecPins, type InboundEdges } from './shared/graph.ts'
 import { execKindOf } from './flow-nodes.ts'
+import { enclosingEntries } from './subworkflow.ts'
 import { TERMINAL_NODE_STATUSES, cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
 
 /** 一次调度结束时的运行状态与原因。 */
@@ -44,11 +46,17 @@ interface NodeTask {
   executor: WorkflowNodeExecutor
   record: NodeRunRecord
   info: NodeRunInfo
+  /** 节点正在等待外部结果，或它的等待因运行退出而被放弃。 */
+  waiting: boolean
 }
 
 /** 执行一个运行中未结束的节点。每个节点的开始和结束状态都在写入运行记录后才继续。 */
 export class RunExecutor {
   private readonly signal: AbortSignal
+  /** 一个节点以 `exit` 结束运行时中止。 */
+  private readonly exit = new AbortController()
+  /** 运行取消或退出时中止，外部结果等待随之放弃：等待中的节点没有做到一半的工作，而人可能永远不回答。 */
+  private readonly abandon: AbortSignal
   /** 本次运行定义的入边索引；定义在运行期间不变，因此只建一次。 */
   private readonly inbound: InboundEdges
 
@@ -58,6 +66,7 @@ export class RunExecutor {
    */
   constructor(private readonly state: RunState, private readonly host: RunHost) {
     this.signal = state.abortController.signal
+    this.abandon = AbortSignal.any([this.signal, this.exit.signal])
     this.inbound = inboundEdges(state.definition.edges)
   }
 
@@ -65,7 +74,8 @@ export class RunExecutor {
    * 调度所有 pending 节点直到运行结束、失败或被取消。
    *
    * 节点在自己的全部前驱结束后立即开始，而不等待同层的其他节点，因此一个长节点不会拖住与它无关的分支。
-   * 节点失败后不再启动新节点，已在执行的节点跑完后运行才失败，使带副作用的节点不被半途丢下。
+   * 节点失败后不再启动新节点，已在执行的节点跑完后运行才失败，使带副作用的节点不被半途丢下；
+   * 只有等待外部结果的节点被放弃并记为 cancelled，否则一个没人回答的请求会让运行永远不结束。
    * @returns 运行的结束状态；节点失败或写入失败时为 failed。
    */
   async execute(): Promise<RunOutcome> {
@@ -100,9 +110,17 @@ export class RunExecutor {
         if (running.size > 0) {
           const settled = await Promise.race(running.values())
           running.delete(settled)
-          const record = nodeState(state, settled).record
+          const { node, record } = nodeState(state, settled)
           if (record.status === 'failed') {
-            failure ??= `${record.nodeId}: ${record.error ?? '节点执行失败'}`
+            const policy = errorPolicyOf(node)
+            switch (policy) {
+              case 'exit':
+                failure ??= this.failureOf(node, record.error ?? '节点执行失败')
+                this.exit.abort(failure)
+                break
+              default:
+                assertNever(policy)
+            }
           }
           continue
         }
@@ -123,6 +141,17 @@ export class RunExecutor {
       cancelRemaining(state, message)
       return { status: 'failed', error: message }
     }
+  }
+
+  /**
+   * 以节点名包装的错误，与 `code` 工作流生成的函数一样逐层包装：先是它所在的各层子工作流，由外到内，再是节点本身。
+   * 节点名是它的标签，未命名时是它的类型。
+   * @param node - 失败的节点。
+   * @param error - 它的错误。
+   */
+  private failureOf(node: DagNodeDefinition, error: string): string {
+    const path = [...enclosingEntries(id => this.state.nodeStates.get(id)?.node, node.id), node]
+    return [...path.map(item => item.label ?? item.type), error].join(': ')
   }
 
   /**
@@ -158,7 +187,7 @@ export class RunExecutor {
 
   /**
    * 声明或复用节点的外部结果等待。节点保持 running；已送达结果的请求立即返回。
-   * @returns 送达的结果；运行取消时以中止原因拒绝。
+   * @returns 送达的结果；运行取消或退出时以原因拒绝。
    */
   private async awaitSignal(task: NodeTask, requestId: string, request: unknown): Promise<JsonValue> {
     if (requestId.trim() === '') throw new TypeError('requestId 必须为非空字符串')
@@ -166,7 +195,8 @@ export class RunExecutor {
     record.requests ??= []
     let pending = record.requests.find(item => item.id === requestId)
     if (pending?.result !== undefined) return structuredClone(pending.result)
-    this.signal.throwIfAborted()
+    task.waiting = true
+    this.abandon.throwIfAborted()
     if (pending === undefined) {
       pending = { id: requestId, request: toJsonValue(request, 'request'), createdAt: Date.now() }
       record.requests.push(pending)
@@ -178,7 +208,9 @@ export class RunExecutor {
     try {
       await this.host.checkpoint(this.state)
       this.host.emit('dag/signal-requested', runInfo(this.state), task.info, requestId)
-      return await abortable(promise, this.signal)
+      const result = await abortable(promise, this.abandon)
+      task.waiting = false
+      return result
     } finally {
       waiters.delete(requestId)
     }
@@ -258,6 +290,7 @@ export class RunExecutor {
       executor,
       record,
       info: { nodeId: node.id, nodeType: node.type, label: node.label ?? node.type, status: 'running' },
+      waiting: false,
     }
     this.host.emit('dag/node-start', runInfo(this.state), task.info)
     await this.host.checkpoint(this.state)
@@ -265,7 +298,7 @@ export class RunExecutor {
     await this.host.checkpoint(this.state)
   }
 
-  /** 通过输入检查后调用执行器。 */
+  /** 通过输入检查后调用执行器；运行取消，或节点的等待被放弃时，无论执行器返回什么，节点都记为 cancelled。 */
   private async runNode(task: NodeTask, inputs: Record<string, unknown>): Promise<NodeEnd> {
     const { node, executor } = task
     const context = this.nodeContext(task, inputs)
@@ -273,11 +306,12 @@ export class RunExecutor {
     const gate = this.inputGate(node, executor, inputs)
     if (gate !== undefined) return gate
 
+    const stopped = (): boolean => this.signal.aborted || (this.exit.signal.aborted && task.waiting)
     try {
       const result = await executor.execute(context)
-      return this.signal.aborted ? { status: 'cancelled' } : resultEnd(node, executor, result)
+      return stopped() ? { status: 'cancelled' } : resultEnd(node, executor, result)
     } catch (error: unknown) {
-      return this.signal.aborted ? { status: 'cancelled' } : { status: 'failed', error: messageOf(error) }
+      return stopped() ? { status: 'cancelled' } : { status: 'failed', error: messageOf(error) }
     }
   }
 
@@ -351,7 +385,7 @@ export class RunExecutor {
     record.status = end.status
     if (end.status === 'completed') record.fired = [...end.fired]
     if (end.status === 'failed') record.error = end.error
-    if (end.status === 'cancelled' && this.signal.reason !== undefined) record.error = String(this.signal.reason)
+    if (end.status === 'cancelled' && this.abandon.reason !== undefined) record.error = String(this.abandon.reason)
     if ('outputs' in end && end.outputs !== undefined) record.outputs = structuredClone(end.outputs)
     record.completedAt = Date.now()
     this.host.emit('dag/node-end', runInfo(this.state), { ...info, status: end.status })
@@ -409,5 +443,5 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 function assertNever(value: never): never {
-  throw new Error(`未知的节点执行结果: ${JSON.stringify(value)}`)
+  throw new Error(`未覆盖的取值: ${JSON.stringify(value)}`)
 }

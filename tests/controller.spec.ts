@@ -12,7 +12,8 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ATOM_FIELD, CODE_ATOM_TYPE } from '../src/shared/language.ts'
-import { RunId } from '../src/shared/types.ts'
+import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE } from '../src/shared/subworkflow.ts'
+import { RunId, type SavedWorkflow } from '../src/shared/types.ts'
 import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 
@@ -174,7 +175,7 @@ describe('WorkflowStudioController', () => {
     )
   })
 
-  it('保存带原子目录的 Go 工作流时写出目录中的 <ID>.workflow.go，改名时换掉旧文件；写不出时照样保存并给出原因', async () => {
+  it('保存带原子目录的 Go 工作流时写出目录中的 <ID>.workflow.go，改名时换掉旧文件，删除时删掉；写不出时照样保存并给出原因', async () => {
     const controller = await setup()
     const folder = await mkdtemp(join(tmpdir(), 'atoms-'))
     try {
@@ -200,9 +201,30 @@ describe('WorkflowStudioController', () => {
         '',
       ].join('\n'))
 
+      // 嵌入它的工作流按它的签名调用它，所以它的签名一变，嵌入方的文件随之重写；写不出时删除并给出原因。
+      await controller.save(JSON.stringify(workflow({
+        in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'name', type: 'string' }] },
+        sub: { type: SUBWORKFLOW_TYPE, config: { [SUBWORKFLOW_FIELD]: 'hello' }, inputs: [{ name: 'name', type: 'string' }] },
+      }, ['in:name>sub:name'], { name: 'outer', kind: 'code', language: 'go', atomFolder: folder })))
+      assert.match(await readFile(join(folder, 'outer.workflow.go'), 'utf8'), /err = hello\(name\)/)
+      const widened = greet('greet.go')
+      widened.nodes[0]!.outputs!.push({ name: 'greeting', type: 'string' })
+      const saved = JSON.parse(await controller.update('hello', JSON.stringify(widened))) as SavedWorkflow
+      assert.deepEqual(saved.embedderErrors?.map(({ name }) => name), ['outer'])
+      assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'hello.workflow.go'])
+      await assert.rejects(controller.delete('hello'), /被 "outer" 作为子工作流嵌入，不能删除/)
+      await controller.save(JSON.stringify(greet('greet.go')))
+
       // 改名后文件随新 ID 改名，旧文件不再留在包里。
+      await controller.save(JSON.stringify(workflow({}, [], { name: 'outer', kind: 'code', language: 'go', atomFolder: folder })))
       await controller.update('hello', JSON.stringify({ ...greet('greet.go'), name: 'greeting' }))
-      assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'greeting.workflow.go'])
+      assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'greeting.workflow.go', 'outer.workflow.go'])
+
+      // 删除工作流同时删除它的文件。
+      await controller.delete('greeting')
+      assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'outer.workflow.go'])
+      assert.deepEqual((JSON.parse(controller.snapshot('code')) as { workflows: Array<{ id: string }> }).workflows.map(({ id }) => id), ['outer'])
+      await assert.rejects(controller.delete('greeting'), /不存在/)
     } finally {
       await rm(folder, { recursive: true, force: true })
     }

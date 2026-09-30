@@ -7,10 +7,8 @@
  * @module dsh-workflow-studio
  */
 
-import { GO_TYPES, goAtom, goImportName } from './go.ts'
-import type {
-  BuiltinPortType, DagWorkflowDefinition, PortDefinition, PortType,
-} from './types.ts'
+import { GO_TYPES, goAtom, goImportName, goPackage } from './go.ts'
+import { BUILTIN_PORT_TYPES, type BuiltinPortType, type DagWorkflowDefinition, type PortDefinition, type PortType } from './types.ts'
 
 /** 代码节点存放代码的配置字段。 */
 export const CODE_FIELD = 'code'
@@ -59,8 +57,6 @@ export interface Signature {
 export interface Atom {
   /** 目录中的文件名，也是原子的 ID。 */
   readonly file: string
-  /** 文件声明的包名。 */
-  readonly package: string
   /** 导入项，按原文，例如 `"fmt"` 或 `str "strings"`。 */
   readonly imports: readonly string[]
   /** 导出函数的签名；调用按名字进行。 */
@@ -88,6 +84,8 @@ export interface AtomLibrary {
   readonly faults: readonly AtomFault[]
   /** 目录中有没有 {@link AtomSyntax.types} 文件。 */
   readonly types: boolean
+  /** 目录的包，生成的函数写进这个包：取自声明了包的第一个文件；还没有这样的文件时取目录名，不能作标识符的字符换成 `_`。 */
+  readonly package: string
 }
 
 /** 一种语言如何读原子目录，以及把生成的函数写进原子所在的包。 */
@@ -102,6 +100,8 @@ export interface AtomSyntax {
   readonly importName: (spec: string) => string | undefined
   /** 读一个原子文件。 */
   readonly read: (file: string, text: string) => Atom | AtomFault
+  /** 一个文件声明的包名；没有包声明时为 undefined。 */
+  readonly packageOf: (text: string) => string | undefined
   /** 包声明，含 `{name}`。 */
   readonly package: string
   /** 导入块的第一行；导入项在块内缩进一级。 */
@@ -160,25 +160,21 @@ export interface Language {
   readonly otherwiseOpen: string
   /** 开启同一决策节点另一个引脚一侧的一行，含 `{condition}`；闭合上一侧同 {@link otherwiseOpen}。 */
   readonly otherwiseIfOpen: string
-  /** 条件取反的表达式，含 `{condition}`。 */
-  readonly negation: string
-  /** 两个值相等的表达式，含 `{left}` 和 `{right}`。 */
-  readonly equality: string
-  /** 连接多个条件、任一成立即成立的运算符，含两侧空白。 */
-  readonly or: string
-  /**
-   * 多路分支写成的 switch 语句，`open` 含 `{value}`，`case` 含逗号分隔的 `{values}`，语句由 {@link blockEnd} 闭合；
-   * 没有它的语言把多路分支写成条件链。
-   */
-  readonly switch?: { readonly open: string; readonly case: string; readonly default: string }
   /** 闭合函数或条件块的一行；靠缩进闭合块的语言没有。 */
   readonly blockEnd?: string
-  /** 空块中必须写的一行；允许空块的语言没有。 */
-  readonly emptyBlock?: string
   /** 不能作为标识符的词。 */
   readonly reserved: readonly string[]
-  /** 原子的读法和调用法；没有它的语言不能使用原子目录。 */
+  /** 原子的读法和调用法；只有 `code` 工作流的语言有。 */
   readonly functions?: FunctionSyntax
+}
+
+/** `code` 工作流的语言：它另外写得出条件取反、switch 语句和函数调用。 */
+export interface CodeLanguage extends Language {
+  /** 条件取反的表达式，含 `{condition}`。 */
+  readonly negation: string
+  /** 多路分支写成的 switch 语句，`open` 含 `{value}`，`case` 含逗号分隔的 `{values}`，语句由 {@link blockEnd} 闭合。 */
+  readonly switch: { readonly open: string; readonly case: string; readonly default: string }
+  readonly functions: FunctionSyntax
 }
 
 /** `run` 工作流的语言：按执行顺序缩进的伪代码。 */
@@ -190,56 +186,11 @@ export const PSEUDOCODE: Language = {
   conditionOpen: 'if {condition}:',
   otherwiseOpen: 'else:',
   otherwiseIfOpen: 'else if {condition}:',
-  negation: 'not {condition}',
-  equality: '{left} == {right}',
-  or: ' or ',
   reserved: [],
 }
 
-/** Python 3。 */
-export const PYTHON: Language = {
-  name: 'python',
-  indent: '    ',
-  comment: '# ',
-  functionOpen: 'def {name}({parameters}):',
-  conditionOpen: 'if {condition}:',
-  otherwiseOpen: 'else:',
-  otherwiseIfOpen: 'elif {condition}:',
-  negation: 'not ({condition})',
-  equality: '{left} == {right}',
-  or: ' or ',
-  emptyBlock: 'pass',
-  reserved: [
-    'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
-    'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import',
-    'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while',
-    'with', 'yield',
-  ],
-}
-
-/** TypeScript。 */
-export const TYPESCRIPT: Language = {
-  name: 'typescript',
-  indent: '  ',
-  comment: '// ',
-  functionOpen: 'export function {name}({parameters}) {',
-  conditionOpen: 'if ({condition}) {',
-  otherwiseOpen: '} else {',
-  otherwiseIfOpen: '} else if ({condition}) {',
-  negation: '!({condition})',
-  equality: '{left} === {right}',
-  or: ' || ',
-  blockEnd: '}',
-  reserved: [
-    'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
-    'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function',
-    'if', 'import', 'in', 'instanceof', 'let', 'new', 'null', 'return', 'super', 'switch', 'this',
-    'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
-  ],
-}
-
 /** Go；原子目录是一个 Go 包，每个文件导出一个具名函数或绑定到 `var` 的函数字面量，自定义类型声明在 `types.go`。 */
-export const GO: Language = {
+export const GO: CodeLanguage = {
   name: 'go',
   indent: '\t',
   comment: '// ',
@@ -248,8 +199,6 @@ export const GO: Language = {
   otherwiseOpen: '} else {',
   otherwiseIfOpen: '} else if {condition} {',
   negation: '!({condition})',
-  equality: '{left} == {right}',
-  or: ' || ',
   switch: { open: 'switch {value} {', case: 'case {values}:', default: 'default:' },
   blockEnd: '}',
   reserved: [
@@ -275,6 +224,7 @@ export const GO: Language = {
       types: 'types.go',
       importName: goImportName,
       read: goAtom,
+      packageOf: goPackage,
       package: 'package {name}',
       importOpen: 'import (',
       importClose: ')',
@@ -283,7 +233,7 @@ export const GO: Language = {
 }
 
 /** `code` 工作流可以使用的语言；新的 `code` 工作流用第一种。 */
-export const CODE_LANGUAGES: readonly Language[] = [GO, PYTHON, TYPESCRIPT]
+export const CODE_LANGUAGES: readonly CodeLanguage[] = [GO]
 
 /**
  * 一个工作流写成的语言。
@@ -295,14 +245,37 @@ export function languageOf(definition: Pick<DagWorkflowDefinition, 'kind' | 'lan
   switch (definition.kind) {
     case 'run':
       return PSEUDOCODE
-    case 'code': {
-      const language = CODE_LANGUAGES.find(candidate => candidate.name === definition.language)
-      if (language !== undefined) return language
-      throw new Error(`code 工作流的语言必须是 ${CODE_LANGUAGES.map(({ name }) => name).join('、')} 之一，`
-        + `而不是 ${definition.language ?? '空'}`)
-    }
+    case 'code':
+      return codeLanguageOf(definition.language)
     default:
       return assertNever(definition.kind)
+  }
+}
+
+/**
+ * 名为 `name` 的 `code` 工作流语言。
+ * @param name - 语言名。
+ * @throws `name` 不是 {@link CODE_LANGUAGES} 之一时。
+ */
+export function codeLanguageOf(name: string | undefined): CodeLanguage {
+  const language = CODE_LANGUAGES.find(candidate => candidate.name === name)
+  if (language !== undefined) return language
+  throw new Error(`code 工作流的语言必须是 ${CODE_LANGUAGES.map(candidate => candidate.name).join('、')} 之一，而不是 ${name ?? '空'}`)
+}
+
+/**
+ * 代码节点由作者声明端口的那几侧：代码块的输入和输出，代码条件的输入，它的输出固定是条件的值。
+ * @param type - 节点类型。
+ * @returns 作者声明端口的各侧；其他节点的端口由类型或被调用者决定，没有这样的一侧。
+ */
+export function codePortSides(type: string): readonly ('inputs' | 'outputs')[] {
+  switch (type) {
+    case CODE_BLOCK_TYPE:
+      return ['inputs', 'outputs']
+    case CODE_CONDITION_TYPE:
+      return ['inputs']
+    default:
+      return []
   }
 }
 
@@ -346,26 +319,29 @@ export function isAtomFile(file: string, syntax: AtomSyntax): boolean {
 
 /**
  * 读出一个原子目录中的原子。
+ * @param folder - 目录的路径。
  * @param files - 目录中该语言扩展名的文件，含 {@link AtomSyntax.types} 文件。
  * @param syntax - 语言的原子读法。
- * @returns 按文件名索引的原子、不能作为原子的文件，以及有没有类型文件。
+ * @returns 按文件名索引的原子、不能作为原子的文件、有没有类型文件，以及目录的包。
  */
-export function atomLibrary(files: readonly AtomFile[], syntax: AtomSyntax): AtomLibrary {
+export function atomLibrary(folder: string, files: readonly AtomFile[], syntax: AtomSyntax): AtomLibrary {
   const read = files.filter(({ file }) => isAtomFile(file, syntax)).map(({ file, text }) => syntax.read(file, text))
+  const declared = files.map(({ text }) => syntax.packageOf(text)).find(name => name !== undefined)
   return {
     atoms: new Map(read.flatMap(atom => 'fault' in atom ? [] : [[atom.file, atom] as const])),
     faults: read.filter(atom => 'fault' in atom),
     types: files.some(({ file }) => file === syntax.types),
+    package: declared ?? folder.split(/[\\/]/).at(-1)!.replaceAll(/[^\p{L}\p{N}_]/gu, '_').replace(/^(?=\p{N})/u, '_'),
   }
 }
 
 /**
- * 原子目录中原子的参数和结果用到的端口类型，去重后排序。
- * @param library - 原子目录读出的原子。
+ * 端口可以声明的类型：内置类型，其后是原子的参数和结果用到的其他类型，排序。
+ * @param atoms - 原子目录读出的原子。
  */
-export function atomTypes(library: AtomLibrary): PortType[] {
-  const types = [...library.atoms.values()].flatMap(({ signature }) => [...signature.parameters, ...signature.results])
-  return [...new Set(types.map(({ type }) => type))].sort()
+export function portTypes(atoms: ReadonlyMap<string, Atom>): PortType[] {
+  const used = [...atoms.values()].flatMap(({ signature }) => [...signature.parameters, ...signature.results]).map(({ type }) => type)
+  return [...BUILTIN_PORT_TYPES, ...[...new Set(used)].filter(type => !BUILTIN_PORT_TYPES.includes(type as BuiltinPortType)).sort()]
 }
 
 /**

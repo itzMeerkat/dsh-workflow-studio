@@ -31,7 +31,7 @@ export const SUBWORKFLOW_DEFAULTS = 'defaults'
  * 把一个 `run` 工作流的子工作流节点展开成它们嵌入的工作流的节点，嵌套的子工作流一并展开。
  *
  * 子工作流节点 `S` 展开为：
- * - 一个 ID 仍为 `S` 的入口节点，输入就是 `S` 的输入，因此连进 `S` 的边原样保留；它把收到的值和子工作流输入的默认值
+ * - 一个 ID 仍为 `S` 的入口节点，标签是 `S` 的标签或被嵌入工作流的名称，输入就是 `S` 的输入，因此连进 `S` 的边原样保留；它把收到的值和子工作流输入的默认值
  *   作为输出，代替子工作流的输入边界；
  * - 子工作流其余的节点和边，ID 前加 `S/`，输出边界换成出口节点；
  * - 从入口到每个展开节点的执行边，OR 连接点除外，它由自己的入执行边决定何时运行。于是整个子工作流等 `S` 的输入
@@ -112,7 +112,7 @@ function inline(
   const entry: DagNodeDefinition = {
     id: node.id,
     type: SUBWORKFLOW_ENTRY_TYPE,
-    ...(node.label === undefined ? {} : { label: node.label }),
+    label: node.label ?? authored.name,
     config: {
       [SUBWORKFLOW_DEFAULTS]: Object.fromEntries(ports.flatMap(port => port.default === undefined ? [] : [[port.name, port.default]])),
     },
@@ -134,6 +134,21 @@ function inline(
   const results = new Map(edges.filter(edge => isDataEdge(edge) && edge.target === exit).map(edge =>
     [edge.targetPort ?? 'input', { source: edge.source, ...(edge.sourcePort === undefined ? {} : { sourcePort: edge.sourcePort }) }] as const))
   return { nodes: [entry, ...body], edges, exit, results }
+}
+
+/**
+ * 展开后的一个节点所在的各层子工作流的入口，由外到内。
+ *
+ * 展开把子工作流的节点改名为 `<子工作流节点>/<ID>`，入口沿用子工作流节点的 ID，所以 ID 在某个 `/` 之前的部分
+ * 若是一个入口的 ID，那个入口就是一层。
+ * @param node - 按 ID 读取展开后的定义中的节点。
+ * @param id - 展开后的节点 ID。
+ */
+export function enclosingEntries(node: (id: NodeId) => DagNodeDefinition | undefined, id: NodeId): DagNodeDefinition[] {
+  return [...id.matchAll(/\//g)].flatMap((match) => {
+    const entry = node(NodeId(id.slice(0, match.index)))
+    return entry?.type === SUBWORKFLOW_ENTRY_TYPE ? [entry] : []
+  })
 }
 
 function execEdge(id: string, source: NodeId, target: NodeId): DagExecEdge {

@@ -117,6 +117,14 @@ export abstract class DagEngine extends Service {
    */
   abstract update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId>
 
+  /**
+   * 删除一个工作流定义；它的运行记录保留，因为每个运行自带启动时的定义快照。
+   * @param id - 必须已存在的工作流 ID。
+   * @returns 删除持久化后兑现。
+   * @throws 工作流不存在，或被其他工作流作为子工作流嵌入时。
+   */
+  abstract delete(id: WorkflowId): Promise<void>
+
   /** 按 ID 获取工作流定义。 */
   abstract get(id: WorkflowId): DagWorkflowDefinition | undefined
 

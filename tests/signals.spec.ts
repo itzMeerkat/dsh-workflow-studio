@@ -165,6 +165,38 @@ describe('节点等待外部结果', () => {
     assert.deepEqual((await run.result).nodes[0]?.outputs, { output: { done: true } })
   })
 
+  it('一个节点失败退出运行时，等待外部结果的节点被放弃，已在工作的节点照常跑完', async () => {
+    const release = Promise.withResolvers<void>()
+    const worker: WorkflowNodeExecutor = {
+      type: 'worker',
+      label: 'Worker',
+      description: 'Works until released',
+      async execute() {
+        await release.promise
+        return { status: 'completed', outputs: {} }
+      },
+    }
+    const failer: WorkflowNodeExecutor = {
+      type: 'failer',
+      label: 'Failer',
+      description: 'Fails',
+      execute: () => ({ status: 'failed', error: 'down' }),
+    }
+    const { engine } = await hosts.start(await hosts.root(), [...executors({ asks: 0 }), worker, failer])
+    const run = engine.start(await engine.save(workflow({ w: 'waiter', work: 'worker', fail: 'failer' }, [], { name: 'exit' })))
+    await until(() => engine.getRun(run.runId)!.nodes.find(node => node.nodeId === NodeId('fail'))?.status === 'failed')
+    release.resolve()
+
+    const result = await run.result
+    assert.equal(result.status, 'failed')
+    assert.equal(result.error, 'failer: down')
+    assert.deepEqual(result.nodes.map(node => [node.nodeId, node.status, node.error]), [
+      ['w', 'cancelled', 'failer: down'],
+      ['work', 'completed', undefined],
+      ['fail', 'failed', 'down'],
+    ])
+  })
+
   it('等待中的请求在重启后保留，重新调用的节点不会重复声明', async () => {
     const root = await hosts.root()
     const first = await asked(root)

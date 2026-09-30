@@ -23,17 +23,18 @@ describe('原子目录', () => {
       await mkdir(join(folder, 'nested'))
       await mkdir(join(folder, '.git'))
 
-      assert.deepEqual((await readAtomFiles(folder, GO.functions!.atoms)).map(file => file.file), ['add.go', 'types.go'])
-      const library = await workflowAtoms(workflow({}, [], { kind: 'code', language: 'go', atomFolder: folder }))
+      assert.deepEqual((await readAtomFiles(folder, GO.functions.atoms)).map(file => file.file), ['add.go', 'types.go'])
+      const library = (await workflowAtoms(workflow({}, [], { kind: 'code', language: 'go', atomFolder: folder })))!
       assert.deepEqual([...library.atoms.keys()], ['add.go'])
       assert.equal(library.types, true)
+      assert.equal(library.package, 'm')
       assert.deepEqual(await listFolders(folder), {
         path: folder,
         parent: tmpdir(),
         folders: [{ name: 'nested', path: join(folder, 'nested') }],
         files: ['add.go', 'add_test.go', 'flow.workflow.go', 'notes.md', 'types.go'],
       })
-      await assert.rejects(readAtomFiles('relative/atoms', GO.functions!.atoms), /绝对路径/)
+      await assert.rejects(readAtomFiles('relative/atoms', GO.functions.atoms), /绝对路径/)
     } finally {
       await rm(folder, { recursive: true, force: true })
     }

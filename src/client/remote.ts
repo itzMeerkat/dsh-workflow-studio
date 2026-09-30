@@ -11,6 +11,7 @@ export interface WorkflowStudioRemoteNamespace {
   snapshot(kind: string): Promise<RemoteResult<string>>
   save(source: string): Promise<RemoteResult<string>>
   update(workflowId: string, source: string): Promise<RemoteResult<string>>
+  delete(workflowId: string): Promise<RemoteResult<string>>
   start(workflowId: string, inputs: string): Promise<RemoteResult<string>>
   listRuns(): Promise<RemoteResult<string>>
   getRun(runId: string): Promise<RemoteResult<string>>
@@ -55,6 +56,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'workflowStudio/snapshot': WorkflowStudioRemoteNamespace['snapshot']
     'workflowStudio/save': WorkflowStudioRemoteNamespace['save']
     'workflowStudio/update': WorkflowStudioRemoteNamespace['update']
+    'workflowStudio/delete': WorkflowStudioRemoteNamespace['delete']
     'workflowStudio/start': WorkflowStudioRemoteNamespace['start']
     'workflowStudio/listRuns': WorkflowStudioRemoteNamespace['listRuns']
     'workflowStudio/getRun': WorkflowStudioRemoteNamespace['getRun']
@@ -93,6 +95,7 @@ const contribution: TypertRemoteContribution = {
     descriptor('snapshot', ['kind']),
     descriptor('save', ['source']),
     descriptor('update', ['workflowId', 'source']),
+    descriptor('delete', ['workflowId']),
     descriptor('start', ['workflowId', 'inputs']),
     descriptor('listRuns', []),
     descriptor('getRun', ['runId']),

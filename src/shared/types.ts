@@ -54,6 +54,15 @@ export const DEFAULT_WORKFLOW_KIND: WorkflowKind = 'run'
  */
 export type NodeRecoveryPolicy = 'rerun' | 'hold'
 
+/**
+ * 节点遇到它自己处理不了的错误时，工作流怎么做。
+ * - `exit`：工作流不再开始新的节点，并返回以节点名包装的错误。`run` 工作流等已在工作的节点跑完、放弃等待外部结果的
+ *   节点后，运行以 failed 结束；`code` 工作流生成的函数提前返回。
+ *
+ * 子工作流中的节点以 `exit` 失败时，子工作流随之失败，错误再由嵌入它的节点的策略处置，并再包一层它的名字。
+ */
+export type NodeErrorPolicy = 'exit'
+
 /** 内置端口类型，按编辑器列出的先后排列；`run` 工作流只用它们。 */
 export const BUILTIN_PORT_TYPES = ['any', 'string', 'number', 'boolean'] as const
 
@@ -135,6 +144,8 @@ export interface DagNodeDefinition {
   config: Record<string, unknown>
   /** 覆盖执行器声明的中断恢复策略。 */
   recovery?: NodeRecoveryPolicy
+  /** 节点失败时工作流怎么做；省略时为 `exit`。 */
+  onError?: NodeErrorPolicy
   /** 可视化编辑器中的节点坐标。 */
   position?: { x: number; y: number }
   /** 可视化编辑器中卡片的宽度（像素）；省略时为默认宽度。 */
@@ -449,8 +460,11 @@ export interface WorkflowStudioSnapshot {
   readonly nodeTypes: readonly NodeTypeSummary[]
 }
 
-/** 一次保存的结果：工作流 ID，以及它有原子目录却写不出源码时的原因。 */
+/** 一次保存的结果。 */
 export interface SavedWorkflow {
   readonly workflowId: WorkflowId
+  /** 工作流有原子目录却写不出源码时的原因；它的文件已删除。 */
   readonly sourceError?: string
+  /** 嵌入它的工作流随它重写文件时写不出源码的那些，以及原因；它们的文件已删除。 */
+  readonly embedderErrors?: readonly { readonly name: string; readonly error: string }[]
 }

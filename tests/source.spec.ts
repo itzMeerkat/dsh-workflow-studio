@@ -6,8 +6,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { indexNodeTypes } from '../src/shared/analysis.ts'
 import {
-  ATOM_FIELD, CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, GO, PSEUDOCODE, PYTHON,
-  TYPESCRIPT, atomLibrary, type Language,
+  ATOM_FIELD, CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, GO, PSEUDOCODE, atomLibrary,
 } from '../src/shared/language.ts'
 import { withCallees } from '../src/shared/callees.ts'
 import { RenderError, renderWorkflow } from '../src/shared/source.ts'
@@ -39,8 +38,7 @@ function discount(): DagWorkflowDefinition {
   ], { name: '折扣', kind: 'code' })
 }
 
-const compile = (definition: DagWorkflowDefinition, language: Language) =>
-  renderWorkflow(irOf(definition, CODE_CATALOG), language)
+const compile = (definition: DagWorkflowDefinition) => renderWorkflow(irOf(definition, CODE_CATALOG), GO)
 
 describe('run 工作流写成伪代码', () => {
   it('节点写成调用，实参写出来源，决策节点的两侧写成 if/else，同名节点退回节点 ID', () => {
@@ -83,56 +81,45 @@ describe('run 工作流写成伪代码', () => {
 })
 
 describe('code 工作流写成它的语言', () => {
-  it('语句原样写出并按所在的块重新缩进，条件写进 if，块的开合由语言决定', () => {
-    assert.equal(compile(discount(), PYTHON), [
-      '# Code generated from workflow "折扣". DO NOT EDIT.',
-      '',
-      'def 折扣(amount):',
-      '    if amount > 100:',
-      '        price = amount * 0.9',
-      '        log("discount")',
-      '    else:',
-      '        price = amount',
-      '    log(price)',
-      '',
-    ].join('\n'))
-    assert.equal(compile(discount(), TYPESCRIPT), [
+  it('语句原样写出并按所在的块重新缩进，条件写进 if', () => {
+    assert.equal(compile(discount()), [
       '// Code generated from workflow "折扣". DO NOT EDIT.',
       '',
-      'export function 折扣(amount) {',
-      '  if (amount > 100) {',
-      '    price = amount * 0.9',
-      '    log("discount")',
-      '  } else {',
-      '    price = amount',
-      '  }',
-      '  log(price)',
+      'func 折扣(amount float64) (err error) {',
+      '\tif amount > 100 {',
+      '\t\tprice = amount * 0.9',
+      '\t\tlog("discount")',
+      '\t} else {',
+      '\t\tprice = amount',
+      '\t}',
+      '\tlog(price)',
+      '\treturn',
       '}',
       '',
     ].join('\n'))
   })
 
-  it('只有另一侧的分支写成取反的条件，空块写成语言要求的占位', () => {
+  it('只有另一侧的分支写成取反的条件', () => {
     const definition = workflow({
       over: { type: CODE_CONDITION_TYPE, ...code('amount > 100') },
       gate: 'branch',
       keep: { type: CODE_BLOCK_TYPE, ...code('') },
     }, ['over:value>gate:condition', 'gate.false>keep'], { name: 'one-sided', kind: 'code' })
-    assert.match(compile(definition, PYTHON), /\n {4}if not \(amount > 100\):\n {8}pass\n$/)
+    assert.match(compile(definition), /\n\tif !\(amount > 100\) \{\n\t\}\n/)
   })
 
   it('条件接自工作流输入时就是那个参数', () => {
     const definition = workflow({
-      in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'def', type: 'boolean' }] },
+      in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'func', type: 'boolean' }] },
       gate: 'branch',
-      body: { type: CODE_BLOCK_TYPE, ...code('go()') },
-    }, ['in:def>gate:condition', 'gate.true>body'], { name: 'flagged', kind: 'code' })
-    // `def` 是保留字，因此参数换成序号名，条件跟着引用它。
-    assert.match(compile(definition, PYTHON), /def flagged\(arg2\):\n {4}if arg2:\n {8}go\(\)/)
+      body: { type: CODE_BLOCK_TYPE, ...code('run()') },
+    }, ['in:func>gate:condition', 'gate.true>body'], { name: 'flagged', kind: 'code' })
+    // `func` 是保留字，因此参数换成序号名，条件跟着引用它。
+    assert.match(compile(definition), /func flagged\(arg3 bool\) \(err error\) \{\n\tif arg3 \{\n\t\trun\(\)/)
   })
 
   it('Go 只写出工作流函数：类型取自端口，按名字调用原子，被读的结果先声明，分支合并共用一个变量，失败的原子带上名字提前返回错误，只导入函数写到的包', () => {
-    assert.equal(renderWorkflow(irOf(goDiscount(), CODE_CATALOG), GO, { atoms: SHOP.atoms, workflows: new Map() }), [
+    assert.equal(renderWorkflow(irOf(goDiscount(), CODE_CATALOG), GO, { atoms: SHOP.atoms, workflows: new Map(), package: SHOP.package }), [
       '// Code generated from workflow "折扣". DO NOT EDIT.',
       '',
       'package shop',
@@ -165,10 +152,53 @@ describe('code 工作流写成它的语言', () => {
     ].join('\n'))
   })
 
+  it('代码节点的端口是以端口名为名的变量：输入先由数据边赋值，代码块写的输出供后面读，同名端口是同一个变量', () => {
+    assert.equal(renderWorkflow(irOf(slowLabel(), CODE_CATALOG), GO, { atoms: SHOP.atoms, workflows: new Map(), package: SHOP.package }), [
+      '// Code generated from workflow "Describe". DO NOT EDIT.',
+      '',
+      'package shop',
+      '',
+      'import (',
+      '\t"fmt"',
+      '\t"time"',
+      ')',
+      '',
+      'func Describe(amount float64) (label string, err error) {',
+      '\tvar Wait_delay time.Duration',
+      '\tvar d time.Duration',
+      '\tWait_delay, err = Wait(amount)',
+      '\tif err != nil {',
+      '\t\terr = fmt.Errorf("Wait: %w", err)',
+      '\t\treturn',
+      '\t}',
+      '\td = Wait_delay',
+      '\tif d > time.Second {',
+      '\t\td = Wait_delay',
+      '\t\tlabel = fmt.Sprint(amount, d)',
+      '\t} else {',
+      '\t\tlabel = "fast"',
+      '\t}',
+      '\treturn',
+      '}',
+      '',
+    ].join('\n'))
+
+    // 同名的端口类型不同，或端口名不能作为变量时，指出节点和端口。
+    const retyped = slowLabel()
+    retyped.nodes.find(node => node.id === NodeId('slow'))!.inputs = [{ name: 'd', type: 'number' }]
+    assert.throws(() => renderWorkflow(irOf(retyped, CODE_CATALOG), GO, { atoms: SHOP.atoms, workflows: new Map() }),
+      (error: unknown) => error instanceof RenderError && error.fault.code === 'port-variable' && error.fault.node === 'lazy')
+    const keyword = slowLabel()
+    keyword.nodes.find(node => node.id === NodeId('fast'))!.outputs = [{ name: 'func', type: 'string' }]
+    keyword.edges = keyword.edges.map(edge => edge.source === NodeId('fast') && edge.kind === 'data' ? { ...edge, sourcePort: 'func' } : edge)
+    assert.throws(() => renderWorkflow(irOf(keyword, CODE_CATALOG), GO, { atoms: SHOP.atoms, workflows: new Map() }),
+      (error: unknown) => error instanceof RenderError && error.fault.code === 'port-variable' && error.fault.node === 'fast')
+  })
+
   it('写不出时指出要改的节点', () => {
-    const fault = (definition: DagWorkflowDefinition, language: Language, atoms = SHOP.atoms) => {
+    const fault = (definition: DagWorkflowDefinition, atoms = SHOP.atoms) => {
       try {
-        renderWorkflow(irOf(definition, CODE_CATALOG), language, { atoms, workflows: new Map() })
+        renderWorkflow(irOf(definition, CODE_CATALOG), GO, { atoms, workflows: new Map() })
       } catch (error: unknown) {
         if (error instanceof RenderError) return error.fault
         throw error
@@ -177,21 +207,21 @@ describe('code 工作流写成它的语言', () => {
     }
     const unwired = discount()
     unwired.edges = unwired.edges.filter(edge => edge.target !== NodeId('gate') || edge.kind !== 'data')
-    assert.deepEqual(fault(unwired, PYTHON), { code: 'no-condition', node: 'gate' })
+    assert.deepEqual(fault(unwired), { code: 'no-condition', node: 'gate' })
 
     const multiline = discount()
     multiline.nodes.find(node => node.id === NodeId('over'))!.config = { [CODE_FIELD]: 'a\nb' }
-    assert.deepEqual(fault(multiline, PYTHON), { code: 'multiline-condition', node: 'over' })
+    assert.deepEqual(fault(multiline), { code: 'multiline-condition', node: 'over' })
 
-    assert.deepEqual(fault(goDiscount(), GO, new Map()), { code: 'missing-atom', node: 'over', atom: 'over.go' })
+    assert.deepEqual(fault(goDiscount(), new Map()), { code: 'missing-atom', node: 'over', atom: 'over.go' })
     const parameterless = goDiscount()
     parameterless.edges = parameterless.edges.filter(edge => edge.target !== NodeId('keep'))
-    assert.deepEqual(fault(parameterless, GO), { code: 'unwired-parameter', node: 'keep', port: 'amount' })
+    assert.deepEqual(fault(parameterless), { code: 'unwired-parameter', node: 'keep', port: 'amount' })
   })
 })
 
 /** 一个 Go 包形式的原子目录。 */
-const SHOP = atomLibrary([
+const SHOP = atomLibrary('/shop', [
   { file: 'over.go', text: 'package shop\n\nconst limit = 100\n\nvar Over = func(amount float64) bool {\n\treturn amount > limit\n}\n' },
   {
     file: 'cut.go',
@@ -205,7 +235,7 @@ const SHOP = atomLibrary([
     file: 'wait.go',
     text: 'package shop\n\nimport "time"\n\nfunc Wait(price float64) (delay time.Duration, err error) {\n\treturn time.Duration(price) * time.Millisecond, nil\n}\n',
   },
-], GO.functions!.atoms)
+], GO.functions.atoms)
 
 /** {@link discount} 的 Go 写法：每一步是原子目录中的一个原子，端口由它的签名给出。 */
 function goDiscount(): DagWorkflowDefinition {
@@ -227,4 +257,27 @@ function goDiscount(): DagWorkflowDefinition {
     'in:amount>keep:amount', 'cut:price>join:input1', 'keep>join:input2', 'cut.then>join', 'keep.then>join',
     'join>wait:price', 'join>out:price', 'wait:delay>out:delay',
   ], { name: '折扣', kind: 'code', language: GO.name, atomFolder: '/shop' }), { atoms: SHOP.atoms, workflows: new Map() })
+}
+
+/** 等待的时长超过一秒时写出金额和时长，否则写 `fast`；标签是工作流的结果。 */
+function slowLabel(): DagWorkflowDefinition {
+  return withCallees(workflow({
+    in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'amount', type: 'number' }] },
+    wait: { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: 'wait.go' } },
+    slow: { type: CODE_CONDITION_TYPE, ...code('d > time.Second'), inputs: [{ name: 'd', type: 'time.Duration' }] },
+    gate: 'branch',
+    lazy: {
+      type: CODE_BLOCK_TYPE,
+      ...code('label = fmt.Sprint(amount, d)'),
+      inputs: [{ name: 'amount', type: 'number' }, { name: 'd', type: 'time.Duration' }],
+      outputs: [{ name: 'label', type: 'string' }],
+    },
+    fast: { type: CODE_BLOCK_TYPE, ...code('label = "fast"'), outputs: [{ name: 'label', type: 'string' }] },
+    join: 'merge',
+    out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'label', type: 'string', required: false }] },
+  }, [
+    'in:amount>wait:price', 'wait:delay>slow:d', 'slow:value>gate:condition', 'gate.true>lazy', 'gate.false>fast',
+    'in:amount>lazy:amount', 'wait:delay>lazy:d', 'lazy:label>join:input1', 'fast:label>join:input2', 'lazy.then>join',
+    'fast.then>join', 'join>out:label',
+  ], { name: 'Describe', kind: 'code', language: GO.name, atomFolder: '/shop' }), { atoms: SHOP.atoms, workflows: new Map() })
 }

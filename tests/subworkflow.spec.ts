@@ -52,15 +52,14 @@ describe('子工作流的端口与嵌入规则', () => {
     const parent = workflow({ sub: embed('add-offset') }, [], { name: 'parent' })
     const saved = new Map([[WorkflowId('parent'), parent], [WorkflowId('add-offset'), ADD_OFFSET]])
     const lookup = (id: WorkflowId) => saved.get(id)
-    assert.equal(embedFault(parent, WorkflowId('parent'), WorkflowId('add-offset'), ADD_OFFSET, lookup, false), undefined)
-    assert.equal(embedFault(ADD_OFFSET, WorkflowId('add-offset'), WorkflowId('parent'), parent, lookup, false), 'cycle')
-    assert.equal(embedFault(parent, WorkflowId('parent'), WorkflowId('parent'), parent, lookup, false), 'cycle')
+    assert.equal(embedFault(parent, WorkflowId('parent'), WorkflowId('add-offset'), ADD_OFFSET, lookup), undefined)
+    assert.equal(embedFault(ADD_OFFSET, WorkflowId('add-offset'), WorkflowId('parent'), parent, lookup), 'cycle')
+    assert.equal(embedFault(parent, WorkflowId('parent'), WorkflowId('parent'), parent, lookup), 'cycle')
 
     const code = (atomFolder: string): DagWorkflowDefinition => ({ ...ADD_OFFSET, kind: 'code', language: 'go', atomFolder })
-    assert.equal(embedFault(parent, undefined, WorkflowId('c'), code('/a'), lookup, false), 'other-kind')
-    assert.equal(embedFault(code('/a'), undefined, WorkflowId('c'), code('/b'), lookup, true), 'other-package')
-    assert.equal(embedFault(code('/a'), undefined, WorkflowId('c'), code('/a'), lookup, false), 'no-calls')
-    assert.equal(embedFault(code('/a'), undefined, WorkflowId('c'), code('/a'), lookup, true), undefined)
+    assert.equal(embedFault(parent, undefined, WorkflowId('c'), code('/a'), lookup), 'other-kind')
+    assert.equal(embedFault(code('/a'), undefined, WorkflowId('c'), code('/b'), lookup), 'other-package')
+    assert.equal(embedFault(code('/a'), undefined, WorkflowId('c'), code('/a'), lookup), undefined)
   })
 })
 
@@ -142,6 +141,15 @@ describe('run 工作流中的子工作流', () => {
     assert.equal(record.status, 'completed')
     assert.deepEqual(record.outputs, { total: 15 })
     assert.deepEqual(record.nodes.find(node => node.nodeId === 'sub/add')?.outputs, { result: 15 })
+  })
+
+  it('被嵌入的节点失败时，运行的错误像生成的 Go 函数一样逐层以名字包装：子工作流的标签或名称，再是节点的标签或类型', async () => {
+    const controller = await setup()
+    const failing = parent(false)
+    failing.nodes.find(node => node.id === NodeId('ten'))!.config = { value: 'ten' }
+    const record = await runEnded(host, RunId(controller.start(idOf(await controller.save(JSON.stringify(failing))))))
+    assert.equal(record.status, 'failed')
+    assert.equal(record.error, 'add-offset: sum: left、right 和 offset 必须为数值')
   })
 
   it('子工作流节点被跳过时，被嵌入工作流的每个节点都被跳过', async () => {

@@ -56,9 +56,11 @@ export function describeRenderFault(fault: RenderFault): string {
     case 'missing-atom':
       return `原子节点 ${fault.node} 引用的 ${fault.atom} 不在工作流的原子目录中，或不能作为原子`
     case 'missing-workflow':
-      return `子工作流节点 ${fault.node} 嵌入的工作流 ${fault.workflow} 不存在，或工作流的语言写不出函数调用`
+      return `子工作流节点 ${fault.node} 嵌入的工作流 ${fault.workflow} 不存在`
+    case 'port-variable':
+      return `代码节点 ${fault.node} 的端口 ${fault.port} 不能作为变量：它须是标识符、不是保留字、不与原子、被调用的工作流或 err 同名，且与同名端口类型相同`
     case 'no-value':
-      return `节点 ${fault.node} 的值在生成的代码中没有来源：只有调用的结果和只汇合调用结果的分支合并有值`
+      return `节点 ${fault.node} 的值在生成的代码中没有来源：只有调用的结果、代码块的输出，以及只汇合这些值的分支合并有值`
     default:
       return assertNever(fault)
   }

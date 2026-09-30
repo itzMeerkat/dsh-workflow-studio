@@ -16,12 +16,13 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import { messageOf } from '../shared/errors.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type {
-  DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary, WorkflowId,
+  DagNodeDefinition, DagWorkflowDefinition, NodeErrorPolicy, NodeRunRecord, NodeTypeSummary, PortDefinition, WorkflowId,
 } from '../shared/types.ts'
 import { withCallees, type Callees } from '../shared/callees.ts'
-import { languageOf } from '../shared/language.ts'
+import { codePortSides, languageOf, portTypes } from '../shared/language.ts'
 import { SUBWORKFLOW_FIELD, subworkflowOf } from '../shared/subworkflow.ts'
 import { SWITCH_CASES } from '../shared/switch.ts'
+import { canFail, errorPolicyOf } from '../shared/error-policy.ts'
 import {
   connectionError,
   flowEdges,
@@ -35,6 +36,7 @@ import {
 } from './graph-model.ts'
 import type { Translate } from './locale.ts'
 import type { WorkflowRow } from './model.ts'
+import type { WorkflowPortEdit, WorkflowPortSide } from './workflow-ports.ts'
 import { NodeCardContext, WorkflowNodeCard } from './NodeCard.tsx'
 import { NodeInspector } from './NodeInspector.tsx'
 import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
@@ -189,12 +191,30 @@ export function WorkflowGraphEditor({
     })
   }
 
+  const canFailHere = (node: DagNodeDefinition): boolean => canFail(node, definition.kind, callees)
+
   const editCases = (nodeId: string, cases: readonly string[], renamed?: { readonly from: string; readonly to: string }): void => {
     updateNode(nodeId, (node) => {
       const config = { ...node.config, [SWITCH_CASES]: cases }
       if (nodeId === selectedNodeId) setConfigSource(JSON.stringify(config, null, 2))
       return { ...node, config }
     }, renamed)
+  }
+
+  /** Replace one side of a node's own ports; the edges on a renamed port follow it, and those on a removed one go. */
+  const editPorts = (nodeId: string, side: WorkflowPortSide, ports: readonly PortDefinition[], edit: WorkflowPortEdit): void => {
+    const { nodes, edges } = latest.current
+    const [end, handle] = side === 'inputs' ? ['target', 'targetHandle'] as const : ['source', 'sourceHandle'] as const
+    const moved = edit.kind === 'other' ? undefined : handleId({ kind: 'data', name: edit.kind === 'renamed' ? edit.from : edit.name })
+    commit(
+      nodes.map(node => node.id === nodeId
+        ? { ...node, data: { ...node.data, definition: { ...node.data.definition, [side]: [...ports] } } }
+        : node),
+      edges.flatMap((edge) => {
+        if (moved === undefined || edge[end] !== nodeId || edge[handle] !== moved) return [edge]
+        return edit.kind === 'renamed' ? [{ ...edge, [handle]: handleId({ kind: 'data', name: edit.to }) }] : []
+      }),
+    )
   }
 
   /** Show why a connection is rejected, or clear the notice when it is allowed. */
@@ -227,7 +247,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div ref={canvas} className={css.canvas}>
-        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow }, editCases }}>
+        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow }, editCases, canFail: canFailHere }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}
@@ -297,6 +317,26 @@ export function WorkflowGraphEditor({
           onApplyConfig={applyConfig}
           onDelete={deleteSelected}
           onClose={() => { setSelectedNodeId(undefined) }}
+          {...(codePortSides(selectedNode.data.definition.type).length === 0
+            ? {}
+            : {
+              ports: {
+                sides: codePortSides(selectedNode.data.definition.type),
+                types: portTypes(callees.atoms),
+                language: languageOf(definition),
+                onChange: (side: WorkflowPortSide, ports: readonly PortDefinition[], edit: WorkflowPortEdit) => {
+                  editPorts(selectedNode.id, side, ports, edit)
+                },
+              },
+            })}
+          {...(canFailHere(selectedNode.data.definition)
+            ? {
+              errorPolicy: {
+                value: errorPolicyOf(selectedNode.data.definition),
+                onChange: (onError: NodeErrorPolicy) => { updateNode(selectedNode.id, node => ({ ...node, onError })) },
+              },
+            }
+            : {})}
         />
       )}
     </div>

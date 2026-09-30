@@ -132,15 +132,13 @@ function bodyStart(code: string, from: number): number | undefined {
  * @returns 原子，或它不能作为原子的原因。
  */
 export function goAtom(file: string, text: string): Atom | AtomFault {
-  let pkg = ''
   const imports: string[] = []
   const exported: { name: string; signature: Signature | undefined }[] = []
   for (const declaration of declarations(text)) {
     const body = declaration.replace(/^(?:\s*\/\/[^\n]*)*\s*/, '')
     const named = /^func\s+(\p{Lu}[\p{L}\p{N}_]*)/u.exec(body)
     const closure = /^var\s+(\p{Lu}[\p{L}\p{N}_]*)\s*=\s*(func\b[\s\S]*)$/u.exec(body)
-    if (body.startsWith('package')) pkg = body.slice('package'.length).trim()
-    else if (body.startsWith('import')) imports.push(...importSpecs(body.slice('import'.length)))
+    if (body.startsWith('import')) imports.push(...importSpecs(body.slice('import'.length)))
     else if (named !== null) exported.push({ name: named[1]!, signature: goSignature(body) })
     else if (closure !== null) exported.push({ name: closure[1]!, signature: goSignature(closure[2]!) })
   }
@@ -148,7 +146,18 @@ export function goAtom(file: string, text: string): Atom | AtomFault {
   if (exported.length > 1) return { file, fault: 'several-exported-functions', names: exported.map(({ name }) => name) }
   const [{ name, signature }] = exported as [typeof exported[number]]
   if (signature === undefined) return { file, fault: 'unreadable-signature' }
-  return { file, package: pkg, imports, signature: { ...signature, name } }
+  return { file, imports, signature: { ...signature, name } }
+}
+
+/**
+ * 一个 Go 文件的包声明。
+ * @param text - 文件全文。
+ * @returns 包名；文件没有包声明时为 undefined。
+ */
+export function goPackage(text: string): string | undefined {
+  const clause = declarations(text).map(declaration => declaration.replace(/^(?:\s*\/\/[^\n]*)*\s*/, ''))
+    .find(body => body.startsWith('package'))
+  return clause?.slice('package'.length).trim()
 }
 
 /** 一条 `import` 声明中的导入项，按原文，不含注释。 */

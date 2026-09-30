@@ -153,7 +153,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     let current = true
     void callRemote(
       () => remote.atomFiles(folder, definition.language!),
-      files => atomLibrary(atomFilesSchema.parse(JSON.parse(files)), atomSyntax),
+      files => atomLibrary(folder, atomFilesSchema.parse(JSON.parse(files)), atomSyntax),
       setNotice,
     ).then((next) => { if (current) setLibrary(next) })
     return () => { current = false }
@@ -164,7 +164,11 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     () => new Map(snapshot.workflows.map(row => [row.id, parseEditorDefinition(row.definition)])),
     [snapshot.workflows],
   )
-  const callees = useMemo<Callees>(() => ({ atoms: library?.atoms ?? new Map(), workflows: saved }), [library, saved])
+  const callees = useMemo<Callees>(() => ({
+    atoms: library?.atoms ?? new Map(),
+    workflows: saved,
+    ...(library === undefined ? {} : { package: library.package }),
+  }), [library, saved])
 
   // Atom and subworkflow nodes take their ports from what they call, so a folder read again, a workflow saved
   // again, or a workflow opened on them may move those ports.
@@ -198,11 +202,27 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
       ? undefined
       : `${result.workflowId}${atomSyntax.outputSuffix}`
     await load(result.workflowId)
-    setNotice(written === undefined
+    const saved = written === undefined
       ? t('notice.saved')
       : result.sourceError === undefined
         ? `${t('notice.savedFile')} ${written}`
-        : `${t('notice.savedNoFile')} ${result.sourceError}`)
+        : `${t('notice.savedNoFile')} ${result.sourceError}`
+    setNotice([saved, ...(result.embedderErrors ?? []).map(({ name, error }) => `${t('notice.embedderNoFile')} ${name}: ${error}`)].join(' '))
+  }
+
+  /** Delete the saved workflow being edited, then open another, or a new one when none is left. */
+  const remove = async (id: string): Promise<void> => {
+    setPhase('saving')
+    setNotice(undefined)
+    const deleted = await callRemote(() => remote.delete(id), () => true, setNotice)
+    if (deleted === undefined) {
+      setPhase('ready')
+      return
+    }
+    setSelectedId(undefined)
+    replaceDefinition(emptyDefinition(nextWorkflowName(snapshot.workflows, kind), kind))
+    await load()
+    setNotice(t('notice.deleted'))
   }
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
@@ -258,7 +278,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   const { workflows } = snapshot
   const parentId = selectedId === undefined ? undefined : WorkflowId(selectedId)
   const embedChoices = workflows.filter(row => row.id !== parentId).map((row): EmbedChoice => {
-    const fault = embedFault(definition, parentId, row.id, saved.get(row.id)!, id => saved.get(id), language.functions !== undefined)
+    const fault = embedFault(definition, parentId, row.id, saved.get(row.id)!, id => saved.get(id))
     return fault === undefined ? row : { ...row, fault }
   })
   const embeddable = embedChoices.filter(choice => choice.fault === undefined)
@@ -493,11 +513,11 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
         {settingsOpen && (
           <WorkflowSettings
             definition={definition}
-            library={library}
             callees={callees}
             t={t}
             onChange={replaceDefinition}
             onClose={() => { setSettingsOpen(false) }}
+            onDelete={selectedId === undefined || busy ? undefined : () => { void remove(selectedId) }}
           />
         )}
       </div>

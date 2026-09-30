@@ -75,10 +75,10 @@ export { RenderError, renderWorkflow } from './shared/source.ts'
 export type { RenderFault } from './shared/source.ts'
 export {
   ATOM_FIELD, CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, CODE_LANGUAGES, GO, PSEUDOCODE,
-  PYTHON, TYPESCRIPT, languageOf,
+  codeLanguageOf, languageOf,
 } from './shared/language.ts'
 export type {
-  Atom, AtomFault, AtomSyntax, FunctionSyntax, Language, Signature, TypedName,
+  Atom, AtomFault, AtomSyntax, CodeLanguage, FunctionSyntax, Language, Signature, TypedName,
 } from './shared/language.ts'
 export { describeDiagnostic, describeRenderFault } from './diagnostic-message.ts'
 export { registerWorkflowTools } from './tools.ts'

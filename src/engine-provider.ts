@@ -153,16 +153,36 @@ export class DagEngineProvider extends DagEngine {
         return id
       }
       // 子工作流节点按 ID 链接，而 ID 随名称改变，所以被嵌入的工作流改名会断开每个嵌入它的地方。
-      const embedders = [...this.workflows.entries()].map(([, other]) => other)
-        .filter(other => other.nodes.some(node => node.type === SUBWORKFLOW_TYPE && subworkflowOf(node.config) === id))
-      if (embedders.length > 0) {
-        throw new Error(`工作流 "${current.name}" 被 ${embedders.map(other => `"${other.name}"`).join('、')} 作为子工作流嵌入，不能改名`)
-      }
+      this.assertNotEmbedded(id, current.name, '改名')
       const renamed = this.allocateId(snapshot.name)
       await this.workflows.put(renamed, snapshot)
       await this.workflows.delete(id)
       return renamed
     })
+  }
+
+  async delete(id: WorkflowId): Promise<void> {
+    await this.enqueueMutation(async () => {
+      const current = this.workflows.get(id)
+      if (current === undefined) throw new Error(`工作流 "${id}" 不存在`)
+      this.assertNotEmbedded(id, current.name, '删除')
+      await this.workflows.delete(id)
+    })
+  }
+
+  /**
+   * 拒绝会断开子工作流链接的操作。
+   * @param id - 被操作的工作流。
+   * @param name - 它的名称，用于错误信息。
+   * @param action - 被拒绝的操作，用于错误信息。
+   * @throws 有其他工作流嵌入它时。
+   */
+  private assertNotEmbedded(id: WorkflowId, name: string, action: string): void {
+    const embedders = [...this.workflows.entries()].map(([, other]) => other)
+      .filter(other => other.nodes.some(node => node.type === SUBWORKFLOW_TYPE && subworkflowOf(node.config) === id))
+    if (embedders.length > 0) {
+      throw new Error(`工作流 "${name}" 被 ${embedders.map(other => `"${other.name}"`).join('、')} 作为子工作流嵌入，不能${action}`)
+    }
   }
 
   /** 定义中的子工作流按当前保存的版本展开后的图。 */

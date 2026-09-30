@@ -6,7 +6,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { goAtom, goImportName, goSignature } from '../src/shared/go.ts'
 import {
-  ATOM_FIELD, CODE_ATOM_TYPE, GO, PSEUDOCODE, atomLibrary, atomTypes, isAtomFile, languageOf, typeName,
+  ATOM_FIELD, CODE_ATOM_TYPE, GO, PSEUDOCODE, atomLibrary, portTypes, isAtomFile, languageOf, typeName,
 } from '../src/shared/language.ts'
 import { withCallees } from '../src/shared/callees.ts'
 import { WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
@@ -49,7 +49,7 @@ describe('Go 签名', () => {
   })
 
   it('code 工作流必须指定一种代码语言', () => {
-    assert.throws(() => languageOf({ kind: 'code' }), /go、python、typescript 之一/)
+    assert.throws(() => languageOf({ kind: 'code' }), /go 之一/)
     assert.equal(languageOf({ kind: 'code', language: 'go' }), GO)
   })
 
@@ -87,7 +87,6 @@ describe('Go 签名', () => {
     ].join('\n')
     assert.deepEqual(goAtom('discount.go', text), {
       file: 'discount.go',
-      package: 'pricing',
       imports: ['"fmt"', 'str "strings"'],
       signature: {
         name: 'Discount',
@@ -105,18 +104,22 @@ describe('Go 签名', () => {
   })
 
   it('原子目录：types.go 与生成的 *.workflow.go 不是原子，测试文件不是原子文件', () => {
-    const syntax = GO.functions!.atoms!
+    const syntax = GO.functions.atoms
     assert.deepEqual(['a.go', 'a_test.go', 'types.go', 'checkout.workflow.go', 'notes.md'].map(file => isAtomFile(file, syntax)), [
       true, false, false, false, false,
     ])
-    const library = atomLibrary([
+    const library = atomLibrary('/src/p', [
       { file: 'a.go', text: 'package p\n\nfunc A(order Order) {}\n' },
       { file: 'types.go', text: 'package p\n\ntype Order struct{}\n' },
     ], syntax)
     assert.deepEqual([...library.atoms.keys()], ['a.go'])
     assert.equal(library.types, true)
-    assert.equal(atomLibrary([{ file: 'a.go', text: 'package p\n\nfunc A() {}\n' }], syntax).types, false)
-    assert.deepEqual(atomTypes(library), ['Order'])
+    assert.equal(atomLibrary('/src/p', [{ file: 'a.go', text: 'package p\n\nfunc A() {}\n' }], syntax).types, false)
+    assert.deepEqual(portTypes(library.atoms), ['any', 'string', 'number', 'boolean', 'Order'])
+
+    // 包取自声明了包的文件，只有类型文件时也是；目录里还没有 Go 文件时取目录名。
+    assert.equal(atomLibrary('/src/x', [{ file: 'types.go', text: '// Package p.\npackage p\n' }], syntax).package, 'p')
+    assert.equal(atomLibrary('/src/my-atoms', [], syntax).package, 'my_atoms')
   })
 
   it('端口类型按语言写出：Go 写内置类型的 Go 类型，其余类型原样，伪代码不改写', () => {
@@ -125,10 +128,10 @@ describe('Go 签名', () => {
   })
 
   it('原子节点的端口来自原子目录，签名变化时去掉接在消失端口上的边，原子不在目录中时端口不变', () => {
-    const read = (text: string) => atomLibrary([
+    const read = (text: string) => atomLibrary('/src/p', [
       { file: 'a.go', text: `package p\n\n${text}\n` },
       { file: 'b.go', text: 'package p\n' },
-    ], GO.functions!.atoms!)
+    ], GO.functions.atoms)
     const library = read('func Fetch(url string, retries *int) (body string, size int, err error) { return "", 0, nil }')
     assert.deepEqual(library.faults, [{ file: 'b.go', fault: 'no-exported-function' }])
     const node = { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: 'a.go' } }

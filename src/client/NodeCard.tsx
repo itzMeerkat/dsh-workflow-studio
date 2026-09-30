@@ -5,11 +5,12 @@ import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
-import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
+import type { DagNodeDefinition, NodeControlDefinition, PortDefinition } from '../shared/types.ts'
 import { EXEC_RUN_PIN } from '../shared/graph.ts'
 import { typeName, type Language } from '../shared/language.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf } from '../shared/subworkflow.ts'
 import { SWITCH_TYPE, invalidCase, switchCases } from '../shared/switch.ts'
+import { errorPolicyOf } from '../shared/error-policy.ts'
 import type { WorkflowId } from '../shared/types.ts'
 import { diagnosticDetails } from './DiagnosticsView.tsx'
 import { handleId, nodeInputPorts, nodeOutputPins, nodeOutputPorts, type WorkflowFlowNode, type WorkflowNodeData } from './graph-model.ts'
@@ -44,6 +45,8 @@ export interface NodeCardActions {
    * @param renamed - The case whose text changed, so the edges on its pin follow it.
    */
   readonly editCases?: (nodeId: string, cases: readonly string[], renamed?: { readonly from: string; readonly to: string }) => void
+  /** Whether a node can fail, which puts its error policy on the card; absent in a graph that does not show policies. */
+  readonly canFail?: (node: DagNodeDefinition) => boolean
 }
 
 /** Provides {@link NodeCardActions} to the cards React Flow renders. */
@@ -74,13 +77,15 @@ export function NodeCard({
 }) {
   const actions = useContext(NodeCardContext)
   const pins = nodeOutputPins(data)
-  const updateNodeInternals = useUpdateNodeInternals()
-  // A switch's pins follow its cases; React Flow measures a card's handles again only when told they changed.
-  useEffect(() => { updateNodeInternals(data.definition.id) }, [pins.join('\u0000')])
-  if (actions === undefined) throw new Error('Workflow node card rendered outside its view')
-  const { t, language, updateConfig, linkWorkflow, editCases } = actions
   const inputs = nodeInputPorts(data)
   const outputs = nodeOutputPorts(data)
+  const updateNodeInternals = useUpdateNodeInternals()
+  // A switch's pins follow its cases and a code node's ports follow its author; React Flow measures a card's handles
+  // again only when told they changed.
+  const handles = [...pins, '', ...inputs.map(port => port.name), '', ...outputs.map(port => port.name)].join('\u0000')
+  useEffect(() => { updateNodeInternals(data.definition.id) }, [handles])
+  if (actions === undefined) throw new Error('Workflow node card rendered outside its view')
+  const { t, language, updateConfig, linkWorkflow, editCases, canFail } = actions
   const controls = data.catalog?.controls ?? []
   const runOutputs = displayedOutputs(data)
   const connectable = graph === 'data'
@@ -96,6 +101,11 @@ export function NodeCard({
         {data.runRecord !== undefined && (
           <span className={css.nodeStatus} data-status={data.runRecord.status}>
             {data.runRecord.status}
+          </span>
+        )}
+        {canFail?.(data.definition) === true && (
+          <span className={css.errorPolicy} title={t(`errorPolicy.${errorPolicyOf(data.definition)}`)}>
+            {t(`errorPolicy.${errorPolicyOf(data.definition)}.badge`)}
           </span>
         )}
         {data.diagnostics !== undefined && <DiagnosticBadge diagnostics={data.diagnostics} t={t} />}
