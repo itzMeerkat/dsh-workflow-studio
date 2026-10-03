@@ -13,9 +13,12 @@ Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node
 
 - `type`: globally unique lowercase kebab-case identifier.
 - `label` and `description`: concise user-visible catalog text.
-- `ports`: business `inputs` and `outputs` with exact names, types, requiredness, descriptions, and card display modes. Do not declare an input named `condition`; the base class owns it.
+- `ports`: `inputs` and `outputs` with exact names, types, requiredness, descriptions, and card display modes.
 - `controls`: optional browser controls backed by fields in `context.config`.
-- `conditional`: leave it `true` for a normal node. Set it to `false` only for a flow-control node that computes branch signals and must not be gated by one.
+- `execOutputs`: the execution pins the node fires on completion; omitted means the single pin `then`. A node that picks among several pins returns them in `next`.
+- `exclusiveExecOutputs`: set it when every completion fires exactly one of at least two pins, as an approval does. The node becomes a decision node: the analysis treats its pins as mutually exclusive, and the engine fails a completion that fires any other number.
+- `kinds`: the workflow kinds the node belongs in; omitted means `run` only. Code workflows are compiled, never run, so a node with `execute()` work belongs in `run`.
+- `recovery`: `hold` when a person must decide whether calling the node again after a Host restart is safe; omitted means `rerun`.
 - `variadicInputs`: declare the minimum instance input count and optional same-type output requirement.
 - `validateSignal`: declare it when the node waits for a result with `awaitSignal` and that result has a required format.
 
@@ -56,11 +59,11 @@ export class PrefixTextNode extends WorkflowNode<{ output: string }> {
 }
 ```
 
-Every key in the returned outputs must match a declared output port. A thrown error's message is all the run record keeps, so make it actionable.
+The returned outputs must hold exactly the declared output ports, each with a value; write `null` for a port with nothing to report. A node cannot skip itself: one that does not apply completes having done no work, and only execution edges decide whether a node runs. A thrown error's message is all the run record keeps, so make it actionable.
 
-`context.inputs` contains only ports whose upstream produced a value, and `run()` never sees `condition`. Use `context.connected.has(name)` to distinguish a connected port whose upstream produced nothing from a disconnected port. `context.invocationKey` is `<runId>/<nodeId>`; use it to name or deduplicate external work when the node may run again.
+`context.inputs` contains only ports whose upstream produced a value. Use `context.connected.has(name)` to distinguish a connected port whose upstream produced nothing from a disconnected port. `context.invocationKey` is `<runId>/<nodeId>`; use it to name or deduplicate external work when the node may run again.
 
-A plain object that implements `WorkflowNodeExecutor` is also accepted. It returns `{ outputs, next? }` from `execute()` itself, or throws, may implement `preflight()`, and receives no condition input unless it declares one.
+A plain object that implements `WorkflowNodeExecutor` is also accepted. Its `execute()` returns `{ outputs, next? }` or throws. Implement `execute()` directly, rather than extending `WorkflowNode`, when the node chooses its own execution pins.
 
 ## Register with Cordis ownership
 
@@ -90,9 +93,7 @@ Use the actual provider plugin name as `sourcePlugin`. It appears in the browser
 - Port compatibility requires equal types unless one side uses `any`.
 - An instance may override `inputs` or `outputs`; the engine validates the resulting ports when saving the workflow.
 - One input port accepts at most one incoming edge.
-- A `WorkflowNode` with `conditional` left `true` receives the optional boolean `condition` port. A connected condition that is `false` or produces nothing skips the node; a non-boolean value fails it.
-- A control-flow node with `conditional: false` declares its own boolean branch outputs.
-- An instance `inputs` override replaces the business inputs; the base class's `condition` port remains.
+- Branching is done with execution pins, not boolean ports: compute a boolean and wire it to the engine's `branch` node, or fire a pin of your own with `next`. A node behind a pin that did not fire is skipped, and so is everything behind it.
 
 Use `display: 'value'` for compact scalar output and `display: 'json'` for structured output. Display metadata affects the card only; it does not validate runtime values.
 
@@ -132,13 +133,12 @@ Use `context.log()` for concise run diagnostics at meaningful state transitions.
 
 Add focused tests beside the package tests or in the provider plugin that owns the node:
 
-1. Exercise each successful business branch.
-2. Reject malformed `config` and required input values.
-3. Assert exact output port keys and values.
-4. Exercise expected failed results.
-5. For asynchronous nodes, abort while work is active and verify prompt teardown.
-6. Register through a real `WorkflowNodeRegistry`; verify duplicate type rejection and disposer cleanup when registration behavior changes.
-7. Save and run a small workflow through the real engine when the change affects ports, condition gating, variadic inputs, HITL, or scheduling.
+1. Exercise each business outcome, including the ones expressed by a fired pin.
+2. Assert that malformed `config` and required input values throw.
+3. Assert exact output port keys and values, and the pins in `next`.
+4. For asynchronous nodes, abort while work is active and verify prompt teardown.
+5. Register through a real `WorkflowNodeRegistry`; verify duplicate type rejection and disposer cleanup when registration behavior changes.
+6. Save and run a small workflow through the real engine when the change affects ports, execution pins, variadic inputs, waiting for results, or scheduling.
 
 Do not change production code only to make the executor testable. Prefer production configuration and real registry/engine integration over mocks.
 
@@ -148,7 +148,7 @@ Before finishing, confirm:
 
 - The type is kebab-case and unique.
 - User-visible text is concise and locale ownership is respected for client changes.
-- Every used input and produced output is declared.
+- Every used input and produced output is declared, and every declared output has a value on completion.
 - Business outcomes are outputs or fired pins; only an error the node cannot handle is thrown, with a useful message.
 - Async work observes cancellation and releases resources.
 - A second call of `run()` for the same `invocationKey` is safe, or `recovery` is `hold`.

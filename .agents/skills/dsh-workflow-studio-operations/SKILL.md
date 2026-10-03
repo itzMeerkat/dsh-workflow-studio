@@ -23,7 +23,7 @@ Do not edit files under the storage root directly. The engine owns schema parsin
 2. Use the folder button beside the workflow name to search, select, or create a workflow.
 3. Edit the name, add nodes from **Add node**, and connect explicit output and input handles.
 4. Select a node to edit its label and configuration. Use card controls when the node provides them.
-5. Use **Execution order** to inspect scheduler stages and condition branches. This view is read-only.
+5. Use **Execution order** to inspect scheduler stages and the execution pins each branch hangs from. This view is read-only.
 6. Save before treating the definition as durable. **Run** saves the current definition, starts a run, and opens the **Runs** tab, where you can follow its node states, pause, resume, or cancel it, and answer its questions.
 7. Inspect node status and outputs in the bottom details area.
 
@@ -121,7 +121,7 @@ export async function runWorkflow(ctx: Context, name: string) {
 ## Understand execution
 
 - The scheduler executes topological stages in order and nodes within one stage concurrently.
-- Nodes built on `WorkflowNode` have an optional boolean `condition` input unless they opt out. A disconnected condition has no effect. A connected `false` or missing value skips the node; a non-boolean value fails it.
+- Execution edges decide whether a node runs: a node whose incoming execution edge leaves a pin that did not fire, or leaves a skipped node, is skipped, while `merge` runs when any of its incoming execution edges fired. Data edges carry values only.
 - Missing required data from a skipped dependency propagates `skipped`. Other partial required inputs fail the node.
 - A failed node fails the workflow after the current stage settles. Pending downstream nodes become cancelled.
 - Runs are saved with a definition snapshot. After a Host restart, unfinished runs continue and nodes that were running are called again; runs that need a person to decide become `interrupted`.
@@ -135,7 +135,7 @@ Check these causes in order:
 2. Missing or duplicate edge: compare every required input with incoming edges.
 3. Type mismatch: compare source and target `PortDefinition.type`.
 4. Cycle: inspect **Execution order** and remove the dependency cycle.
-5. Skipped node: inspect its connected condition and skipped upstream dependencies.
+5. Skipped node: inspect the pins its incoming execution edges leave, and which pins those nodes fired (`fired` in their records).
 6. Failed node: inspect the node record's `inputs`, `outputs`, and `error`.
 7. Run waiting for a result (any node calling `awaitSignal`, such as `human-approval` from `dsh-workflow-demo-node`): answer it in the panel's **Runs** tab, or find the entry without a `result` in the node record's `requests` and call `signal()`.
 8. Interrupted run: read its `error` for the reason, fix it (for example, load the missing node plugin), then call `resumeRun()` or `cancelRun()`.
