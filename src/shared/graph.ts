@@ -176,16 +176,15 @@ export function portsAreCompatible(source: PortDefinition, target: PortDefinitio
 }
 
 /**
- * 检查端口名不重复。
- * @param owner - 错误信息中的端口所有者。
- * @param kind - 错误信息中的端口方向。
+ * 第一个与前面的端口同名的端口名。
  * @param ports - 待检查的端口。
- * @throws 存在同名端口时。
+ * @returns 重复的端口名；端口名互不相同时为 undefined。
  */
-export function assertUniquePortNames(owner: string, kind: string, ports: readonly PortDefinition[]): void {
+export function duplicatePortName(ports: readonly PortDefinition[]): string | undefined {
   const names = new Set<string>()
   for (const port of ports) {
-    if (names.has(port.name)) throw new Error(`${owner} 的${kind}端口 ${port.name} 重复`)
+    if (names.has(port.name)) return port.name
     names.add(port.name)
   }
+  return undefined
 }

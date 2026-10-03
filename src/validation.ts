@@ -4,9 +4,8 @@
  */
 
 import { DIAGNOSTIC_SEVERITY, analyzeWorkflow, indexNodeTypes } from './shared/analysis.ts'
-import { describeDiagnostic } from './diagnostic-message.ts'
 import {
-  assertUniquePortNames,
+  duplicatePortName,
   execPinFault,
   execSourcePin,
   execTargetPin,
@@ -25,6 +24,7 @@ import type {
   DagDataEdge, DagExecEdge, DagNodeDefinition, DagWorkflowDefinition, NodeId, PortDefinition,
   WorkflowNodeExecutor,
 } from './shared/types.ts'
+import { refuse } from './shared/refusal.ts'
 
 /**
  * 按拓扑层级返回节点。层级表示依赖深度，供校验和编辑器展示；调度按每个节点自身的前驱进行。
@@ -34,7 +34,7 @@ import type {
  */
 export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefinition[][] {
   const { levels, cyclic } = topologicalLevels(definition.nodes, definition.edges)
-  if (cyclic.length > 0) throw new Error(`工作流包含环：${cyclic.map(node => node.id).join(', ')}`)
+  if (cyclic.length > 0) refuse({ code: 'cycle', nodes: cyclic.map(node => node.id) })
   return levels
 }
 
@@ -51,17 +51,15 @@ export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefin
 export function validateWorkflow(registry: WorkflowNodeRegistry, definition: DagWorkflowDefinition): void {
   const language = languageOf(definition)
   if (definition.atomFolder !== undefined && (language.functions?.atoms === undefined || !isAbsolute(definition.atomFolder))) {
-    throw new Error(`原子目录必须是绝对路径，且只用于能读原子的语言: ${definition.atomFolder}`)
+    refuse({ code: 'atom-folder-invalid', folder: definition.atomFolder })
   }
-  assertSingleBoundary(definition, WORKFLOW_INPUT_TYPE, '输入')
-  assertSingleBoundary(definition, WORKFLOW_OUTPUT_TYPE, '输出')
+  assertSingleBoundary(definition, WORKFLOW_INPUT_TYPE, 'inputs')
+  assertSingleBoundary(definition, WORKFLOW_OUTPUT_TYPE, 'outputs')
   const executors = resolveExecutors(registry, definition)
   for (const node of definition.nodes) {
     const kinds = executors.get(node.id)!.kinds ?? [DEFAULT_WORKFLOW_KIND]
     if (!kinds.includes(definition.kind)) {
-      throw new Error(
-        `节点类型 ${node.type} 只能用在 ${kinds.join('、')} 工作流中，而本工作流是 ${definition.kind}`,
-      )
+      refuse({ code: 'node-kind', type: node.type, kinds, kind: definition.kind })
     }
   }
 }
@@ -72,12 +70,12 @@ export function validateWorkflow(registry: WorkflowNodeRegistry, definition: Dag
  * 工作流的签名就是边界节点声明的端口，两个同侧边界节点会让签名无从谈起。
  * @param definition - 待验证的定义。
  * @param type - 边界节点类型。
- * @param kind - 端口所在的一侧，用于错误信息。
+ * @param side - 边界节点承担的一侧。
  * @throws 存在多个该侧边界节点时。
  */
-function assertSingleBoundary(definition: DagWorkflowDefinition, type: string, kind: string): void {
+function assertSingleBoundary(definition: DagWorkflowDefinition, type: string, side: 'inputs' | 'outputs'): void {
   if (definition.nodes.filter(node => node.type === type).length > 1) {
-    throw new Error(`工作流最多只能有一个${kind}边界节点`)
+    refuse({ code: 'boundary-duplicate', side })
   }
 }
 
@@ -101,18 +99,20 @@ export function resolveExecutors(
   const executors = new Map<NodeId, WorkflowNodeExecutor>()
   const nodePorts = new Map<NodeId, ResolvedNodePorts>()
   for (const node of definition.nodes) {
-    if (nodePorts.has(node.id)) throw new Error(`节点 ID "${node.id}" 重复`)
+    if (nodePorts.has(node.id)) refuse({ code: 'node-duplicate', node: node.id })
 
     const executor = registry.get(node.type)
-    if (executor === undefined) throw new Error(`未知节点类型: ${node.type}`)
+    if (executor === undefined) refuse({ code: 'node-type-unknown', type: node.type })
     const inputs = node.inputs ?? executor.inputs ?? []
     const outputs = node.outputs ?? executor.outputs ?? []
-    assertUniquePortNames(`节点 ${node.id}`, '输入', inputs)
-    assertUniquePortNames(`节点 ${node.id}`, '输出', outputs)
+    for (const [side, ports] of [['inputs', inputs], ['outputs', outputs]] as const) {
+      const duplicate = duplicatePortName(ports)
+      if (duplicate !== undefined) refuse({ code: 'port-duplicate', node: node.id, side, port: duplicate })
+    }
     validateVariadicInputs(node, executor, inputs, outputs)
     // case 就是执行引脚的名字，所以它们与端口名一样必须互不相同。
     const invalid = node.type === SWITCH_TYPE ? invalidCase(switchCases(node.config)) : undefined
-    if (invalid !== undefined) throw new Error(`节点 ${node.id} 的 case "${invalid}" 为空、重复或与 default 引脚同名`)
+    if (invalid !== undefined) refuse({ code: 'switch-case', node: node.id, case: invalid })
     executors.set(node.id, executor)
     nodePorts.set(node.id, { inputs, outputs, execPins: nodeExecPins(node, executor) })
   }
@@ -121,13 +121,13 @@ export function resolveExecutors(
   const connectedInputs = new Set<string>()
   const execEdgeKeys = new Set<string>()
   for (const edge of definition.edges) {
-    if (edgeIds.has(edge.id)) throw new Error(`边 ID "${edge.id}" 重复`)
+    if (edgeIds.has(edge.id)) refuse({ code: 'edge-duplicate', edge: edge.id })
     edgeIds.add(edge.id)
 
     const source = nodePorts.get(edge.source)
-    if (source === undefined) throw new Error(`边 ${edge.id} 引用不存在的源节点 ${edge.source}`)
+    if (source === undefined) refuse({ code: 'edge-node-missing', edge: edge.id, end: 'source', node: edge.source })
     const target = nodePorts.get(edge.target)
-    if (target === undefined) throw new Error(`边 ${edge.id} 引用不存在的目标节点 ${edge.target}`)
+    if (target === undefined) refuse({ code: 'edge-node-missing', edge: edge.id, end: 'target', node: edge.target })
 
     if (isExecEdge(edge)) {
       validateExecEdge(edge, source.execPins, execEdgeKeys)
@@ -139,7 +139,7 @@ export function resolveExecutors(
   for (const [nodeId, ports] of nodePorts) {
     for (const port of ports.inputs) {
       if (port.required !== false && !connectedInputs.has(`${nodeId}\u0000${port.name}`)) {
-        throw new Error(`节点 ${nodeId} 的输入端口 ${port.name} 缺少入边`)
+        refuse({ code: 'input-unwired', node: nodeId, port: port.name })
       }
     }
   }
@@ -163,7 +163,7 @@ function assertNoAnalysisErrors(registry: WorkflowNodeRegistry, definition: DagW
   topologicalSort(definition)
   const { diagnostics } = analyzeWorkflow(definition, indexNodeTypes(registry.listTypes()))
   const error = diagnostics.find(diagnostic => DIAGNOSTIC_SEVERITY[diagnostic.code] === 'error')
-  if (error !== undefined) throw new Error(describeDiagnostic(error))
+  if (error !== undefined) refuse({ code: 'diagnostic', diagnostic: error })
 }
 
 /**
@@ -180,14 +180,14 @@ function validateExecEdge(edge: DagExecEdge, sourcePins: readonly string[], seen
   const targetPin = execTargetPin(edge)
   const fault = execPinFault(sourcePins, sourcePin, targetPin)
   if (fault === 'source') {
-    throw new Error(`执行边 ${edge.id} 引用节点 ${edge.source} 不存在的执行输出引脚 ${sourcePin}`)
+    refuse({ code: 'exec-pin-missing', edge: edge.id, end: 'source', node: edge.source, pin: sourcePin })
   }
   if (fault === 'target') {
-    throw new Error(`执行边 ${edge.id} 引用节点 ${edge.target} 不存在的执行输入引脚 ${targetPin}`)
+    refuse({ code: 'exec-pin-missing', edge: edge.id, end: 'target', node: edge.target, pin: targetPin })
   }
   const key = `${edge.source}\u0000${sourcePin}\u0000${edge.target}\u0000${targetPin}`
   if (seen.has(key)) {
-    throw new Error(`执行边 ${edge.id} 与已有的 ${edge.source}.${sourcePin} -> ${edge.target}.${targetPin} 重复`)
+    refuse({ code: 'exec-edge-duplicate', edge: edge.id, source: edge.source, sourcePin, target: edge.target, targetPin })
   }
   seen.add(key)
 }
@@ -210,22 +210,28 @@ function validateDataEdge(
   const targetPort = edge.targetPort ?? 'input'
   const sourceDefinition = source.outputs.find(port => port.name === sourcePort)
   if (sourceDefinition === undefined) {
-    throw new Error(`边 ${edge.id} 引用节点 ${edge.source} 不存在的输出端口 ${sourcePort}`)
+    refuse({ code: 'port-missing', edge: edge.id, side: 'outputs', node: edge.source, port: sourcePort })
   }
   const targetDefinition = target.inputs.find(port => port.name === targetPort)
   if (targetDefinition === undefined) {
-    throw new Error(`边 ${edge.id} 引用节点 ${edge.target} 不存在的输入端口 ${targetPort}`)
+    refuse({ code: 'port-missing', edge: edge.id, side: 'inputs', node: edge.target, port: targetPort })
   }
   if (!portsAreCompatible(sourceDefinition, targetDefinition)) {
-    throw new Error(
-      `边 ${edge.id} 的端口类型不兼容: ${edge.source}.${sourcePort}`
-      + ` (${sourceDefinition.type}) -> ${edge.target}.${targetPort} (${targetDefinition.type})`,
-    )
+    refuse({
+      code: 'port-incompatible',
+      edge: edge.id,
+      source: edge.source,
+      sourcePort,
+      sourceType: sourceDefinition.type,
+      target: edge.target,
+      targetPort,
+      targetType: targetDefinition.type,
+    })
   }
 
   const inputKey = `${edge.target}\u0000${targetPort}`
   if (connectedInputs.has(inputKey)) {
-    throw new Error(`节点 ${edge.target} 的输入端口 ${targetPort} 存在多条入边`)
+    refuse({ code: 'input-overwired', node: edge.target, port: targetPort })
   }
   connectedInputs.add(inputKey)
 }
@@ -239,14 +245,14 @@ function validateVariadicInputs(
   const constraint = executor.variadicInputs
   if (constraint === undefined) return
   if (inputs.length < constraint.min) {
-    throw new Error(`节点 ${node.id} 至少需要 ${constraint.min} 个输入端口`)
+    refuse({ code: 'variadic-min', node: node.id, min: constraint.min })
   }
   const inputType = inputs[0]?.type
   if (inputs.some(port => port.type !== inputType)) {
-    throw new Error(`节点 ${node.id} 的所有输入端口必须使用相同类型`)
+    refuse({ code: 'variadic-input-type', node: node.id })
   }
   if (constraint.outputType === 'same'
     && (outputs.length !== 1 || outputs[0]?.type !== inputType)) {
-    throw new Error(`节点 ${node.id} 的输出端口必须与输入端口使用相同类型`)
+    refuse({ code: 'variadic-output-type', node: node.id })
   }
 }

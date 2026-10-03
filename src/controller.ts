@@ -5,7 +5,7 @@
 
 import type { Context, Events } from '@deepseek-ai/cordis'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { z } from 'zod'
+import { ZodError, z } from 'zod'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
 import type { WorkflowFiles } from './workflow-files.ts'
@@ -15,7 +15,7 @@ import {
   type WorkflowRunSummary, type WorkflowStudioSnapshot,
 } from './shared/types.ts'
 import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
-import { messageOf } from './shared/errors.ts'
+import { WorkflowRefusalError, refuse } from './shared/refusal.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { codeLanguageOf } from './shared/language.ts'
 import { listFolders, readAtomFiles } from './atom-folder.ts'
@@ -233,16 +233,14 @@ export class WorkflowStudioController extends TypertRemoteService {
   }
 
   private record(runId: string): WorkflowRunRecord {
-    const record = this.engine.getRun(RunId(runId))
-    if (record === undefined) throw new RemoteError('gateway/bad-request', `运行 ${runId} 不存在`, {})
-    return record
+    return this.guardSync(() => this.engine.getRun(RunId(runId)) ?? refuse({ code: 'run-missing', run: runId }))
   }
 
   private async guard<T>(action: () => Promise<T>): Promise<T> {
     try {
       return await action()
     } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+      throw remoteFailure(error)
     }
   }
 
@@ -250,9 +248,23 @@ export class WorkflowStudioController extends TypertRemoteService {
     try {
       return action()
     } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+      throw remoteFailure(error)
     }
   }
+}
+
+/**
+ * 一次失败在 Remote 上的形式。作者能改正的拒绝带着它的类别交给浏览器；浏览器送来的值不合 schema 是错误的请求；
+ * 其余都是意外，原样抛出，由 Gateway 报告为内部错误。
+ * @param error - 捕获的值。
+ * @returns 要抛出的值。
+ */
+function remoteFailure(error: unknown): unknown {
+  if (error instanceof WorkflowRefusalError) {
+    return new RemoteError('workflowStudio/refused', error.message, { refusal: error.refusal })
+  }
+  if (error instanceof ZodError) return new RemoteError('gateway/bad-request', error.message, { issues: error.issues })
+  return error
 }
 
 export default WorkflowStudioController

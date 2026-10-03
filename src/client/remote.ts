@@ -9,7 +9,6 @@ import type {
   RemoteResult, RemoteStreamHandle, TypertCodec, TypertRemoteContribution, TypertSchema,
 } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
-import { messageOf } from '../shared/errors.ts'
 import type { AtomFile } from '../shared/language.ts'
 import type {
   DagWorkflowDefinition, FolderListing, JsonObject, JsonValue, RunId, SavedWorkflow, WorkflowRunRecord,
@@ -43,19 +42,19 @@ type Method = keyof WorkflowStudioRemoteNamespace
 /**
  * Await one Remote call.
  * @param call - The Remote call.
- * @param onError - Receives the message of a thrown error or an error result.
+ * @param onError - Receives the failure: the error result, or what the call threw; `failureText` words it.
  * @returns The value, or undefined after a failure.
  */
 export async function callRemote<T>(
   call: () => Promise<RemoteResult<T>>,
-  onError: (message: string) => void,
+  onError: (failure: unknown) => void,
 ): Promise<T | undefined> {
   try {
     const response = await call()
     if (response.ok) return response.value
-    onError(response.error.message)
+    onError(response.error)
   } catch (error: unknown) {
-    onError(messageOf(error))
+    onError(error)
   }
   return undefined
 }

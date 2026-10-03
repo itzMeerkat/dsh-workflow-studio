@@ -6,7 +6,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { DIAGNOSTIC_SEVERITY, analyzeWorkflow, indexNodeTypes, type WorkflowAnalysis } from './shared/analysis.ts'
-import { describeDiagnostic, describeRenderFault } from './diagnostic-message.ts'
+import { describeDiagnostic, describeRenderFault } from './shared/diagnostic-message.ts'
 import { buildWorkflowIr } from './shared/ir.ts'
 import { workflowCallees } from './atom-folder.ts'
 import { withCallees } from './shared/callees.ts'

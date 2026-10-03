@@ -45,6 +45,7 @@ import {
   type EmbedChoice,
   type WorkflowRow,
 } from './model.ts'
+import { failureText } from './failure-text.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import { RunDialog } from './RunDialog.tsx'
 import { RunsView, type RequestRenderer } from './RunsView.tsx'
@@ -91,7 +92,9 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   const runnable = kind === 'run'
   const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
   const view = views.some(entry => entry.view === chosenView) ? chosenView : 'canvas'
-  const runs = useRuns(remote, setNotice)
+  // A failed Remote call shows as the notice, a refusal worded in the active locale.
+  const fail = (failure: unknown): void => { setNotice(failureText(failure, t)) }
+  const runs = useRuns(remote, fail, () => { setNotice(undefined) })
   // Set while the run dialog is collecting values for the workflow's declared inputs.
   const [runPrompt, setRunPrompt] = useState(false)
   // The atoms read from the workflow's atom folder; reading again after a refresh picks up edited files.
@@ -128,7 +131,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
     setAtomsRead(value => value + 1)
     setPhase('loading')
     setNotice(undefined)
-    const next = await callRemote(() => remote.snapshot(), setNotice)
+    const next = await callRemote(() => remote.snapshot(), fail)
     if (next !== undefined) {
       setSnapshot(next)
       const selected = next.workflows.find(row => row.id === preferredId)
@@ -151,7 +154,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
     setLibrary(undefined)
     if (folder === undefined || atomSyntax === undefined) return
     let current = true
-    void callRemote(() => remote.atomFiles(folder, definition.language!), setNotice)
+    void callRemote(() => remote.atomFiles(folder, definition.language!), fail)
       .then((files) => { if (current && files !== undefined) setLibrary(atomLibrary(folder, files, atomSyntax)) })
     return () => { current = false }
   }, [definition.atomFolder, definition.language, atomsRead])
@@ -178,7 +181,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   const persist = async (): Promise<SavedWorkflow | undefined> => {
     const result = await callRemote(
       () => selectedId === undefined ? remote.save(definition) : remote.update(selectedId, definition),
-      setNotice,
+      fail,
     )
     if (result !== undefined) setSelectedId(result.workflowId)
     return result
@@ -209,7 +212,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   const remove = async (id: string): Promise<void> => {
     setPhase('saving')
     setNotice(undefined)
-    const deleted = await callRemote(() => remote.delete(id), setNotice)
+    const deleted = await callRemote(() => remote.delete(id), fail)
     if (deleted === undefined) {
       setPhase('ready')
       return
@@ -228,7 +231,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
     const result = await persist()
     const runId = result === undefined
       ? undefined
-      : await callRemote(() => remote.start(result.workflowId, inputs), setNotice)
+      : await callRemote(() => remote.start(result.workflowId, inputs), fail)
     if (runId !== undefined) {
       runs.setFilter('workflow')
       setView('runs')

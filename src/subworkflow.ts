@@ -17,6 +17,7 @@ import {
 import {
   WORKFLOW_OUTPUT_TYPE, workflowInputNode, workflowInputPorts, workflowOutputNode,
 } from './shared/workflow-boundary.ts'
+import { refuse } from './shared/refusal.ts'
 
 /** 展开后站在子工作流节点位置上的节点：把嵌入处送来的值交给子工作流，并让子工作流的每个节点等它。 */
 export const SUBWORKFLOW_ENTRY_TYPE = 'subworkflow-entry'
@@ -98,9 +99,9 @@ function inline(
   trail: readonly WorkflowId[],
 ): Inlined {
   const ref = subworkflowOf(node.config)
-  if (trail.includes(ref)) throw new Error(`子工作流嵌入成环：${[...trail, ref].join(' → ')}`)
+  if (trail.includes(ref)) refuse({ code: 'embed-cycle', trail: [...trail, ref] })
   const authored = lookup(ref)
-  if (authored === undefined) throw new Error(`子工作流节点 ${node.id} 嵌入的工作流 ${ref} 不存在`)
+  if (authored === undefined) refuse({ code: 'embedded-workflow-missing', node: node.id, workflow: ref })
   const child = expand(authored, lookup, isJoin, [...trail, ref])
   const input = workflowInputNode(child)
   const output = workflowOutputNode(child)

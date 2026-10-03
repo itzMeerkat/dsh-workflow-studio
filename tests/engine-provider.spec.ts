@@ -463,7 +463,7 @@ describe('DagEngineProvider', () => {
 
   it('未知工作流和运行 ID 返回明确结果', async () => {
     const { engine } = await setup()
-    assert.throws(() => engine.start(WorkflowId('missing')), /未找到/)
+    assert.throws(() => engine.start(WorkflowId('missing')), { refusal: { code: 'workflow-missing', workflow: 'missing' } })
     assert.equal(engine.getRun(RunId('missing')), undefined)
   })
 })

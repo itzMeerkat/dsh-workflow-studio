@@ -3,6 +3,7 @@
  * @module dsh-workflow-studio
  */
 
+import type { Dirent } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -10,6 +11,8 @@ import type { DagEngine } from './engine.ts'
 import type { Callees } from './shared/callees.ts'
 import { atomLibrary, isAtomFile, languageOf, type AtomFile, type AtomLibrary, type AtomSyntax } from './shared/language.ts'
 import type { DagWorkflowDefinition, FolderListing } from './shared/types.ts'
+import { messageOf } from './shared/errors.ts'
+import { refuse } from './shared/refusal.ts'
 
 /**
  * 一个目录中的原子文件和类型文件，不递归，按文件名排序。
@@ -19,8 +22,8 @@ import type { DagWorkflowDefinition, FolderListing } from './shared/types.ts'
  * @throws 路径不是绝对路径或目录读不出时。
  */
 export async function readAtomFiles(folder: string, syntax: AtomSyntax): Promise<AtomFile[]> {
-  if (!isAbsolute(folder)) throw new Error(`原子目录必须是绝对路径: ${folder}`)
-  const entries = await readdir(folder, { withFileTypes: true })
+  if (!isAbsolute(folder)) refuse({ code: 'folder-relative', folder })
+  const entries = await readFolder(folder)
   const files = entries
     .filter(entry => entry.isFile() && (isAtomFile(entry.name, syntax) || entry.name === syntax.types))
     .map(entry => entry.name)
@@ -62,8 +65,8 @@ export async function workflowCallees(definition: DagWorkflowDefinition, engine:
  */
 export async function listFolders(path: string): Promise<FolderListing> {
   const folder = path === '' ? homedir() : path
-  if (!isAbsolute(folder)) throw new Error(`目录必须是绝对路径: ${folder}`)
-  const entries = await readdir(folder, { withFileTypes: true })
+  if (!isAbsolute(folder)) refuse({ code: 'folder-relative', folder })
+  const entries = await readFolder(folder)
   const parent = dirname(folder)
   return {
     path: folder,
@@ -74,5 +77,22 @@ export async function listFolders(path: string): Promise<FolderListing> {
       .sort()
       .map(name => ({ name, path: join(folder, name) })),
     files: entries.filter(entry => entry.isFile() && !entry.name.startsWith('.')).map(entry => entry.name).sort(),
+  }
+}
+
+/** 作者选错目录时操作系统给出的错误码：不存在、不是目录、没有权限。 */
+const WRONG_FOLDER = new Set(['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'])
+
+/**
+ * 一层目录的条目。
+ * @throws 目录不存在、不是目录或没有权限时拒绝，因为作者能换一个目录；其他读取错误原样抛出。
+ */
+async function readFolder(folder: string): Promise<Dirent[]> {
+  try {
+    return await readdir(folder, { withFileTypes: true })
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== undefined && WRONG_FOLDER.has(code)) refuse({ code: 'folder-unreadable', folder, reason: messageOf(error) })
+    throw error
   }
 }

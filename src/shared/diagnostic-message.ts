@@ -6,9 +6,9 @@
  * @module dsh-workflow-studio
  */
 
-import type { WorkflowDiagnostic } from './shared/analysis.ts'
-import type { RenderFault } from './shared/source.ts'
-import { assertNever } from './shared/errors.ts'
+import type { WorkflowDiagnostic } from './analysis.ts'
+import type { RenderFault } from './source.ts'
+import { assertNever } from './errors.ts'
 
 /**
  * 一条诊断的中文说明；错误同时给出可行的修改方式。

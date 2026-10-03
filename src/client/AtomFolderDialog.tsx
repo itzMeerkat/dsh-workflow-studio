@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { isAtomFile, type AtomSyntax } from '../shared/language.ts'
 import type { FolderListing } from '../shared/types.ts'
 import type { Translate } from './locale.ts'
+import { failureText } from './failure-text.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import css from './WorkflowStudioPanel.module.css'
 
@@ -33,8 +34,8 @@ export function AtomFolderDialog({ folder, syntax, remote, t, onCancel, onChoose
   useEffect(() => {
     let current = true
     setError(undefined)
-    void callRemote(() => remote.folders(path), (message) => {
-      if (current) setError(message)
+    void callRemote(() => remote.folders(path), (failure) => {
+      if (current) setError(failureText(failure, t))
     }).then((next) => {
       if (!current || next === undefined) return
       setListing(next)

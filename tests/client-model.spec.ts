@@ -45,6 +45,9 @@ import {
   NodeId, RunId, WorkflowId, type NodeRunRecord, type NodeTypeSummary, type PortDefinition,
 } from '../src/shared/types.ts'
 import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { failureText, refusalText } from '../src/client/failure-text.ts'
+import { dictionaries, type WorkflowStudioKey } from '../src/client/locale.ts'
 
 /** A definition as the Host schema reads it back from JSON. */
 const parseEditorDefinition = (source: string) => workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
@@ -475,5 +478,22 @@ describe('workflow result values', () => {
     assert.deepEqual(workflowResultValues(ports, record({ verdict: 'hold' })), [{ name: 'verdict', value: 'hold' }])
     assert.deepEqual(workflowResultValues(ports, record()), [])
     assert.deepEqual(workflowResultValues(ports, undefined), [])
+  })
+})
+
+describe('refusal wording', () => {
+  const t = (key: WorkflowStudioKey): string => dictionaries.en[key]
+
+  it('words a refusal from the dictionary and any other failure by its message', () => {
+    const refused = new RemoteError('workflowStudio/refused', '工作流名称 "a" 已被一个 code 工作流使用', {
+      refusal: { code: 'name-taken-by-kind', name: 'a', kind: 'code' },
+    })
+    assert.equal(failureText(refused, t), 'The name “a” is taken by a Code workflow.')
+    assert.equal(
+      refusalText({ code: 'embedded', name: 'child', embedders: ['p', 'q'], action: 'delete' }, t),
+      'Workflow “child” is embedded by p, q, so it cannot be deleted.',
+    )
+    assert.equal(failureText(new RemoteError('gateway/internal', 'disk full', {}), t), 'disk full')
+    assert.equal(failureText(new Error('offline'), t), 'offline')
   })
 })

@@ -13,7 +13,7 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import DagEngine from './engine.ts'
 import type { DagRun } from './engine.ts'
 import type {
-  DagWorkflowDefinition, JsonObject, NodeId, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
+  DagWorkflowDefinition, JsonObject, JsonValue, NodeId, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
   WorkflowNodeExecutor,
 } from './shared/types.ts'
 import { WorkflowId, RunId } from './shared/types.ts'
@@ -32,6 +32,7 @@ import {
 } from './run-state.ts'
 import { RunExecutor, type RunHost, type RunOutcome } from './run-executor.ts'
 import { toJsonValue } from './shared/json.ts'
+import { refuse } from './shared/refusal.ts'
 
 /** 引擎部署配置。 */
 export interface DagEngineConfig {
@@ -119,7 +120,7 @@ export class DagEngineProvider extends DagEngine {
     return this.enqueueMutation(async () => {
       const existing = this.findByName(snapshot.name)
       if (existing !== undefined && existing.kind !== snapshot.kind) {
-        throw new Error(`工作流名称 "${snapshot.name}" 已被一个 ${existing.kind} 工作流使用`)
+        refuse({ code: 'name-taken-by-kind', name: snapshot.name, kind: existing.kind })
       }
       const id = existing !== undefined ? existing.id : this.allocateId(snapshot.name)
       await this.workflows.put(id, snapshot)
@@ -138,22 +139,20 @@ export class DagEngineProvider extends DagEngine {
     validateWorkflow(this.registry, snapshot)
     return this.enqueueMutation(async () => {
       const current = this.workflows.get(id)
-      if (current === undefined) {
-        throw new Error(`工作流 "${id}" 不存在`)
-      }
+      if (current === undefined) refuse({ code: 'workflow-missing', workflow: id })
       if (current.kind !== snapshot.kind) {
-        throw new Error(`工作流 "${id}" 是 ${current.kind} 工作流，不能改为 ${snapshot.kind} 工作流`)
+        refuse({ code: 'kind-change', workflow: id, from: current.kind, to: snapshot.kind })
       }
       const named = this.findByName(snapshot.name)
       if (named !== undefined && named.id !== id) {
-        throw new Error(`工作流名称 "${snapshot.name}" 已存在`)
+        refuse({ code: 'name-taken', name: snapshot.name })
       }
       if (current.name === snapshot.name) {
         await this.workflows.put(id, snapshot)
         return id
       }
       // 子工作流节点按 ID 链接，而 ID 随名称改变，所以被嵌入的工作流改名会断开每个嵌入它的地方。
-      this.assertNotEmbedded(id, current.name, '改名')
+      this.assertNotEmbedded(id, current.name, 'rename')
       const renamed = this.allocateId(snapshot.name)
       await this.workflows.put(renamed, snapshot)
       await this.workflows.delete(id)
@@ -164,8 +163,8 @@ export class DagEngineProvider extends DagEngine {
   async delete(id: WorkflowId): Promise<void> {
     await this.enqueueMutation(async () => {
       const current = this.workflows.get(id)
-      if (current === undefined) throw new Error(`工作流 "${id}" 不存在`)
-      this.assertNotEmbedded(id, current.name, '删除')
+      if (current === undefined) refuse({ code: 'workflow-missing', workflow: id })
+      this.assertNotEmbedded(id, current.name, 'delete')
       await this.workflows.delete(id)
     })
   }
@@ -177,12 +176,10 @@ export class DagEngineProvider extends DagEngine {
    * @param action - 被拒绝的操作，用于错误信息。
    * @throws 有其他工作流嵌入它时。
    */
-  private assertNotEmbedded(id: WorkflowId, name: string, action: string): void {
+  private assertNotEmbedded(id: WorkflowId, name: string, action: 'rename' | 'delete'): void {
     const embedders = [...this.workflows.entries()].map(([, other]) => other)
       .filter(other => other.nodes.some(node => node.type === SUBWORKFLOW_TYPE && subworkflowOf(node.config) === id))
-    if (embedders.length > 0) {
-      throw new Error(`工作流 "${name}" 被 ${embedders.map(other => `"${other.name}"`).join('、')} 作为子工作流嵌入，不能${action}`)
-    }
+    if (embedders.length > 0) refuse({ code: 'embedded', name, embedders: embedders.map(other => other.name), action })
   }
 
   /** 定义中的子工作流按当前保存的版本展开后的图。 */
@@ -222,8 +219,8 @@ export class DagEngineProvider extends DagEngine {
   start(workflowId: WorkflowId, inputs: JsonObject = {}): DagRun {
     if (this.closing) throw new Error('工作流引擎正在关闭')
     const authored = this.get(workflowId)
-    if (authored === undefined) throw new Error(`工作流 ${workflowId} 未找到`)
-    if (authored.kind !== 'run') throw new Error(`工作流 ${workflowId} 是 ${authored.kind} 工作流，只写成源码，不能运行`)
+    if (authored === undefined) refuse({ code: 'workflow-missing', workflow: workflowId })
+    if (authored.kind !== 'run') refuse({ code: 'not-runnable', workflow: workflowId, kind: authored.kind })
     // 子工作流按启动时保存的版本展开，输入值写进边界节点的配置，因此运行快照自带它们，恢复时也不必重新提供。
     const definition = withRunInputs(this.expand(authored), inputs)
     const executors = resolveExecutors(this.registry, definition)
@@ -307,7 +304,7 @@ export class DagEngineProvider extends DagEngine {
     const state = this.runs.get(runId)
     if (state !== undefined) return TERMINAL_STATUSES.has(state.status) ? undefined : state
     if (this.runStore.get(runId) !== undefined) return undefined
-    throw new Error(`运行 ${runId} 不存在`)
+    refuse({ code: 'run-missing', run: runId })
   }
 
   // ---- 持久化与恢复 ----
@@ -413,17 +410,20 @@ export class DagEngineProvider extends DagEngine {
 
   async signal(runId: RunId, nodeId: NodeId, requestId: string, result: unknown): Promise<void> {
     const state = this.liveState(runId)
-    if (state === undefined) throw new Error(`运行 ${runId} 已结束`)
+    if (state === undefined) refuse({ code: 'run-ended', run: runId })
     const execState = state.nodeStates.get(nodeId)
-    if (execState === undefined) throw new Error(`运行 ${runId} 没有节点 ${nodeId}`)
+    if (execState === undefined) refuse({ code: 'run-node-missing', run: runId, node: nodeId })
     const pending = execState.record.requests?.find(item => item.id === requestId)
-    if (pending === undefined) throw new Error(`节点 ${nodeId} 没有请求 ${requestId}`)
-    if (pending.result !== undefined) throw new Error(`请求 ${requestId} 已送达结果`)
+    if (pending === undefined) refuse({ code: 'request-missing', node: nodeId, request: requestId })
+    if (pending.result !== undefined) refuse({ code: 'request-answered', request: requestId })
     const validate = this.registry.get(execState.node.type)?.validateSignal
-    const validated = toJsonValue(
-      validate === undefined ? result : validate(pending.request, result),
-      'result',
-    )
+    let validated: JsonValue
+    try {
+      validated = toJsonValue(validate === undefined ? result : validate(pending.request, result), 'result')
+    } catch (error: unknown) {
+      // 结果的格式由节点类型决定，格式不对是送达方能改正的，所以作为拒绝交回送达方，节点继续等待。
+      refuse({ code: 'result-rejected', reason: messageOf(error) })
+    }
     pending.result = validated
     pending.resolvedAt = Date.now()
     try {

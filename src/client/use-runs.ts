@@ -2,7 +2,6 @@
 
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { useEffect, useRef, useState } from 'react'
-import { messageOf } from '../shared/errors.ts'
 import type { JsonValue, WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import type { RunAction, RunsFilter } from './RunsView.tsx'
@@ -14,12 +13,14 @@ const REWATCH_DELAY_MS = 2000
  * Keep the run list and the selected run current while mounted. The Host pushes the run list whenever a run changes;
  * the selected run's record is read again when its row changes.
  * @param remote - The `workflowStudio` Remote.
- * @param setNotice - Shows a failure message; undefined clears it.
+ * @param onError - Receives a failed call or stream; `failureText` words it.
+ * @param clearNotice - Clears an earlier failure before a run control is applied.
  * @returns Run state and the callbacks that change it.
  */
 export function useRuns(
   remote: WorkflowStudioRemoteNamespace,
-  setNotice: (message: string | undefined) => void,
+  onError: (failure: unknown) => void,
+  clearNotice: () => void,
 ) {
   const [runs, setRuns] = useState<readonly WorkflowRunSummary[]>([])
   const [filter, setFilter] = useState<RunsFilter>('workflow')
@@ -33,7 +34,7 @@ export function useRuns(
   const readSelected = async (): Promise<void> => {
     const runId = selectedRunRef.current
     if (runId === undefined) return
-    const detail = await callRemote(() => remote.getRun(runId), setNotice)
+    const detail = await callRemote(() => remote.getRun(runId), onError)
     if (detail !== undefined && selectedRunRef.current === runId) setRecord(detail)
   }
 
@@ -53,7 +54,7 @@ export function useRuns(
           }
         }
       } catch (error: unknown) {
-        if (!controller.signal.aborted) setNotice(messageOf(error))
+        if (!controller.signal.aborted) onError(error)
       } finally {
         handle.dispose()
       }
@@ -76,8 +77,8 @@ export function useRuns(
   /** Apply a run control or answer and show the record it returns. */
   const control = async (call: () => Promise<RemoteResult<WorkflowRunRecord>>): Promise<void> => {
     setBusy(true)
-    setNotice(undefined)
-    const next = await callRemote(call, setNotice)
+    clearNotice()
+    const next = await callRemote(call, onError)
     if (next !== undefined && selectedRunRef.current === next.runId) setRecord(next)
     setBusy(false)
   }

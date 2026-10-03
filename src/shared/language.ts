@@ -10,6 +10,7 @@
 import { GO_TYPES, goAtom, goImportName, goPackage } from './go.ts'
 import { BUILTIN_PORT_TYPES, type BuiltinPortType, type DagWorkflowDefinition, type PortDefinition, type PortType } from './types.ts'
 import { assertNever } from './errors.ts'
+import { refuse } from './refusal.ts'
 
 /** 代码节点存放代码的配置字段。 */
 export const CODE_FIELD = 'code'
@@ -261,7 +262,7 @@ export function languageOf(definition: Pick<DagWorkflowDefinition, 'kind' | 'lan
 export function codeLanguageOf(name: string | undefined): CodeLanguage {
   const language = CODE_LANGUAGES.find(candidate => candidate.name === name)
   if (language !== undefined) return language
-  throw new Error(`code 工作流的语言必须是 ${CODE_LANGUAGES.map(candidate => candidate.name).join('、')} 之一，而不是 ${name ?? '空'}`)
+  return refuse({ code: 'language-unknown', language: name ?? '', languages: CODE_LANGUAGES.map(candidate => candidate.name) })
 }
 
 /**

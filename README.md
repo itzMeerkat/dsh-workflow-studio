@@ -211,7 +211,7 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/subworkflow.ts`](src/subworkflow.ts) | Expanding subworkflows when a run starts, and finding the subworkflows an expanded node sits in |
 | [`src/client/AtomFolderDialog.tsx`](src/client/AtomFolderDialog.tsx) | The dialog that browses Host folders for an atom folder |
 | [`src/client/AtomsPanel.tsx`](src/client/AtomsPanel.tsx) | The atoms panel: the atom folder, its atoms to add, and the files that are not atoms |
-| [`src/diagnostic-message.ts`](src/diagnostic-message.ts) | Host wording for one diagnostic or render fault |
+| [`src/shared/diagnostic-message.ts`](src/shared/diagnostic-message.ts) | Host wording for one diagnostic or render fault |
 | [`src/shared/workflow-boundary.ts`](src/shared/workflow-boundary.ts) | The boundary node types, the workflow signature they carry, and a run's input values |
 | [`src/client/index.tsx`](src/client/index.tsx) | `main` panel and sidebar registration, and Remote mounting |
 | [`src/client/locale.ts`](src/client/locale.ts) | zh and en copy for the `workflowStudio` locale namespace |

@@ -8,6 +8,7 @@
  */
 
 import type { DagNodeDefinition, DagWorkflowDefinition, JsonObject, PortDefinition } from './types.ts'
+import { refuse } from './refusal.ts'
 
 /** 把调用方提供的输入送入图中的节点类型。 */
 export const WORKFLOW_INPUT_TYPE = 'workflow-input'
@@ -70,7 +71,7 @@ export function withRunInputs(
   const node = workflowInputNode(definition)
   if (node === undefined) {
     const [unknown] = Object.keys(supplied)
-    if (unknown !== undefined) throw new Error(`工作流未声明输入 "${unknown}"`)
+    if (unknown !== undefined) refuse({ code: 'input-undeclared', input: unknown })
     return definition
   }
   const values = resolveWorkflowInputs(node.outputs ?? [], supplied)
@@ -97,18 +98,14 @@ export function resolveWorkflowInputs(
 ): JsonObject {
   const declared = new Set(ports.map(port => port.name))
   const unknown = Object.keys(supplied).find(name => !declared.has(name))
-  if (unknown !== undefined) {
-    throw new Error(`工作流未声明输入 "${unknown}"`)
-  }
+  if (unknown !== undefined) refuse({ code: 'input-undeclared', input: unknown })
   const values: JsonObject = {}
   for (const port of ports) {
     if (Object.hasOwn(supplied, port.name)) {
       values[port.name] = supplied[port.name]!
       continue
     }
-    if (port.default === undefined) {
-      throw new Error(`工作流输入 "${port.name}" 未提供值，且没有默认值`)
-    }
+    if (port.default === undefined) refuse({ code: 'input-missing', input: port.name })
     values[port.name] = port.default
   }
   return values

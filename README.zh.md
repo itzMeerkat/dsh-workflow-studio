@@ -211,7 +211,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/subworkflow.ts`](src/subworkflow.ts) | 运行开始时展开子工作流，以及找出展开后的节点所在的各层子工作流 |
 | [`src/client/AtomFolderDialog.tsx`](src/client/AtomFolderDialog.tsx) | 浏览 Host 目录以选择原子目录的对话框 |
 | [`src/client/AtomsPanel.tsx`](src/client/AtomsPanel.tsx) | 原子侧栏：原子目录、可添加的原子，以及不能作为原子的文件 |
-| [`src/diagnostic-message.ts`](src/diagnostic-message.ts) | 单条诊断或生成失败的 Host 侧文案 |
+| [`src/shared/diagnostic-message.ts`](src/shared/diagnostic-message.ts) | 单条诊断或生成失败的 Host 侧文案 |
 | [`src/shared/workflow-boundary.ts`](src/shared/workflow-boundary.ts) | 边界节点类型、它们承载的工作流签名，以及一次运行的输入值 |
 | [`src/client/index.tsx`](src/client/index.tsx) | `main` 面板和侧边栏注册，以及 Remote 挂载 |
 | [`src/client/locale.ts`](src/client/locale.ts) | `workflowStudio` 本地化命名空间的中英文文案 |

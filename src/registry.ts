@@ -7,7 +7,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { execKindOf } from './flow-nodes.ts'
-import { assertUniquePortNames, execOutputPins } from './shared/graph.ts'
+import { duplicatePortName, execOutputPins } from './shared/graph.ts'
 import { DEFAULT_WORKFLOW_KIND } from './shared/types.ts'
 import type { NodeTypeSummary, WorkflowNodeExecutor } from './shared/types.ts'
 
@@ -51,8 +51,10 @@ export class WorkflowNodeRegistry extends Service {
     if (this.executors.has(type)) {
       throw new Error(`节点类型 "${type}" 已注册`)
     }
-    assertUniquePortNames(`节点类型 "${type}"`, '输入', executor.inputs ?? [])
-    assertUniquePortNames(`节点类型 "${type}"`, '输出', executor.outputs ?? [])
+    for (const [side, ports] of [['输入', executor.inputs], ['输出', executor.outputs]] as const) {
+      const duplicate = duplicatePortName(ports ?? [])
+      if (duplicate !== undefined) throw new Error(`节点类型 "${type}" 的${side}端口 ${duplicate} 重复`)
+    }
     if (executor.variadicInputs !== undefined
       && (!Number.isInteger(executor.variadicInputs.min) || executor.variadicInputs.min < 1)) {
       throw new Error(`节点类型 "${type}" 的可变输入最小数量必须为正整数`)

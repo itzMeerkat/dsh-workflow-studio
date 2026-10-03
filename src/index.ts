@@ -86,7 +86,7 @@ export {
 export type {
   Atom, AtomFault, AtomSyntax, CodeLanguage, FunctionSyntax, Language, Signature, TypedName,
 } from './shared/language.ts'
-export { describeDiagnostic, describeRenderFault } from './diagnostic-message.ts'
+export { describeDiagnostic, describeRenderFault } from './shared/diagnostic-message.ts'
 export { registerWorkflowTools } from './tools.ts'
 export { WORKFLOW_CODE_SKILL, registerWorkflowSkill } from './skill.ts'
 export { WorkflowStudioController } from './controller.ts'

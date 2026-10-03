@@ -15,6 +15,7 @@ import { ATOM_FIELD, CODE_ATOM_TYPE } from '../src/shared/language.ts'
 import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE } from '../src/shared/subworkflow.ts'
 import { RunId, type DagWorkflowDefinition, type SavedWorkflow } from '../src/shared/types.ts'
 import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
+import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkflowStudioController } from '../src/controller.ts'
 
 describe('WorkflowStudioController', () => {
@@ -169,13 +170,23 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(lists.at(-1), ['completed'])
   })
 
-  it('拒绝不完整的定义和未注册节点', async () => {
+  it('作者能改正的拒绝带着类别报告，不合 schema 的值是错误请求，其余是意外', async () => {
     const controller = await setup()
-    await assert.rejects(controller.save({ name: 'no-graph' }), /nodes/)
-    await assert.rejects(
-      controller.save(workflow({ node: 'missing' }, [], { name: 'bad' })),
-      /未知节点类型/,
-    )
+    await assert.rejects(controller.save({ name: 'no-graph' }), { code: 'gateway/bad-request', message: /nodes/ })
+    await assert.rejects(controller.save(workflow({ node: 'missing' }, [], { name: 'bad' })), {
+      code: 'workflowStudio/refused',
+      message: '未知节点类型: missing',
+      details: { refusal: { code: 'node-type-unknown', type: 'missing' } },
+    })
+    assert.throws(() => controller.getRun('gone'), { code: 'workflowStudio/refused', details: { refusal: { code: 'run-missing', run: 'gone' } } })
+    await assert.rejects(controller.folders('/no/such/folder'), {
+      code: 'workflowStudio/refused',
+      details: { refusal: { code: 'folder-unreadable', folder: '/no/such/folder', reason: "ENOENT: no such file or directory, scandir '/no/such/folder'" } },
+    })
+    // 引擎关闭后的写入失败不是作者能改正的，所以不带拒绝的类别，交给 Gateway 报告为内部错误。
+    await hosts.stop(host)
+    await assert.rejects(controller.save(workflow({ v: 'value' }, [], { name: 'late' })), (error: unknown) =>
+      error instanceof Error && remoteErrorOf(error) === undefined)
   })
 
   it('保存带原子目录的 Go 工作流时写出目录中的 <ID>.workflow.go，改名时换掉旧文件，删除时删掉；写不出时照样保存并给出原因', async () => {
