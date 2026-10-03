@@ -108,7 +108,7 @@ export class MergeNode extends WorkflowNode<{ output: unknown }> {
  * 工作流接受哪些输入就是本节点声明了哪些输出端口，因此执行器自身不声明端口。
  * 运行开始前已解析出每个端口的值，所以本节点只是把它们原样交给下游。
  */
-export class WorkflowInputNode implements WorkflowNodeExecutor {
+class WorkflowInputNode implements WorkflowNodeExecutor {
   readonly type = WORKFLOW_INPUT_TYPE
   readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '工作流输入'
@@ -131,7 +131,7 @@ export class WorkflowInputNode implements WorkflowNodeExecutor {
  * 工作流产出哪些输出就是本节点声明了哪些输入端口。收到的值记录在节点运行记录的 `inputs` 上，
  * 运行记录再把它们提升为整个运行的输出，因此本节点不声明输出端口，也就不受输出完整性检查约束。
  */
-export class WorkflowOutputNode implements WorkflowNodeExecutor {
+class WorkflowOutputNode implements WorkflowNodeExecutor {
   readonly type = WORKFLOW_OUTPUT_TYPE
   readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '工作流输出'
@@ -149,7 +149,7 @@ export class WorkflowOutputNode implements WorkflowNodeExecutor {
  *
  * `run` 工作流在运行开始时把它展开成那个工作流的节点，`code` 工作流把它写成一次函数调用，所以它自己从不执行。
  */
-export class SubworkflowNode implements WorkflowNodeExecutor {
+class SubworkflowNode implements WorkflowNodeExecutor {
   readonly type = SUBWORKFLOW_TYPE
   readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '子工作流'
@@ -167,7 +167,7 @@ export class SubworkflowNode implements WorkflowNodeExecutor {
  *
  * 只由展开放置，任何工作流都不能直接使用，所以它不属于任何种类；端口写在节点实例上。
  */
-export class SubworkflowEntryNode implements WorkflowNodeExecutor {
+class SubworkflowEntryNode implements WorkflowNodeExecutor {
   readonly type = SUBWORKFLOW_ENTRY_TYPE
   readonly kinds: readonly WorkflowKind[] = []
   readonly label = '子工作流入口'
@@ -185,7 +185,7 @@ export class SubworkflowEntryNode implements WorkflowNodeExecutor {
 }
 
 /** 子工作流展开后的出口：它完成即子工作流完成。只由展开放置，不属于任何种类。 */
-export class SubworkflowExitNode implements WorkflowNodeExecutor {
+class SubworkflowExitNode implements WorkflowNodeExecutor {
   readonly type = SUBWORKFLOW_EXIT_TYPE
   readonly kinds: readonly WorkflowKind[] = []
   readonly label = '子工作流出口'

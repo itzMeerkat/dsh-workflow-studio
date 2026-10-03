@@ -6,8 +6,9 @@ import type {
   AskUserQuestionAnswer,
   AskUserQuestionItem,
 } from '@deepseek-ai/dsh-user-questions/types'
-import type {
-  JsonValue, NodeRunRecord, NodeSignalRequest, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
+import {
+  TERMINAL_STATUSES, type JsonValue, type NodeRunRecord, type NodeSignalRequest, type WorkflowRunRecord, type WorkflowRunStatus,
+  type WorkflowRunSummary,
 } from '../shared/types.ts'
 
 /**
@@ -15,15 +16,7 @@ import type {
  * @param row - Run summary.
  */
 export function isActiveRun(row: Pick<WorkflowRunSummary, 'status' | 'pendingRequests'>): boolean {
-  return !isFinished(row.status) || row.pendingRequests > 0
-}
-
-/**
- * Whether a run has reached a final status.
- * @param status - Run status.
- */
-export function isFinished(status: WorkflowRunStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled'
+  return !TERMINAL_STATUSES.has(row.status) || row.pendingRequests > 0
 }
 
 /**
@@ -56,7 +49,7 @@ export interface PendingRequest {
  * @param record - Run record.
  */
 export function pendingRequests(record: WorkflowRunRecord): PendingRequest[] {
-  if (isFinished(record.status)) return []
+  if (TERMINAL_STATUSES.has(record.status)) return []
   const nodes = new Map(record.definition.nodes.map(node => [node.id, node]))
   return record.nodes.flatMap(node => (node.requests ?? [])
     .filter(request => request.result === undefined)
@@ -121,7 +114,7 @@ export function runActions(status: WorkflowRunStatus): { pause: boolean; resume:
   return {
     pause: status === 'running',
     resume: status === 'paused' || status === 'interrupted',
-    cancel: !isFinished(status),
+    cancel: !TERMINAL_STATUSES.has(status),
   }
 }
 

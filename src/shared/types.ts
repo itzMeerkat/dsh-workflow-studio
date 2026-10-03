@@ -262,6 +262,9 @@ export interface NodeExecutionResult {
 export type NodeRunStatus =
   | 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'cancelled'
 
+/** 节点的结束状态。等待外部结果的节点仍为 running，因此不在其中：它的下游还不能开始。 */
+export const TERMINAL_NODE_STATUSES: ReadonlySet<NodeRunStatus> = new Set(['completed', 'skipped', 'failed', 'cancelled'])
+
 /** 节点声明的一次外部结果等待。引擎不解释 {@link request} 和 {@link result}。 */
 export interface NodeSignalRequest {
   /** 节点内唯一、在重新调用间保持不变的请求 ID。 */
@@ -296,6 +299,9 @@ export interface NodeRunRecord {
 
 /** 工作流运行状态。 */
 export type WorkflowRunStatus = 'running' | 'paused' | 'interrupted' | 'completed' | 'failed' | 'cancelled'
+
+/** 运行的结束状态。 */
+export const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
 
 /** 持久化的完整运行记录。 */
 export interface WorkflowRunRecord {

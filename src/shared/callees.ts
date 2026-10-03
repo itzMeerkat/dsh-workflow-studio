@@ -26,7 +26,7 @@ export const NO_CALLEES: Callees = { atoms: new Map(), workflows: new Map() }
  * 节点是否调用别处定义的东西，端口由被调用者决定。
  * @param node - 任一节点。
  */
-export function isCaller(node: Pick<DagNodeDefinition, 'type'>): boolean {
+function isCaller(node: Pick<DagNodeDefinition, 'type'>): boolean {
   return node.type === CODE_ATOM_TYPE || node.type === SUBWORKFLOW_TYPE
 }
 
@@ -36,7 +36,7 @@ export function isCaller(node: Pick<DagNodeDefinition, 'type'>): boolean {
  * @param callees - 能调用的一切。
  * @returns 被调用者的签名；节点不调用别处，或被调用者不在 `callees` 中时为 undefined。
  */
-export function calleeSignature(node: DagNodeDefinition, callees: Callees): Signature | undefined {
+function calleeSignature(node: DagNodeDefinition, callees: Callees): Signature | undefined {
   switch (node.type) {
     case CODE_ATOM_TYPE:
       return callees.atoms.get(atomOf(node.config))?.signature

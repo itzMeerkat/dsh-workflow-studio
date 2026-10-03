@@ -3,9 +3,9 @@
  * @module dsh-workflow-studio
  */
 
-import { NodeId } from './shared/types.ts'
+import { NodeId, TERMINAL_STATUSES } from './shared/types.ts'
 import type {
-  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, JsonValue, NodeRunRecord, NodeRunStatus, RunId, WorkflowId,
+  DagNodeDefinition, DagRunInfo, DagWorkflowDefinition, JsonValue, NodeRunRecord, RunId, WorkflowId,
   WorkflowNodeExecutor, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from './shared/types.ts'
 import { WORKFLOW_OUTPUT_TYPE } from './shared/workflow-boundary.ts'
@@ -41,16 +41,6 @@ export interface RunState {
   /** 等待结果送达的节点请求，按节点 ID 和请求 ID 索引。 */
   signalWaiters: Map<NodeId, Map<string, (result: JsonValue) => void>>
 }
-
-/** 运行的结束状态。 */
-export const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['completed', 'failed', 'cancelled'])
-
-/**
- * 节点的结束状态。等待外部结果的节点仍为 running，因此不在其中：它的下游还不能开始。
- */
-export const TERMINAL_NODE_STATUSES: ReadonlySet<NodeRunStatus> = new Set([
-  'completed', 'skipped', 'failed', 'cancelled',
-])
 
 /**
  * 从运行记录创建内存状态；节点记录被复制。

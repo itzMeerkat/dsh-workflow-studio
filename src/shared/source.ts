@@ -421,7 +421,7 @@ function callableOf(call: IrCall, language: CodeLanguage, callees: Callees): Cal
  * @param atoms - 工作流原子目录中的原子。
  * @returns 该语言中的标识符。
  */
-export function workflowFunctionName(name: string, language: CodeLanguage, atoms: ReadonlyMap<string, Atom>): string {
+function workflowFunctionName(name: string, language: CodeLanguage, atoms: ReadonlyMap<string, Atom>): string {
   return functionIdentifiers(language, atoms).take(name, 'workflow')
 }
 

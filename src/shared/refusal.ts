@@ -73,9 +73,6 @@ export type WorkflowRefusal =
   /** 整图分析给出了严重程度为 error 的诊断。 */
   | { readonly code: 'diagnostic'; readonly diagnostic: WorkflowDiagnostic }
 
-/** 拒绝的类别。 */
-export type WorkflowRefusalCode = WorkflowRefusal['code']
-
 /** 引擎拒绝一个作者能自己改正的请求时抛出；信息是 {@link describeRefusal} 的中文说明。 */
 export class WorkflowRefusalError extends Error {
   /** @param refusal - 拒绝的类别与事实。 */
@@ -100,7 +97,7 @@ const END = { source: '源', target: '目标' } as const
  * @param refusal - 拒绝。
  * @returns 一句话说明。
  */
-export function describeRefusal(refusal: WorkflowRefusal): string {
+function describeRefusal(refusal: WorkflowRefusal): string {
   switch (refusal.code) {
     case 'name-taken':
       return `工作流名称 "${refusal.name}" 已存在`

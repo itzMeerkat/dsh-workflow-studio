@@ -43,8 +43,7 @@ export async function askUser(
   requestId: string,
   questions: readonly AskUserQuestionItem[],
 ): Promise<AskUserQuestionAnswer> {
-  // 请求和答案都是 JSON 对象；声明类型没有索引签名，断言只让它们满足 JsonValue。
-  const result = await context.awaitSignal(requestId, questionsRequest(questions) as unknown as JsonValue)
+  const result = await context.awaitSignal(requestId, toJsonValue(questionsRequest(questions), 'request'))
   return parseAnswer(questions, result)
 }
 
@@ -72,7 +71,7 @@ export function questionsRequest(questions: readonly AskUserQuestionItem[]): Que
   })
   return {
     kind: QUESTIONS_KIND,
-    questions: toJsonValue(questions, 'questions') as unknown as AskUserQuestionItem[],
+    questions: structuredClone([...questions]),
   }
 }
 
@@ -107,7 +106,7 @@ export function requestQuestions(request: JsonValue): AskUserQuestionItem[] | un
 export function validateQuestionsSignal(request: JsonValue, result: unknown): JsonValue {
   const questions = requestQuestions(request)
   if (questions === undefined) throw new TypeError('请求不是 questions 信号')
-  return parseAnswer(questions, result) as unknown as JsonValue
+  return toJsonValue(parseAnswer(questions, result), 'result')
 }
 
 const answerSchema = z.object({

@@ -14,6 +14,7 @@ import { CODE_LANGUAGES, languageOf } from './shared/language.ts'
 import { RenderError, renderWorkflow } from './shared/source.ts'
 import { RunId, type JsonObject, type NodeTypeSummary } from './shared/types.ts'
 import { toJsonObject } from './shared/json.ts'
+import { refuse } from './shared/refusal.ts'
 import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 
 /**
@@ -145,7 +146,7 @@ export function registerWorkflowTools(ctx: Context): void {
     },
     async execute(args, _exec) {
       const summary = engine.findByName(args.name)
-      if (summary === undefined) throw new Error(`未找到工作流: ${args.name}`)
+      if (summary === undefined) refuse({ code: 'workflow-missing', workflow: args.name })
       const definition = engine.get(summary.id)!
       const language = languageOf(definition)
       const types = catalog()
@@ -186,9 +187,7 @@ export function registerWorkflowTools(ctx: Context): void {
     },
     async execute(args, _exec) {
       const summary = engine.findByName(args.name)
-      if (summary === undefined) {
-        throw new Error(`工作流 "${args.name}" 未找到`)
-      }
+      if (summary === undefined) refuse({ code: 'workflow-missing', workflow: args.name })
       const run = engine.start(summary.id, workflowInputValues(args.inputs))
       return { runId: run.runId, status: 'running' }
     },
@@ -232,7 +231,7 @@ export function registerWorkflowTools(ctx: Context): void {
     },
     async execute(args, _exec) {
       const result = engine.getRun(RunId(args.runId))
-      if (result === undefined) throw new Error(`运行 ${args.runId} 不存在`)
+      if (result === undefined) refuse({ code: 'run-missing', run: args.runId })
       return {
         runId: result.runId,
         name: result.definition.name,

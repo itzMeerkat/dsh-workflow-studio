@@ -5,6 +5,7 @@ import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { useState } from 'react'
 import { requestQuestions } from '../shared/questions.ts'
+import { toJsonValue } from '../shared/json.ts'
 import type { JsonValue } from '../shared/types.ts'
 import type { NS, Translate } from './locale.ts'
 import { buildAnswer, isAnswerComplete, type AnswerDraft } from './runs-model.ts'
@@ -40,8 +41,7 @@ export function QuestionsRequestForm({
       className={css.questionCard}
       onSubmit={(event) => {
         event.preventDefault()
-        // 答案是 JSON 对象；声明类型没有索引签名，断言只让它满足 JsonValue。
-        submit(buildAnswer(questions, draft) as unknown as JsonValue)
+        submit(toJsonValue(buildAnswer(questions, draft), 'answer'))
       }}
     >
       <p className={css.questionSource}>{t('questions.title')} · {t('questions.from')} {nodeLabel}</p>

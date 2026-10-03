@@ -8,11 +8,12 @@ import type {
   WorkflowNodeExecutor, WorkflowRunStatus,
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
-import { assertNever, messageOf } from './shared/errors.ts'
+import { messageOf } from './shared/errors.ts'
 import { execSourcePin, inboundEdges, nodeExecPins, type InboundEdges } from './shared/graph.ts'
 import { execKindOf } from './flow-nodes.ts'
 import { enclosingEntries } from './subworkflow.ts'
-import { TERMINAL_NODE_STATUSES, cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
+import { cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
+import { TERMINAL_NODE_STATUSES } from './shared/types.ts'
 
 /** 一次调度结束时的运行状态与原因。 */
 export interface RunOutcome {

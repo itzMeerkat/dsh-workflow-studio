@@ -16,7 +16,7 @@ import type {
   DagWorkflowDefinition, JsonObject, JsonValue, NodeId, WorkflowSummary, WorkflowRunSummary, WorkflowRunRecord,
   WorkflowNodeExecutor,
 } from './shared/types.ts'
-import { WorkflowId, RunId } from './shared/types.ts'
+import { TERMINAL_STATUSES, WorkflowId, RunId } from './shared/types.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import { execKindOf, registerBuiltinNodes } from './flow-nodes.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf } from './shared/subworkflow.ts'
@@ -27,7 +27,7 @@ import { resolveExecutors, validateWorkflow } from './validation.ts'
 import { uniqueWorkflowSlug } from './shared/slug.ts'
 import { withRunInputs } from './shared/workflow-boundary.ts'
 import {
-  TERMINAL_STATUSES, cancelRemaining, createRunState, nodeState, releasePauseWaiters, runInfo,
+  cancelRemaining, createRunState, nodeState, releasePauseWaiters, runInfo,
   summaryOfRecord, toRunRecord, type RunState,
 } from './run-state.ts'
 import { RunExecutor, type RunHost, type RunOutcome } from './run-executor.ts'

@@ -11,11 +11,11 @@ import type {
 /** 每个节点的执行输入引脚名；执行边默认连到该引脚。 */
 export const EXEC_RUN_PIN = 'run'
 
-/** 引擎自有的条件分支节点的类型名。 */
-export const BRANCH_TYPE = 'branch'
-
 /** 节点完成时触发的执行输出引脚名；执行边默认由该引脚引出。 */
 export const EXEC_THEN_PIN = 'then'
+
+/** 引擎自有的条件分支节点的类型名。 */
+export const BRANCH_TYPE = 'branch'
 
 /**
  * 边是否为执行边。

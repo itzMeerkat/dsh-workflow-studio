@@ -18,7 +18,7 @@ import {
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider, type DagEngineConfig } from '../src/engine-provider.ts'
 import { WorkflowFiles } from '../src/workflow-files.ts'
-import type { RunId, WorkflowNodeExecutor, WorkflowRunRecord } from '../src/shared/types.ts'
+import { TERMINAL_STATUSES, type RunId, type WorkflowNodeExecutor, type WorkflowRunRecord } from '../src/shared/types.ts'
 
 /** 一组测试共享的 Host 与临时目录；`cleanup()` 在 afterEach 中调用。 */
 export class TestHosts {
@@ -90,7 +90,7 @@ export class TestHosts {
  */
 export function runEnded(ctx: Context, runId: RunId): Promise<WorkflowRunRecord> {
   const current = ctx.dagEngine.getRun(runId)
-  if (current !== undefined && ['completed', 'failed', 'cancelled'].includes(current.status)) {
+  if (current !== undefined && TERMINAL_STATUSES.has(current.status)) {
     return Promise.resolve(current)
   }
   return new Promise((resolve) => {

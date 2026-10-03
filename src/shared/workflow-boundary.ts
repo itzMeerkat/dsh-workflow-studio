@@ -92,7 +92,7 @@ export function withRunInputs(
  * @returns 每个声明端口一个值。
  * @throws 提供了未声明的输入，或某个既未提供又没有默认值的输入缺失时。
  */
-export function resolveWorkflowInputs(
+function resolveWorkflowInputs(
   ports: readonly PortDefinition[],
   supplied: JsonObject,
 ): JsonObject {

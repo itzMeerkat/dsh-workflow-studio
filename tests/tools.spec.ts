@@ -106,7 +106,7 @@ describe('workflow tools', () => {
 
     await assert.rejects(
       async () => run.execute({ name: 'missing' }, {}),
-      /工作流 "missing" 未找到/,
+      { refusal: { code: 'workflow-missing', workflow: 'missing' } },
     )
 
     fixture.dispose()

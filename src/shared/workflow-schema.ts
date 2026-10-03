@@ -44,7 +44,7 @@ const nonEmptyString = z.string().refine(value => value.trim() !== '', {
 })
 
 /** 一个工作流端口的 JSON 表示。 */
-export const workflowPortSchema = declared<PortDefinition>()(z.object({
+const workflowPortSchema = declared<PortDefinition>()(z.object({
   name: nonEmptyString,
   type: nonEmptyString,
   description: nonEmptyString.optional(),
@@ -56,7 +56,7 @@ export const workflowPortSchema = declared<PortDefinition>()(z.object({
 const controlIdentity = { name: nonEmptyString, label: nonEmptyString }
 
 /** 节点卡片配置控件的 JSON 表示。 */
-export const nodeControlSchema = declared<NodeControlDefinition>()(z.discriminatedUnion('kind', [
+const nodeControlSchema = declared<NodeControlDefinition>()(z.discriminatedUnion('kind', [
   z.object({
     ...controlIdentity,
     kind: z.literal('number'),
@@ -88,7 +88,7 @@ const editorPosition = z.object({
 })
 
 /** 一个工作流节点的 JSON 表示。 */
-export const workflowNodeSchema = declared<DagNodeDefinition>()(z.object({
+const workflowNodeSchema = declared<DagNodeDefinition>()(z.object({
   id: nonEmptyString,
   type: nonEmptyString,
   label: nonEmptyString.optional(),
@@ -109,13 +109,13 @@ const edgeIdentity = {
 }
 
 /** 一条工作流边的 JSON 表示；`kind` 决定端口名属于数据端口还是执行引脚。 */
-export const workflowEdgeSchema = declared<DagEdgeDefinition>()(z.discriminatedUnion('kind', [
+const workflowEdgeSchema = declared<DagEdgeDefinition>()(z.discriminatedUnion('kind', [
   z.object({ ...edgeIdentity, kind: z.literal('data') }),
   z.object({ ...edgeIdentity, kind: z.literal('exec') }),
 ]))
 
 /** 工作流种类的 JSON schema。 */
-export const workflowKindSchema = z.enum(['run', 'code'])
+const workflowKindSchema = z.enum(['run', 'code'])
 
 /** 完整工作流定义的持久化和 Remote JSON schema。 */
 export const workflowDefinitionSchema = declared<DagWorkflowDefinition>()(z.object({
