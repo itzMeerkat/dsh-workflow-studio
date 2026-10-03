@@ -13,6 +13,7 @@ import {
   CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, atomOf, codeLanguageOf, codeOf, codePortSides, typeName, type Atom, type CodeLanguage,
   type Language, type Signature,
 } from './language.ts'
+import { BRANCH_TYPE } from './graph.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf, workflowSignature } from './subworkflow.ts'
 import { SWITCH_DEFAULT_PIN, SWITCH_TYPE, switchCases } from './switch.ts'
 import type { NodeId, PortDefinition, PortType } from './types.ts'
@@ -20,7 +21,7 @@ import { assertNever } from './errors.ts'
 
 /** 一种语言写不出的图，`node` 是需要修改的节点。 */
 export type RenderFault =
-  /** 条件块的守卫节点不是决策节点，它的引脚不对应任何表达式。 */
+  /** `code` 工作流中条件块的守卫节点不是 branch 或 switch，它的引脚不对应任何表达式。 */
   | { readonly code: 'not-a-decision'; readonly node: NodeId }
   /** 决策节点的条件输入没有接线。 */
   | { readonly code: 'no-condition'; readonly node: NodeId }
@@ -358,7 +359,8 @@ function codeContent(ir: WorkflowIr, language: CodeLanguage, callees: Callees): 
       return []
     },
     condition(gate, pin) {
-      if (gate.execKind !== 'decision') throw new RenderError({ code: 'not-a-decision', node: gate.node })
+      // 只有 branch 的条件是一个表达式；switch 写成 switch 语句，不经过这里。
+      if (gate.type !== BRANCH_TYPE) throw new RenderError({ code: 'not-a-decision', node: gate.node })
       const source = gate.args[0]
       if (source === undefined) throw new RenderError({ code: 'no-condition', node: gate.node })
       return pin === gate.pins[0] ? valueOf(source.value) : fill(language.negation, { condition: valueOf(source.value) })

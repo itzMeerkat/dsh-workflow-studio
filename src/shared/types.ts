@@ -360,6 +360,11 @@ export interface WorkflowNodeExecutor {
    * 声明多个引脚的节点通过 {@link NodeExecutionResult.next} 选择本次触发哪些。
    */
   readonly execOutputs?: readonly string[]
+  /**
+   * 节点每次完成恰好触发 {@link execOutputs} 中的一个，例如审批的批准或拒绝。为 true 时节点是决策节点，静态分析据此认定
+   * 这些引脚互斥；引擎在运行时检查，触发的引脚不是恰好一个时节点失败。需要声明至少两个执行输出引脚。
+   */
+  readonly exclusiveExecOutputs?: boolean
   /** 浏览器节点卡片直接渲染的配置控件。 */
   readonly controls?: readonly NodeControlDefinition[]
   /** 节点实例可以声明的同型可变输入端口约束。 */
@@ -396,7 +401,8 @@ export interface WorkflowNodeExecutor {
  * - `decision`：AND 连接，完成时只触发已声明引脚中的一个，因此这些引脚互斥。
  * - `join`：OR 连接，任一入执行边触发即执行。
  *
- * 该值由引擎按执行器实例身份判定并写入目录，节点插件无法自行声明。
+ * 该值由引擎判定并写入目录：`join` 只属于引擎自有的 merge 节点，按实例身份判断；`decision` 属于引擎的 branch、switch，
+ * 以及声明了 {@link WorkflowNodeExecutor.exclusiveExecOutputs} 的节点。
  */
 export type NodeExecKind = 'plain' | 'decision' | 'join'
 

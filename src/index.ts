@@ -58,7 +58,7 @@ export type { QuestionsRequest } from './shared/questions.ts'
 export { toJsonValue, toJsonObject } from './shared/json.ts'
 export { assertNever, messageOf } from './shared/errors.ts'
 export {
-  EXEC_RUN_PIN, EXEC_THEN_PIN, execOutputPins, execSourcePin, execTargetPin, isDataEdge, isExecEdge,
+  BRANCH_TYPE, EXEC_RUN_PIN, EXEC_THEN_PIN, execOutputPins, execSourcePin, execTargetPin, isDataEdge, isExecEdge,
 } from './shared/graph.ts'
 export { WorkflowNode } from './node.ts'
 export { BRANCH_FALSE_PIN, BRANCH_TRUE_PIN, BranchNode, MergeNode, SwitchNode } from './flow-nodes.ts'

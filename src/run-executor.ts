@@ -389,7 +389,9 @@ export class RunExecutor {
   }
 }
 
-/** 节点返回结果对应的结束状态；输出须恰为已声明端口的 JSON 值，触发的引脚须已声明，否则节点失败。 */
+/**
+ * 节点返回结果对应的结束状态；输出须恰为已声明端口的 JSON 值，触发的引脚须已声明，决策节点须恰好触发一个，否则节点失败。
+ */
 function resultEnd(node: DagNodeDefinition, executor: WorkflowNodeExecutor, result: NodeExecutionResult): NodeEnd {
   const declared = (node.outputs ?? executor.outputs ?? []).map(port => port.name)
   const undeclared = Object.keys(result.outputs).find(name => !declared.includes(name))
@@ -403,6 +405,9 @@ function resultEnd(node: DagNodeDefinition, executor: WorkflowNodeExecutor, resu
   const unknown = fired.find(pin => !pins.includes(pin))
   if (unknown !== undefined) {
     return { status: 'failed', error: `节点 ${node.id} 触发未声明的执行输出引脚 ${unknown}` }
+  }
+  if (execKindOf(executor) === 'decision' && fired.length !== 1) {
+    return { status: 'failed', error: `决策节点 ${node.id} 必须恰好触发一个执行输出引脚，实际触发 ${fired.length} 个` }
   }
   try {
     return { status: 'completed', outputs: toJsonObject(result.outputs, `节点 ${node.id} 的输出`), fired: [...fired] }

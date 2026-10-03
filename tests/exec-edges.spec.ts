@@ -210,10 +210,19 @@ describe('分支、合并与输出完整性', () => {
         /完成时未产生输出端口 output/,
       ],
       [[], () => ({ outputs: {}, next: ['nope'] }), /触发未声明的执行输出引脚 nope/],
+      // 声明了互斥引脚的决策节点省略 next 就触发了两个。
+      [[], () => ({ outputs: {} }), /决策节点 o 必须恰好触发一个执行输出引脚，实际触发 2 个/],
     ]
     for (const [outputs, execute, message] of offenders) {
       const offender: WorkflowNodeExecutor = {
-        type: 'offender', label: 'Offender', description: 'Breaks one completion rule', inputs: [], outputs, execute,
+        type: 'offender',
+        label: 'Offender',
+        description: 'Breaks one completion rule',
+        inputs: [],
+        outputs,
+        execOutputs: ['yes', 'no'],
+        exclusiveExecOutputs: true,
+        execute,
       }
       const { ctx, engine } = await hosts.start(await hosts.root(), [offender])
       const id = await engine.save(workflow({ o: 'offender' }, []))

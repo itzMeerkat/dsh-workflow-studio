@@ -32,6 +32,19 @@ describe('WorkflowNodeRegistry', () => {
     return new WorkflowNodeRegistry(ctx)
   }
 
+  it('声明互斥执行输出引脚的节点是决策节点，且至少要有两个引脚', () => {
+    const reg = registry()
+    reg.register(executor('decide', { execOutputs: ['yes', 'no'], exclusiveExecOutputs: true }), 'test-plugin')
+    reg.register(executor('fan', { execOutputs: ['left', 'right'] }), 'test-plugin')
+    const kinds = new Map(reg.listTypes().map(type => [type.type, type.execKind]))
+    assert.equal(kinds.get('decide'), 'decision')
+    assert.equal(kinds.get('fan'), 'plain')
+    assert.throws(
+      () => reg.register(executor('lonely', { execOutputs: ['only'], exclusiveExecOutputs: true }), 'test-plugin'),
+      /没有声明至少两个执行输出引脚/,
+    )
+  })
+
   it('注册后可按类型取回，重复类型和空来源插件名被拒绝', () => {
     const reg = registry()
     const node = executor('test-node')

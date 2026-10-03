@@ -47,7 +47,7 @@ export function describeDiagnostic(diagnostic: WorkflowDiagnostic): string {
 export function describeRenderFault(fault: RenderFault): string {
   switch (fault.code) {
     case 'not-a-decision':
-      return `节点 ${fault.node} 不是决策节点，它守卫的分支写不成条件：改用 branch 分叉`
+      return `节点 ${fault.node} 不是 branch 或 switch，它守卫的分支在代码中写不成条件：改用 branch 分叉`
     case 'no-condition':
       return `决策节点 ${fault.node} 的条件输入没有接线`
     case 'multiline-condition':

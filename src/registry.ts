@@ -57,6 +57,9 @@ export class WorkflowNodeRegistry extends Service {
       && (!Number.isInteger(executor.variadicInputs.min) || executor.variadicInputs.min < 1)) {
       throw new Error(`节点类型 "${type}" 的可变输入最小数量必须为正整数`)
     }
+    if (executor.exclusiveExecOutputs === true && (executor.execOutputs?.length ?? 0) < 2) {
+      throw new Error(`节点类型 "${type}" 声明了互斥的执行输出引脚，但没有声明至少两个执行输出引脚`)
+    }
     const registration = { executor, sourcePlugin }
     this.executors.set(type, registration)
     this.ctx.logger.info(`[workflow] 注册节点: ${type}`)

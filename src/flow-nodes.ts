@@ -10,6 +10,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createCodeNodes } from './code-nodes.ts'
 import { WorkflowNode, type WorkflowNodePorts } from './node.ts'
+import { BRANCH_TYPE } from './shared/graph.ts'
 import { SUBWORKFLOW_TYPE } from './shared/subworkflow.ts'
 import { SWITCH_DEFAULT_PIN, SWITCH_TYPE, switchCases, switchPin } from './shared/switch.ts'
 import { SUBWORKFLOW_DEFAULTS, SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE } from './subworkflow.ts'
@@ -33,7 +34,7 @@ export const BRANCH_FALSE_PIN = 'false'
  * 它不产生数据；比较和判断由上游节点完成，本节点只把布尔结果变成执行流的分叉。
  */
 export class BranchNode implements WorkflowNodeExecutor {
-  readonly type = 'branch'
+  readonly type = BRANCH_TYPE
   readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '条件分支'
   readonly description = '按布尔输入触发 true 或 false 执行引脚'
@@ -204,12 +205,13 @@ const mergeNode = new MergeNode()
 /**
  * 执行器的执行语义。
  *
- * 按实例身份判断，因此第三方节点即使使用相同类型名或字段也无法获得 `decision` 或 `join` 语义。
+ * `join` 按实例身份判断，因此第三方节点即使使用相同类型名或字段也无法获得 OR 连接语义。`decision` 还属于声明了
+ * {@link WorkflowNodeExecutor.exclusiveExecOutputs} 的节点，引擎在运行时检查它们恰好触发一个引脚，分析的互斥结论因此成立。
  * @param executor - 运行中解析到的节点执行器。
  */
 export function execKindOf(executor: WorkflowNodeExecutor): NodeExecKind {
   if (executor === mergeNode) return 'join'
-  if (executor === branchNode || executor === switchNode) return 'decision'
+  if (executor === branchNode || executor === switchNode || executor.exclusiveExecOutputs === true) return 'decision'
   return 'plain'
 }
 
