@@ -7,7 +7,7 @@
 
 import { CODE_ATOM_TYPE, atomOf, signaturePorts, type Atom, type Signature } from './language.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf, workflowSignature } from './subworkflow.ts'
-import type { DagNodeDefinition, DagWorkflowDefinition, WorkflowId } from './types.ts'
+import type { DagNodeDefinition, DagWorkflowDefinition, PortDefinition, WorkflowId } from './types.ts'
 
 /** 一个工作流的节点能调用的一切。 */
 export interface Callees {
@@ -55,27 +55,37 @@ export function calleeSignature(node: DagNodeDefinition, callees: Callees): Sign
  * 被调用者不在 `callees` 中时保留节点原有的端口，接线不因目录暂时读不到或列表尚未加载而丢失。
  * @param definition - 工作流定义。
  * @param callees - 能调用的一切。
- * @returns 调用节点的端口与被调用者签名一致的定义。
+ * @returns 调用节点的端口与被调用者签名一致的定义；端口已经一致时就是 `definition` 本身，调用方可以按引用判断有没有变化。
  */
 export function withCallees(definition: DagWorkflowDefinition, callees: Callees): DagWorkflowDefinition {
+  let changed = false
   const nodes = definition.nodes.map((node) => {
     const signature = calleeSignature(node, callees)
-    return signature === undefined
-      ? node
-      : { ...node, inputs: signaturePorts(signature.parameters), outputs: signaturePorts(signature.results) }
+    if (signature === undefined) return node
+    const inputs = signaturePorts(signature.parameters)
+    const outputs = signaturePorts(signature.results)
+    if (samePorts(node.inputs, inputs) && samePorts(node.outputs, outputs)) return node
+    changed = true
+    return { ...node, inputs, outputs }
   })
   const byId = new Map(nodes.map(node => [node.id, node]))
   const declares = (node: DagNodeDefinition, ports: DagNodeDefinition['inputs'], port: string): boolean =>
     !isCaller(node) || (ports ?? []).some(candidate => candidate.name === port)
-  return {
-    ...definition,
-    nodes,
-    edges: definition.edges.filter((edge) => {
-      if (edge.kind === 'exec') return true
-      const source = byId.get(edge.source)!
-      const target = byId.get(edge.target)!
-      return declares(source, source.outputs, edge.sourcePort ?? 'output')
-        && declares(target, target.inputs, edge.targetPort ?? 'input')
-    }),
-  }
+  const edges = definition.edges.filter((edge) => {
+    if (edge.kind === 'exec') return true
+    const source = byId.get(edge.source)!
+    const target = byId.get(edge.target)!
+    return declares(source, source.outputs, edge.sourcePort ?? 'output')
+      && declares(target, target.inputs, edge.targetPort ?? 'input')
+  })
+  return changed || edges.length !== definition.edges.length ? { ...definition, nodes, edges } : definition
+}
+
+/** 两组端口的名称、类型和必需性逐个相同；签名给出的端口只有这三项。 */
+function samePorts(current: readonly PortDefinition[] | undefined, next: readonly PortDefinition[]): boolean {
+  return current !== undefined && current.length === next.length && current.every((port, index) => {
+    const other = next[index]!
+    return port.name === other.name && port.type === other.type && (port.required ?? true) === (other.required ?? true)
+      && port.description === undefined && port.display === undefined && port.default === undefined
+  })
 }

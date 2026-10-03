@@ -15,19 +15,13 @@ import {
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { XYPosition } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { messageOf } from '../shared/errors.ts'
 import { withCallees, type Callees } from '../shared/callees.ts'
 import { SUBWORKFLOW_TYPE, embedFault } from '../shared/subworkflow.ts'
-import {
-  WorkflowId, type DagWorkflowDefinition, type JsonObject, type NodeTypeSummary, type SavedWorkflow, type WorkflowKind,
-  type WorkflowStudioSnapshot,
-} from '../shared/types.ts'
+import { WorkflowId, type JsonObject, type NodeTypeSummary, type WorkflowKind } from '../shared/types.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, workflowInputPorts,
 } from '../shared/workflow-boundary.ts'
-import {
-  CODE_LANGUAGES, atomLibrary, languageOf, type AtomLibrary,
-} from '../shared/language.ts'
+import { languageOf } from '../shared/language.ts'
 import { analyzeEditorGraph } from './analysis-model.ts'
 import { CARD_WIDTH } from './graph-model.ts'
 import { AtomsPanel } from './AtomsPanel.tsx'
@@ -40,21 +34,18 @@ import {
   appendAtomNode,
   appendEditorNode,
   appendSubworkflowNode,
-  nextWorkflowName,
-  openFault,
   type EmbedChoice,
-  type WorkflowRow,
 } from './model.ts'
-import { failureText } from './failure-text.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import { RunDialog } from './RunDialog.tsx'
 import { RunsView, type RequestRenderer } from './RunsView.tsx'
 import { isActiveRun, runRecordsByNode } from './runs-model.ts'
-import { downloadWorkflow, importedWorkflowName, parseImportedWorkflow } from './transfer.ts'
+import { downloadWorkflow } from './transfer.ts'
+import { useAtomLibrary } from './use-atom-library.ts'
 import { useRuns } from './use-runs.ts'
+import { useWorkflowEditor } from './use-workflow-editor.ts'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
 import { WorkflowSettings } from './WorkflowSettings.tsx'
-import { boundaryNode } from './workflow-ports.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 type View = 'canvas' | 'execution' | 'source' | 'runs'
@@ -78,86 +69,27 @@ export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
  * workflow has the Runs view and the Run action, a code workflow has its language and atom folder instead.
  */
 export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudioPanelProps) {
-  const [snapshot, setSnapshot] = useState<WorkflowStudioSnapshot>({ workflows: [], nodeTypes: [] })
-  const [selectedId, setSelectedId] = useState<string>()
-  const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1', 'run'))
-  // Incremented when the canvas must discard its local graph and reload `definition`.
-  const [revision, setRevision] = useState(0)
+  const editor = useWorkflowEditor(remote, t)
+  const { snapshot, selectedId, definition, revision, phase, notice, setNotice, replace } = editor
   // The view last chosen; a workflow of a kind without that view shows the canvas instead.
   const [chosenView, setView] = useState<View>('canvas')
-  const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'running'>('loading')
-  const [notice, setNotice] = useState<string>()
   const { kind } = definition
   // Code workflows compile instead of running, so they have no runs to start or show.
   const runnable = kind === 'run'
   const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
   const view = views.some(entry => entry.view === chosenView) ? chosenView : 'canvas'
-  // A failed Remote call shows as the notice, a refusal worded in the active locale.
-  const fail = (failure: unknown): void => { setNotice(failureText(failure, t)) }
-  const runs = useRuns(remote, fail, () => { setNotice(undefined) })
+  const runs = useRuns(remote, editor.fail, () => { setNotice(undefined) })
+  const atoms = useAtomLibrary(remote, definition, editor.fail)
+  const { library } = atoms
   // Set while the run dialog is collecting values for the workflow's declared inputs.
   const [runPrompt, setRunPrompt] = useState(false)
-  // The atoms read from the workflow's atom folder; reading again after a refresh picks up edited files.
-  const [library, setLibrary] = useState<AtomLibrary>()
-  const [atomsRead, setAtomsRead] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(true)
   const [atomsOpen, setAtomsOpen] = useState(true)
   const importInput = useRef<HTMLInputElement>(null)
   const viewCenter = useRef<() => XYPosition>()
 
-  const replaceDefinition = (next: DagWorkflowDefinition): void => {
-    setDefinition(next)
-    setRevision(value => value + 1)
-    setNotice(undefined)
-  }
-
-  /** The definition, or an error naming why the panel cannot edit it. */
-  const editable = (next: DagWorkflowDefinition): DagWorkflowDefinition => {
-    const fault = openFault(next)
-    if (fault !== undefined) throw new Error(`${t(fault.key)} ${fault.detail}`)
-    return next
-  }
-
-  const select = (workflow: WorkflowRow): void => {
-    try {
-      replaceDefinition(editable(workflow.definition))
-      setSelectedId(workflow.id)
-    } catch (error: unknown) {
-      setNotice(messageOf(error))
-    }
-  }
-
-  const load = async (preferredId?: string): Promise<void> => {
-    setAtomsRead(value => value + 1)
-    setPhase('loading')
-    setNotice(undefined)
-    const next = await callRemote(() => remote.snapshot(), fail)
-    if (next !== undefined) {
-      setSnapshot(next)
-      const selected = next.workflows.find(row => row.id === preferredId)
-        ?? next.workflows.find(row => row.id === selectedId)
-        ?? next.workflows[0]
-      if (selected !== undefined) select(selected)
-    }
-    setPhase('ready')
-  }
-
-  useEffect(() => {
-    void load()
-  }, [])
-
   const language = languageOf(definition)
   const atomSyntax = language.functions?.atoms
-  useEffect(() => {
-    const folder = definition.atomFolder
-    // The atoms panel shows the folder as being read until its atoms arrive.
-    setLibrary(undefined)
-    if (folder === undefined || atomSyntax === undefined) return
-    let current = true
-    void callRemote(() => remote.atomFiles(folder, definition.language!), fail)
-      .then((files) => { if (current && files !== undefined) setLibrary(atomLibrary(folder, files, atomSyntax)) })
-    return () => { current = false }
-  }, [definition.atomFolder, definition.language, atomsRead])
 
   // The saved workflows, which subworkflow nodes link to by ID.
   const saved = useMemo(
@@ -174,89 +106,36 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   // again, or a workflow opened on them may move those ports.
   useEffect(() => {
     const signed = withCallees(definition, callees)
-    if (JSON.stringify(signed) !== JSON.stringify(definition)) replaceDefinition(signed)
+    if (signed !== definition) replace(signed)
   }, [callees, revision])
 
-  /** Save the edited definition; failures show as the notice. */
-  const persist = async (): Promise<SavedWorkflow | undefined> => {
-    const result = await callRemote(
-      () => selectedId === undefined ? remote.save(definition) : remote.update(selectedId, definition),
-      fail,
-    )
-    if (result !== undefined) setSelectedId(result.workflowId)
-    return result
-  }
-
-  const save = async (): Promise<void> => {
-    setPhase('saving')
-    setNotice(undefined)
-    const result = await persist()
-    if (result === undefined) {
-      setPhase('ready')
-      return
-    }
-    // Saving a workflow with an atom folder also writes its function into that folder, in a file named after its ID.
-    const written = definition.atomFolder === undefined || atomSyntax === undefined
-      ? undefined
-      : `${result.workflowId}${atomSyntax.outputSuffix}`
-    await load(result.workflowId)
-    const saved = written === undefined
-      ? t('notice.saved')
-      : result.sourceError === undefined
-        ? `${t('notice.savedFile')} ${written}`
-        : `${t('notice.savedNoFile')} ${result.sourceError}`
-    setNotice([saved, ...(result.embedderErrors ?? []).map(({ name, error }) => `${t('notice.embedderNoFile')} ${name}: ${error}`)].join(' '))
-  }
-
-  /** Delete the saved workflow being edited, then open another, or a new one when none is left. */
-  const remove = async (id: string): Promise<void> => {
-    setPhase('saving')
-    setNotice(undefined)
-    const deleted = await callRemote(() => remote.delete(id), fail)
-    if (deleted === undefined) {
-      setPhase('ready')
-      return
-    }
-    setSelectedId(undefined)
-    replaceDefinition(emptyDefinition(nextWorkflowName(snapshot.workflows, kind), kind))
-    await load()
-    setNotice(t('notice.deleted'))
+  /** Read the saved workflows and the atom folder again. */
+  const refresh = (): void => {
+    atoms.reload()
+    void editor.load()
   }
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
   const startRun = async (inputs: JsonObject): Promise<void> => {
     setRunPrompt(false)
-    setPhase('running')
+    editor.setPhase('running')
     setNotice(undefined)
-    const result = await persist()
+    const result = await editor.persist()
     const runId = result === undefined
       ? undefined
-      : await callRemote(() => remote.start(result.workflowId, inputs), fail)
+      : await callRemote(() => remote.start(result.workflowId, inputs), editor.fail)
     if (runId !== undefined) {
       runs.setFilter('workflow')
       setView('runs')
       runs.select(runId)
     }
-    setPhase('ready')
+    editor.setPhase('ready')
   }
 
   /** A workflow that declares inputs asks for their values first; one that declares none just runs. */
   const run = (): void => {
     if (workflowInputPorts(definition).length > 0) setRunPrompt(true)
     else void startRun({})
-  }
-
-  /** Load one picked file into the editor as an unsaved workflow. */
-  const importFile = async (file: File): Promise<void> => {
-    try {
-      const imported = editable(parseImportedWorkflow(await file.text()))
-      setSelectedId(undefined)
-      replaceDefinition({ ...imported, name: importedWorkflowName(imported.name, workflows) })
-      setView('canvas')
-      setNotice(t('notice.imported'))
-    } catch (error: unknown) {
-      setNotice(messageOf(error))
-    }
   }
 
   const showAllRuns = (): void => {
@@ -307,7 +186,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             value={definition.name}
             readOnly={view !== 'canvas'}
             onChange={(event) => {
-              setDefinition({ ...definition, name: event.currentTarget.value })
+              editor.edit({ ...definition, name: event.currentTarget.value })
             }}
           />
           <WorkflowPicker
@@ -315,11 +194,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             workflows={workflows}
             selectedId={selectedId}
             t={t}
-            onCreate={(created) => {
-              setSelectedId(undefined)
-              replaceDefinition(emptyDefinition(nextWorkflowName(workflows, created), created))
-            }}
-            onSelect={select}
+            onCreate={editor.create}
+            onSelect={editor.select}
           />
           <div className={css.viewTabs} role="tablist" aria-label={t('view.label')}>
             {views.map(({ view: tab, Icon }) => (
@@ -341,8 +217,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
               nodeTypes={addableNodeTypes}
               workflows={embedChoices}
               t={t}
-              onSelect={(nodeType: NodeTypeSummary) => { replaceDefinition(appendEditorNode(definition, nodeType, placement())) }}
-              onSelectWorkflow={(row) => { replaceDefinition(appendSubworkflowNode(definition, row.id, saved.get(row.id)!, placement())) }}
+              onSelect={(nodeType: NodeTypeSummary) => { replace(appendEditorNode(definition, nodeType, placement())) }}
+              onSelectWorkflow={(row) => { replace(appendSubworkflowNode(definition, row.id, saved.get(row.id)!, placement())) }}
             />
           )}
         </div>
@@ -383,7 +259,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             variant="outline"
             icon={<IconRefreshOutlineRegular size={14} />}
             disabled={busy}
-            onClick={() => { void load() }}
+            onClick={refresh}
           >
             {t('action.refresh')}
           </Button>
@@ -396,7 +272,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
               const file = event.currentTarget.files?.[0]
               // Clear the picker so choosing the same file again still fires a change.
               event.currentTarget.value = ''
-              if (file !== undefined) void importFile(file)
+              if (file !== undefined) void editor.importFile(file).then((opened) => { if (opened) setView('canvas') })
             }}
           />
           <Button
@@ -417,7 +293,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
           >
             {t('action.export')}
           </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => { void save() }}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => { void editor.save() }}>
             {phase === 'saving' ? t('action.saving') : t('action.save')}
           </Button>
           {runnable && (
@@ -443,12 +319,12 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             library={library}
             remote={remote}
             t={t}
-            onChange={replaceDefinition}
+            onChange={replace}
             onAdd={(atom) => {
-              replaceDefinition(appendAtomNode(definition, atom, placement()))
+              replace(appendAtomNode(definition, atom, placement()))
               setView('canvas')
             }}
-            onReload={() => { setAtomsRead(value => value + 1) }}
+            onReload={atoms.reload}
             onClose={() => { setAtomsOpen(false) }}
           />
         )}
@@ -480,7 +356,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
               callees={callees}
               workflows={embeddable}
               t={t}
-              onChange={setDefinition}
+              onChange={editor.edit}
               onError={setNotice}
               viewCenter={viewCenter}
               {...(runResult === undefined ? {} : { runResult })}
@@ -514,30 +390,12 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             definition={definition}
             callees={callees}
             t={t}
-            onChange={replaceDefinition}
+            onChange={replace}
             onClose={() => { setSettingsOpen(false) }}
-            onDelete={selectedId === undefined || busy ? undefined : () => { void remove(selectedId) }}
+            onDelete={selectedId === undefined || busy ? undefined : () => { void editor.remove(selectedId) }}
           />
         )}
       </div>
     </main>
   )
-}
-
-/**
- * A new workflow, holding only its two boundary nodes.
- *
- * They are ordinary nodes, so a new workflow could start without them; seeding them means the
- * place to declare an input is on screen from the start instead of hiding in the node library.
- * @param name - The new workflow's name.
- * @param kind - The new workflow's kind; a code workflow starts in the first code language.
- */
-function emptyDefinition(name: string, kind: WorkflowKind): DagWorkflowDefinition {
-  return {
-    name,
-    kind,
-    ...(kind === 'code' ? { language: CODE_LANGUAGES[0]!.name } : {}),
-    nodes: [boundaryNode('inputs'), boundaryNode('outputs')],
-    edges: [],
-  }
 }

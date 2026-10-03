@@ -212,16 +212,20 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/client/AtomFolderDialog.tsx`](src/client/AtomFolderDialog.tsx) | The dialog that browses Host folders for an atom folder |
 | [`src/client/AtomsPanel.tsx`](src/client/AtomsPanel.tsx) | The atoms panel: the atom folder, its atoms to add, and the files that are not atoms |
 | [`src/shared/diagnostic-message.ts`](src/shared/diagnostic-message.ts) | Host wording for one diagnostic or render fault |
+| [`src/shared/refusal.ts`](src/shared/refusal.ts) | Refusals of requests an author can correct, their Host wording, and their Remote error code |
 | [`src/shared/workflow-boundary.ts`](src/shared/workflow-boundary.ts) | The boundary node types, the workflow signature they carry, and a run's input values |
 | [`src/client/index.tsx`](src/client/index.tsx) | `main` panel and sidebar registration, and Remote mounting |
 | [`src/client/locale.ts`](src/client/locale.ts) | zh and en copy for the `workflowStudio` locale namespace |
 | [`src/client/remote.ts`](src/client/remote.ts) | Remote method descriptors and the `callRemote` error helper |
-| [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | Workflow selection, save, run, and the canvas/execution/source/runs views |
+| [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | The toolbar, the views each workflow kind offers, and running a workflow |
+| [`src/client/use-workflow-editor.ts`](src/client/use-workflow-editor.ts) | The saved workflows, the open definition, and loading, saving, deleting and importing them |
+| [`src/client/use-atom-library.ts`](src/client/use-atom-library.ts) | Reading the open code workflow's atom folder |
+| [`src/client/failure-text.ts`](src/client/failure-text.ts) | Wording a failed Remote call, a refusal in the active locale |
 | [`src/client/analysis-model.ts`](src/client/analysis-model.ts) | The edited graph's diagnostics and IR, and when it cannot be analyzed |
 | [`src/client/DiagnosticsView.tsx`](src/client/DiagnosticsView.tsx) | The checks list and the marker a node card carries |
 | [`src/client/SourceView.tsx`](src/client/SourceView.tsx) | The edited graph written in its workflow's language |
 | [`src/client/Menus.tsx`](src/client/Menus.tsx) | Workflow picker and node library menus |
-| [`src/client/use-runs.ts`](src/client/use-runs.ts) | Run list polling, run selection, run controls, and signal delivery |
+| [`src/client/use-runs.ts`](src/client/use-runs.ts) | The pushed run list, run selection, run controls, and signal delivery |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | Read-only execution dependency graph and run status |
 | [`src/client/execution-layout.ts`](src/client/execution-layout.ts) | Stage band and card geometry of the execution graph |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow canvas state, node edits, and connections |

@@ -212,16 +212,20 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/client/AtomFolderDialog.tsx`](src/client/AtomFolderDialog.tsx) | 浏览 Host 目录以选择原子目录的对话框 |
 | [`src/client/AtomsPanel.tsx`](src/client/AtomsPanel.tsx) | 原子侧栏：原子目录、可添加的原子，以及不能作为原子的文件 |
 | [`src/shared/diagnostic-message.ts`](src/shared/diagnostic-message.ts) | 单条诊断或生成失败的 Host 侧文案 |
+| [`src/shared/refusal.ts`](src/shared/refusal.ts) | 作者能改正的请求被拒绝的类别、Host 文案和 Remote 错误码 |
 | [`src/shared/workflow-boundary.ts`](src/shared/workflow-boundary.ts) | 边界节点类型、它们承载的工作流签名，以及一次运行的输入值 |
 | [`src/client/index.tsx`](src/client/index.tsx) | `main` 面板和侧边栏注册，以及 Remote 挂载 |
 | [`src/client/locale.ts`](src/client/locale.ts) | `workflowStudio` 本地化命名空间的中英文文案 |
 | [`src/client/remote.ts`](src/client/remote.ts) | Remote 方法描述和 `callRemote` 错误处理函数 |
-| [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | 工作流选择、保存、运行和画布/执行顺序/源码/运行视图 |
+| [`src/client/WorkflowStudioPanel.tsx`](src/client/WorkflowStudioPanel.tsx) | 工具栏、每种工作流提供的视图，以及运行工作流 |
+| [`src/client/use-workflow-editor.ts`](src/client/use-workflow-editor.ts) | 已保存的工作流、打开的定义，以及加载、保存、删除和导入它们 |
+| [`src/client/use-atom-library.ts`](src/client/use-atom-library.ts) | 读取打开的代码工作流的原子目录 |
+| [`src/client/failure-text.ts`](src/client/failure-text.ts) | Remote 调用失败的文案，拒绝按当前语言书写 |
 | [`src/client/analysis-model.ts`](src/client/analysis-model.ts) | 正在编辑的图的诊断与 IR，以及何时无法分析 |
 | [`src/client/DiagnosticsView.tsx`](src/client/DiagnosticsView.tsx) | 检查列表与节点卡片上的标记 |
 | [`src/client/SourceView.tsx`](src/client/SourceView.tsx) | 把正在编辑的图写成工作流的语言 |
 | [`src/client/Menus.tsx`](src/client/Menus.tsx) | 工作流选择器和节点库菜单 |
-| [`src/client/use-runs.ts`](src/client/use-runs.ts) | 运行列表轮询、运行选择、运行控制和结果送达 |
+| [`src/client/use-runs.ts`](src/client/use-runs.ts) | 推送的运行列表、运行选择、运行控制和结果送达 |
 | [`src/client/ExecutionOrderView.tsx`](src/client/ExecutionOrderView.tsx) | 只读执行依赖图和运行状态 |
 | [`src/client/execution-layout.ts`](src/client/execution-layout.ts) | 执行顺序图的泳道与卡片几何布局 |
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布状态、节点编辑和连线 |

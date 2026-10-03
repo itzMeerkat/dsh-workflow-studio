@@ -145,6 +145,8 @@ describe('Go 签名', () => {
     // 最后一个 error 结果报告失败，不是结果端口。
     assert.deepEqual(signed.nodes[0]?.outputs, [{ name: 'body', type: 'string' }, { name: 'size', type: 'int' }])
     assert.equal(signed.nodes[1]?.inputs, undefined)
+    // 端口已与签名一致时返回同一个定义，调用方按引用就知道没有变化。
+    assert.equal(withCallees(signed, { atoms: library.atoms, workflows: new Map() }), signed)
 
     const renamed = withCallees(signed, { atoms: read('func Fetch(url string) (text string, size int, err error) { return "", 0, nil }').atoms, workflows: new Map() })
     assert.deepEqual(renamed.edges.map(edge => edge.id), ['e1'])
