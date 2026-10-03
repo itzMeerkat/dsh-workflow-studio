@@ -11,6 +11,7 @@ import { WorkflowNodeRegistry } from './registry.ts'
 import { DagEngineProvider, type DagEngineConfig } from './engine-provider.ts'
 import { registerWorkflowTools } from './tools.ts'
 import { WorkflowStudioController } from './controller.ts'
+import { WorkflowFiles } from './workflow-files.ts'
 import { registerWorkflowSkill } from './skill.ts'
 
 /** 插件运行所需的 Harness 服务。 */
@@ -34,6 +35,10 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   ctx.inject(['dagEngine', 'workflowNodeRegistry'], (scope) => {
+    scope.plugin(WorkflowFiles)
+  })
+
+  ctx.inject(['dagEngine', 'workflowNodeRegistry', 'workflowFiles'], (scope) => {
     scope.plugin(WorkflowStudioController)
     registerWorkflowTools(scope)
   })
@@ -84,6 +89,7 @@ export { describeDiagnostic, describeRenderFault } from './diagnostic-message.ts
 export { registerWorkflowTools } from './tools.ts'
 export { WORKFLOW_CODE_SKILL, registerWorkflowSkill } from './skill.ts'
 export { WorkflowStudioController } from './controller.ts'
+export { WorkflowFiles, workflowFilePath } from './workflow-files.ts'
 export { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 export { workflowDefinitionSchema, workflowRunRecordSchema } from './shared/workflow-schema.ts'
 export { DagEngine } from './engine.ts'

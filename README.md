@@ -204,7 +204,8 @@ Definitions returned by `get()`, run records returned by `getRun()`, and final r
 | [`src/shared/go.ts`](src/shared/go.ts) | Reading a Go function's signature |
 | [`src/code-nodes.ts`](src/code-nodes.ts) | The `code` workflow's node types, which fail when run |
 | [`src/skill.ts`](src/skill.ts) | Registering the bundled `workflow-code-atoms` skill |
-| [`src/atom-folder.ts`](src/atom-folder.ts) | Reading a workflow's atom folder, writing its function there, and listing Host folders to choose one |
+| [`src/atom-folder.ts`](src/atom-folder.ts) | Reading a workflow's atom folder, and listing Host folders to choose one |
+| [`src/workflow-files.ts`](src/workflow-files.ts) | The `workflowFiles` service: saving, renaming and deleting a workflow one operation at a time while keeping its file and its embedders' files in the atom folder current |
 | [`src/shared/subworkflow.ts`](src/shared/subworkflow.ts) | The `subworkflow` node's link, its ports, and which workflows it may embed |
 | [`src/shared/callees.ts`](src/shared/callees.ts) | Ports of nodes that call an atom or a workflow |
 | [`src/subworkflow.ts`](src/subworkflow.ts) | Expanding subworkflows when a run starts, and finding the subworkflows an expanded node sits in |

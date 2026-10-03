@@ -233,4 +233,17 @@ describe('WorkflowStudioController', () => {
       await rm(folder, { recursive: true, force: true })
     }
   })
+
+  it('同时到达的保存逐个执行，换了两次原子目录的工作流只在最后一个目录留下文件', async () => {
+    const controller = await setup()
+    const folders = await Promise.all([1, 2, 3].map(async () => mkdtemp(join(tmpdir(), 'dsh-workflow-files-'))))
+    const moved = (folder: string): string => JSON.stringify(workflow({}, [], { name: 'mover', kind: 'code', language: 'go', atomFolder: folder }))
+    try {
+      await controller.save(moved(folders[0]!))
+      await Promise.all([controller.update('mover', moved(folders[1]!)), controller.update('mover', moved(folders[2]!))])
+      assert.deepEqual(await Promise.all(folders.map(async folder => readdir(folder))), [[], [], ['mover.workflow.go']])
+    } finally {
+      await Promise.all(folders.map(async folder => rm(folder, { recursive: true, force: true })))
+    }
+  })
 })

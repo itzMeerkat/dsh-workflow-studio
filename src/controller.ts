@@ -12,7 +12,8 @@ import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 import { messageOf } from './shared/errors.ts'
 import { parseJsonObject } from './shared/json.ts'
 import { codeLanguageOf } from './shared/language.ts'
-import { deleteWithFile, listFolders, readAtomFiles, saveWithFile } from './atom-folder.ts'
+import { listFolders, readAtomFiles } from './atom-folder.ts'
+import type { WorkflowFiles } from './workflow-files.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -22,15 +23,17 @@ declare module '@deepseek-ai/cordis' {
 
 /** Host controller backing the `workflowStudio` Remote namespace. */
 export class WorkflowStudioController extends TypertRemoteService {
-  static inject = ['dagEngine', 'workflowNodeRegistry']
+  static inject = ['dagEngine', 'workflowNodeRegistry', 'workflowFiles']
 
   private readonly engine: DagEngine
   private readonly registry: WorkflowNodeRegistry
+  private readonly files: WorkflowFiles
 
   constructor(ctx: Context) {
     super(ctx, 'workflowStudioController', { namespace: 'workflowStudio' })
     this.engine = ctx.dagEngine
     this.registry = ctx.workflowNodeRegistry
+    this.files = ctx.workflowFiles
   }
 
   /**
@@ -63,7 +66,7 @@ export class WorkflowStudioController extends TypertRemoteService {
   async save(source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return JSON.stringify(await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.save(definition)))
+      return JSON.stringify(await this.files.save(definition))
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
@@ -80,8 +83,7 @@ export class WorkflowStudioController extends TypertRemoteService {
   async update(workflowId: string, source: string): Promise<string> {
     try {
       const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      const id = WorkflowId(workflowId)
-      return JSON.stringify(await saveWithFile(definition, { registry: this.registry, engine: this.engine }, () => this.engine.update(id, definition), id))
+      return JSON.stringify(await this.files.update(WorkflowId(workflowId), definition))
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }
@@ -95,7 +97,7 @@ export class WorkflowStudioController extends TypertRemoteService {
   @Remote
   async delete(workflowId: string): Promise<string> {
     try {
-      await deleteWithFile(WorkflowId(workflowId), this.engine)
+      await this.files.delete(WorkflowId(workflowId))
       return ''
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})

@@ -204,7 +204,8 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/shared/go.ts`](src/shared/go.ts) | 读 Go 函数的签名 |
 | [`src/code-nodes.ts`](src/code-nodes.ts) | `code` 工作流的节点类型，运行时失败 |
 | [`src/skill.ts`](src/skill.ts) | 注册随包的 `workflow-code-atoms` 技能 |
-| [`src/atom-folder.ts`](src/atom-folder.ts) | 读取工作流的原子目录、把它的函数写进去，以及列出可供选择的 Host 目录 |
+| [`src/atom-folder.ts`](src/atom-folder.ts) | 读取工作流的原子目录，以及列出可供选择的 Host 目录 |
+| [`src/workflow-files.ts`](src/workflow-files.ts) | `workflowFiles` 服务：逐个执行工作流的保存、改名与删除，并让它和嵌入它的工作流在原子目录中的文件保持一致 |
 | [`src/shared/subworkflow.ts`](src/shared/subworkflow.ts) | `subworkflow` 节点的链接、端口，以及它能嵌入哪些工作流 |
 | [`src/shared/callees.ts`](src/shared/callees.ts) | 调用原子或工作流的节点的端口 |
 | [`src/subworkflow.ts`](src/subworkflow.ts) | 运行开始时展开子工作流，以及找出展开后的节点所在的各层子工作流 |

@@ -1,21 +1,15 @@
 /**
- * Host 侧的原子目录：读出其中的原子，把生成的工作流函数写回目录，以及浏览器选择目录时看到的子目录。
+ * Host 侧的原子目录：读出其中的原子，以及浏览器选择目录时看到的子目录。生成的工作流函数由 `workflow-files.ts` 写回目录。
  * @module dsh-workflow-studio
  */
 
-import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
-import { describeRenderFault } from './diagnostic-message.ts'
 import type { DagEngine } from './engine.ts'
-import type { WorkflowNodeRegistry } from './registry.ts'
 import type { Callees } from './shared/callees.ts'
-import { analyzeWorkflow, indexNodeTypes } from './shared/analysis.ts'
-import { buildWorkflowIr } from './shared/ir.ts'
 import { atomLibrary, isAtomFile, languageOf, type AtomFile, type AtomLibrary, type AtomSyntax } from './shared/language.ts'
-import { RenderError, renderWorkflow } from './shared/source.ts'
-import { SUBWORKFLOW_TYPE, subworkflowOf } from './shared/subworkflow.ts'
-import type { DagWorkflowDefinition, FolderListing, SavedWorkflow, WorkflowId } from './shared/types.ts'
+import type { DagWorkflowDefinition, FolderListing } from './shared/types.ts'
 
 /**
  * 一个目录中的原子文件和类型文件，不递归，按文件名排序。
@@ -45,12 +39,6 @@ export async function workflowAtoms(definition: DagWorkflowDefinition): Promise<
   return atomLibrary(definition.atomFolder, await readAtomFiles(definition.atomFolder, syntax), syntax)
 }
 
-/** 保存工作流时用到的 Host 服务。 */
-export interface WorkflowHost {
-  readonly registry: WorkflowNodeRegistry
-  readonly engine: DagEngine
-}
-
 /**
  * 一个工作流的节点能调用的一切：它原子目录中的原子，以及已保存的工作流。
  * @param definition - 工作流定义。
@@ -64,108 +52,6 @@ export async function workflowCallees(definition: DagWorkflowDefinition, engine:
     workflows: new Map(engine.list().map(summary => [summary.id, engine.get(summary.id)!])),
     ...(library === undefined ? {} : { package: library.package }),
   }
-}
-
-/**
- * 一个工作流生成的文件在原子目录中的路径。
- * @param definition - 工作流定义。
- * @param id - 工作流 ID，也是文件名的主体。
- * @returns 路径；工作流没有原子目录时为 undefined。
- */
-export function workflowFilePath(definition: DagWorkflowDefinition, id: WorkflowId): string | undefined {
-  const syntax = languageOf(definition).functions?.atoms
-  if (definition.atomFolder === undefined || syntax === undefined) return undefined
-  return join(definition.atomFolder, `${id}${syntax.outputSuffix}`)
-}
-
-/**
- * 一个有原子目录的 `code` 工作流写进该目录的源码，与原子同属一个包。
- * @param definition - 已保存的工作流定义。
- * @param host - 提供节点类型和能调用的工作流。
- * @returns 源码，或写不出时说明要修改的节点。
- */
-async function workflowSource(
-  definition: DagWorkflowDefinition,
-  host: WorkflowHost,
-): Promise<{ readonly source: string } | { readonly error: string }> {
-  const catalog = indexNodeTypes(host.registry.listTypes())
-  const callees = await workflowCallees(definition, host.engine)
-  try {
-    return { source: renderWorkflow(buildWorkflowIr(definition, catalog, analyzeWorkflow(definition, catalog)), languageOf(definition), callees) }
-  } catch (error: unknown) {
-    if (error instanceof RenderError) return { error: describeRenderFault(error.fault) }
-    throw error
-  }
-}
-
-/**
- * 写出一个已保存的工作流的文件 `<ID><后缀>`；它没有原子目录时什么也不写。
- *
- * 源码写不出时删除它的文件，免得包里留下与定义不一致的函数。
- * @param definition - 已保存的工作流定义。
- * @param id - 它的 ID。
- * @param host - 提供节点类型和能调用的工作流。
- * @returns 源码写不出的原因；写出或不必写时为 undefined。
- */
-async function writeWorkflowFile(definition: DagWorkflowDefinition, id: WorkflowId, host: WorkflowHost): Promise<string | undefined> {
-  const path = workflowFilePath(definition, id)
-  if (path === undefined) return undefined
-  const written = await workflowSource(definition, host)
-  if ('error' in written) {
-    await rm(path, { force: true })
-    return written.error
-  }
-  await writeFile(path, written.source)
-  return undefined
-}
-
-/**
- * 保存一个工作流，随后写出它的文件，并重写直接嵌入它的工作流的文件：它们按它的签名调用它。
- *
- * 源码写不出时工作流照样保存。替换已有工作流时，它原先的文件若不再是该工作流的文件（改了名或换了原子目录），也被删除。
- * @param definition - 待保存的工作流定义。
- * @param host - 节点注册表和引擎。
- * @param save - 引擎的保存或更新。
- * @param replaces - 被替换的工作流 ID；新建时省略。
- * @returns 保存后的工作流 ID，以及它和嵌入它的工作流写不出源码时的原因。
- */
-export async function saveWithFile(
-  definition: DagWorkflowDefinition,
-  host: WorkflowHost,
-  save: () => Promise<WorkflowId>,
-  replaces?: WorkflowId,
-): Promise<SavedWorkflow> {
-  const previous = replaces === undefined ? undefined : { id: replaces, definition: host.engine.get(replaces) }
-  const before = previous?.definition === undefined ? undefined : workflowFilePath(previous.definition, previous.id)
-  const workflowId = await save()
-  if (before !== undefined && before !== workflowFilePath(definition, workflowId)) await rm(before, { force: true })
-  const sourceError = await writeWorkflowFile(definition, workflowId, host)
-  const embedderErrors: { name: string; error: string }[] = []
-  for (const { id } of host.engine.list()) {
-    // list() 与 get() 同步读取同一张表，列出的 ID 一定存在。
-    const embedder = host.engine.get(id)!
-    if (!embedder.nodes.some(node => node.type === SUBWORKFLOW_TYPE && subworkflowOf(node.config) === workflowId)) continue
-    const error = await writeWorkflowFile(embedder, id, host)
-    if (error !== undefined) embedderErrors.push({ name: embedder.name, error })
-  }
-  return {
-    workflowId,
-    ...(sourceError === undefined ? {} : { sourceError }),
-    ...(embedderErrors.length === 0 ? {} : { embedderErrors }),
-  }
-}
-
-/**
- * 删除一个工作流，以及它写进原子目录的文件。
- * @param id - 工作流 ID。
- * @param engine - 引擎。
- * @throws 引擎拒绝删除时；此时文件不动。
- */
-export async function deleteWithFile(id: WorkflowId, engine: DagEngine): Promise<void> {
-  const definition = engine.get(id)
-  await engine.delete(id)
-  const path = definition === undefined ? undefined : workflowFilePath(definition, id)
-  if (path !== undefined) await rm(path, { force: true })
 }
 
 /**

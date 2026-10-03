@@ -24,11 +24,13 @@ function setup() {
   const disposers: Array<() => void> = []
   const ctx = {
     effect(register: () => () => void) { disposers.push(register()) },
-    dagEngine: {
+    workflowFiles: {
       async save(definition: DagWorkflowDefinition) {
         saved = definition
-        return WorkflowId('workflow-id')
+        return { workflowId: WorkflowId('workflow-id') }
       },
+    },
+    dagEngine: {
       findByName: (name: string) => name === CODE_FLOW.name ? { id: WorkflowId('code-flow') } : undefined,
       list: () => [{ id: WorkflowId('code-flow') }],
       get: () => CODE_FLOW,

@@ -8,7 +8,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { DIAGNOSTIC_SEVERITY, analyzeWorkflow, indexNodeTypes, type WorkflowAnalysis } from './shared/analysis.ts'
 import { describeDiagnostic, describeRenderFault } from './diagnostic-message.ts'
 import { buildWorkflowIr } from './shared/ir.ts'
-import { saveWithFile, workflowCallees } from './atom-folder.ts'
+import { workflowCallees } from './atom-folder.ts'
 import { withCallees } from './shared/callees.ts'
 import { CODE_LANGUAGES, languageOf } from './shared/language.ts'
 import { RenderError, renderWorkflow } from './shared/source.ts'
@@ -18,7 +18,7 @@ import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 
 /**
  * 注册所有工作流模型工具；每个工具随 `ctx` 卸载。
- * @param ctx - Cordis context，需已加载 dagEngine 与 workflowNodeRegistry 服务。
+ * @param ctx - Cordis context，需已加载 dagEngine、workflowNodeRegistry 与 workflowFiles 服务。
  */
 export function registerWorkflowTools(ctx: Context): void {
   const engine = ctx.dagEngine
@@ -104,12 +104,7 @@ export function registerWorkflowTools(ctx: Context): void {
         ...(args.description === undefined ? {} : { description: args.description }),
       })
       const def = withCallees(parsed, await workflowCallees(parsed, engine))
-      const { workflowId, sourceError, embedderErrors = [] } = await saveWithFile(
-        def,
-        { registry: ctx.workflowNodeRegistry, engine },
-        () => engine.save(def),
-        engine.findByName(def.name)?.id,
-      )
+      const { workflowId, sourceError, embedderErrors = [] } = await ctx.workflowFiles.save(def)
       return {
         workflowId,
         name: args.name,
