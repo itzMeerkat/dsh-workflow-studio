@@ -9,6 +9,7 @@
 
 import { GO_TYPES, goAtom, goImportName, goPackage } from './go.ts'
 import { BUILTIN_PORT_TYPES, type BuiltinPortType, type DagWorkflowDefinition, type PortDefinition, type PortType } from './types.ts'
+import { assertNever } from './errors.ts'
 
 /** 代码节点存放代码的配置字段。 */
 export const CODE_FIELD = 'code'
@@ -350,8 +351,4 @@ export function portTypes(atoms: ReadonlyMap<string, Atom>): PortType[] {
  */
 export function signaturePorts(names: readonly (TypedName & { readonly optional?: boolean })[]): PortDefinition[] {
   return names.map(({ name, type, optional }) => optional === true ? { name, type, required: false } : { name, type })
-}
-
-function assertNever(kind: never): never {
-  throw new Error(`未覆盖的工作流种类: ${String(kind)}`)
 }

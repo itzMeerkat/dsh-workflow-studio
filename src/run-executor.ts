@@ -8,7 +8,7 @@ import type {
   WorkflowNodeExecutor, WorkflowRunStatus,
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
-import { messageOf } from './shared/errors.ts'
+import { assertNever, messageOf } from './shared/errors.ts'
 import { errorPolicyOf } from './shared/error-policy.ts'
 import { execSourcePin, inboundEdges, nodeExecPins, type InboundEdges } from './shared/graph.ts'
 import { execKindOf } from './flow-nodes.ts'
@@ -430,8 +430,4 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
       (error: unknown) => { signal.removeEventListener('abort', onAbort); reject(error) },
     )
   })
-}
-
-function assertNever(value: never): never {
-  throw new Error(`未覆盖的取值: ${JSON.stringify(value)}`)
 }

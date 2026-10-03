@@ -16,6 +16,7 @@ import {
 import { SUBWORKFLOW_TYPE, subworkflowOf, workflowSignature } from './subworkflow.ts'
 import { SWITCH_DEFAULT_PIN, SWITCH_TYPE, switchCases } from './switch.ts'
 import type { NodeId, PortDefinition, PortType } from './types.ts'
+import { assertNever } from './errors.ts'
 
 /** 一种语言写不出的图，`node` 是需要修改的节点。 */
 export type RenderFault =
@@ -506,8 +507,4 @@ class Identifiers {
     this.taken.add(name)
     return name
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`未覆盖的取值: ${String(value)}`)
 }

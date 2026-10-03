@@ -8,6 +8,7 @@
 import { calleeSignature, type Callees } from './callees.ts'
 import { isBoundaryNode } from './workflow-boundary.ts'
 import type { DagNodeDefinition, NodeErrorPolicy, WorkflowKind } from './types.ts'
+import { assertNever } from './errors.ts'
 
 /** 全部错误策略，按编辑器中列出的顺序。 */
 export const ERROR_POLICIES: readonly NodeErrorPolicy[] = ['exit']
@@ -38,8 +39,4 @@ export function canFail(node: DagNodeDefinition, kind: WorkflowKind, callees: Ca
     default:
       return assertNever(kind)
   }
-}
-
-function assertNever(kind: never): never {
-  throw new Error(`未覆盖的工作流种类: ${String(kind)}`)
 }

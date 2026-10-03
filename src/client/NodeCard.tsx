@@ -17,6 +17,7 @@ import { handleId, nodeInputPorts, nodeOutputPins, nodeOutputPorts, type Workflo
 import type { Translate } from './locale.ts'
 import type { WorkflowRow } from './model.ts'
 import css from './WorkflowStudioPanel.module.css'
+import { assertNever } from '../shared/errors.ts'
 
 /**
  * Which graph a card is drawn in.
@@ -520,8 +521,4 @@ function DiagnosticBadge({ diagnostics, t }: {
       {t(`diagnostics.${severity}`)} {diagnostics.length}
     </span>
   )
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unknown node control: ${JSON.stringify(value)}`)
 }

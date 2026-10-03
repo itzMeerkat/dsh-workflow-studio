@@ -8,6 +8,7 @@
 
 import type { WorkflowDiagnostic } from './shared/analysis.ts'
 import type { RenderFault } from './shared/source.ts'
+import { assertNever } from './shared/errors.ts'
 
 /**
  * 一条诊断的中文说明；错误同时给出可行的修改方式。
@@ -64,8 +65,4 @@ export function describeRenderFault(fault: RenderFault): string {
     default:
       return assertNever(fault)
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`未覆盖的类别: ${JSON.stringify(value)}`)
 }

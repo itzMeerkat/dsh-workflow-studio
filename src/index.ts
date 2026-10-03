@@ -56,6 +56,7 @@ export {
 } from './shared/questions.ts'
 export type { QuestionsRequest } from './shared/questions.ts'
 export { toJsonValue, toJsonObject } from './shared/json.ts'
+export { assertNever, messageOf } from './shared/errors.ts'
 export {
   EXEC_RUN_PIN, EXEC_THEN_PIN, execOutputPins, execSourcePin, execTargetPin, isDataEdge, isExecEdge,
 } from './shared/graph.ts'

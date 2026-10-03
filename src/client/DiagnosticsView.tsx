@@ -4,6 +4,7 @@ import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { Translate } from './locale.ts'
 import css from './WorkflowStudioPanel.module.css'
+import { assertNever } from '../shared/errors.ts'
 
 /**
  * The facts a diagnostic adds to its message, as `端口 input` style pairs.
@@ -76,8 +77,4 @@ export function DiagnosticsView({ diagnostics, t }: {
 /** A finding's identity for React: one node raises at most one finding of each code per port. */
 function diagnosticKey(diagnostic: WorkflowDiagnostic): string {
   return `${diagnostic.nodeId}/${diagnostic.code}/${'port' in diagnostic ? diagnostic.port : ''}`
-}
-
-function assertNever(diagnostic: never): never {
-  throw new Error(`Unhandled diagnostic: ${JSON.stringify(diagnostic)}`)
 }
