@@ -49,7 +49,7 @@ export function registerWorkflowTools(ctx: Context): void {
           + '端口名就是参数名和结果名（未命名的结果为 output 或 output1、output2……），指针参数是可选端口。'
           + '端口类型就是 Go 类型的写法，例如 int、Order、*Coupon，但 float64、bool、string、any 写作 number、boolean、string、any；'
           + '工作流边界端口也这样声明类型，数据边两端的类型必须相同，除非一端是 any。'
-          + '保存还把工作流函数写成目录中的 <工作流 ID>.workflow.go；写不出时不保存。',
+          + '保存还把工作流函数写成目录中的 <工作流 ID>.workflow.go；写不出时工作流照样保存，目录中不留该文件，原因在 warnings 中。',
       },
       nodes: {
         type: 'array',
