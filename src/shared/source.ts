@@ -308,14 +308,8 @@ function codeContent(ir: WorkflowIr, language: CodeLanguage, callees: Callees): 
       ? invocation
       : fill(functions.assign, { targets: targets.map(target => target ?? functions.discard).join(', '), value: invocation })
     if (!signature.fails) return [statement]
-    switch (call.onError) {
-      case 'exit': {
-        const step = JSON.stringify(`${call.label ?? signature.name}: %w`)
-        return [statement, ...functions.exit.map(line => fill(line, { error, step }))]
-      }
-      default:
-        return assertNever(call.onError)
-    }
+    const step = JSON.stringify(`${call.label ?? signature.name}: %w`)
+    return [statement, ...functions.exit.map(line => fill(line, { error, step }))]
   }
 
   const list = (ports: readonly PortDefinition[], names: ReadonlyMap<string, string>): string[] =>

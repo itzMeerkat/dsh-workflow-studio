@@ -93,7 +93,6 @@ export const workflowNodeSchema = declared<DagNodeDefinition>()(z.object({
   label: nonEmptyString.optional(),
   config: z.record(z.string(), z.json()).default({}),
   recovery: z.enum(['rerun', 'hold']).optional(),
-  onError: z.enum(['exit']).optional(),
   position: editorPosition.optional(),
   width: z.number().positive().optional(),
   outputs: z.array(workflowPortSchema).optional(),

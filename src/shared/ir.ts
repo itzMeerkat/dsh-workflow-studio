@@ -7,11 +7,10 @@
  */
 
 import { atomNode, atomPin, type WorkflowAnalysis } from './analysis.ts'
-import { errorPolicyOf } from './error-policy.ts'
 import { isDataEdge, nodeExecPins } from './graph.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './workflow-boundary.ts'
 import type {
-  DagNodeDefinition, DagWorkflowDefinition, NodeErrorPolicy, NodeExecKind, NodeId, NodeTypeSummary, PortDefinition,
+  DagNodeDefinition, DagWorkflowDefinition, NodeExecKind, NodeId, NodeTypeSummary, PortDefinition,
   WorkflowKind,
 } from './types.ts'
 
@@ -38,8 +37,6 @@ export interface IrCall {
   readonly execKind: NodeExecKind
   /** 节点配置，例如代码节点携带的代码。 */
   readonly config: Record<string, unknown>
-  /** 节点失败时工作流怎么做。 */
-  readonly onError: NodeErrorPolicy
   /** 节点的执行输出引脚，按声明顺序。 */
   readonly pins: readonly string[]
   /** 节点的输入端口。 */
@@ -239,7 +236,6 @@ class Lowering {
       ...(node.label === undefined ? {} : { label: node.label }),
       execKind: summary.execKind,
       config: node.config,
-      onError: errorPolicyOf(node),
       pins: nodeExecPins(node, summary),
       inputs: this.inputsOf(node),
       args: this.argumentsOf(node),

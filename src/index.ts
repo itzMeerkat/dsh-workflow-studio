@@ -99,7 +99,7 @@ export type {
   DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
   DagDataEdge, DagExecEdge,
-  NodeControlDefinition, NodeErrorPolicy,
+  NodeControlDefinition,
   WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
   NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, NodeSignalRequest,
   NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, NodeExecKind, WorkflowKind,

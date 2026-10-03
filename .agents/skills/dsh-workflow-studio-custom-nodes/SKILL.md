@@ -21,7 +21,7 @@ Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node
 
 ## Implement a node
 
-Treat `context.config` and `context.inputs` as runtime JSON. Validate values that `run()` relies on. Return the outputs. Express every business outcome, such as a rejected approval, as output values or the execution pins the node fires, so the graph branches on it. Throw only for an error the node cannot handle, such as invalid configuration or a failed dependency: the engine records the node as failed with the error's message and applies its error policy, exactly as a `code` workflow returns when an atom returns an error.
+Treat `context.config` and `context.inputs` as runtime JSON. Validate values that `run()` relies on. Return the outputs. Express every business outcome, such as a rejected approval, as output values or the execution pins the node fires, so the graph branches on it. Throw only for an error the node cannot handle, such as invalid configuration or a failed dependency: the engine records the node as failed with the error's message and ends the workflow with it, exactly as a `code` workflow returns when an atom returns an error.
 
 ```ts
 import {

@@ -1,9 +1,8 @@
-/** Details panel for the selected canvas node: label, error policy, own ports, configuration JSON, and the latest run result. */
+/** Details panel for the selected canvas node: label, own ports, configuration JSON, and the latest run result. */
 
 import { Button, IconCloseOutlineRegular, IconTrashOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import { ERROR_POLICIES } from '../shared/error-policy.ts'
 import type { Language } from '../shared/language.ts'
-import type { NodeErrorPolicy, PortDefinition, PortType } from '../shared/types.ts'
+import type { PortDefinition, PortType } from '../shared/types.ts'
 import { nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode } from './graph-model.ts'
 import type { Translate } from './locale.ts'
 import { PortList } from './PortList.tsx'
@@ -21,7 +20,6 @@ export function NodeInspector({
   onApplyConfig,
   onDelete,
   onClose,
-  errorPolicy,
   ports,
 }: {
   readonly node: WorkflowFlowNode
@@ -34,8 +32,6 @@ export function NodeInspector({
   readonly onApplyConfig: () => void
   readonly onDelete: () => void
   readonly onClose: () => void
-  /** The node's error policy and how to change it; absent for a node that cannot fail. */
-  readonly errorPolicy?: { readonly value: NodeErrorPolicy; readonly onChange: (policy: NodeErrorPolicy) => void }
   /** The sides whose ports the author declares, and how to change them; absent for a node that has none. */
   readonly ports?: {
     readonly sides: readonly WorkflowPortSide[]
@@ -73,17 +69,6 @@ export function NodeInspector({
                 onChange={event => { onLabel(event.currentTarget.value) }}
               />
             </label>
-            {errorPolicy !== undefined && (
-              <label>
-                <span>{t('inspector.onError')}</span>
-                <select
-                  value={errorPolicy.value}
-                  onChange={(event) => { errorPolicy.onChange(ERROR_POLICIES.find(policy => policy === event.currentTarget.value)!) }}
-                >
-                  {ERROR_POLICIES.map(policy => <option key={policy} value={policy}>{t(`errorPolicy.${policy}`)}</option>)}
-                </select>
-              </label>
-            )}
             {ports?.sides.map(side => (
               <PortList
                 key={side}

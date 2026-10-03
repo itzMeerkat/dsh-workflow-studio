@@ -16,13 +16,12 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import { messageOf } from '../shared/errors.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type {
-  DagNodeDefinition, DagWorkflowDefinition, NodeErrorPolicy, NodeRunRecord, NodeTypeSummary, PortDefinition, WorkflowId,
+  DagNodeDefinition, DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary, PortDefinition, WorkflowId,
 } from '../shared/types.ts'
 import { withCallees, type Callees } from '../shared/callees.ts'
 import { codePortSides, languageOf, portTypes } from '../shared/language.ts'
 import { SUBWORKFLOW_FIELD, subworkflowOf } from '../shared/subworkflow.ts'
 import { SWITCH_CASES } from '../shared/switch.ts'
-import { canFail, errorPolicyOf } from '../shared/error-policy.ts'
 import {
   connectionError,
   flowEdges,
@@ -191,8 +190,6 @@ export function WorkflowGraphEditor({
     })
   }
 
-  const canFailHere = (node: DagNodeDefinition): boolean => canFail(node, definition.kind, callees)
-
   const editCases = (nodeId: string, cases: readonly string[], renamed?: { readonly from: string; readonly to: string }): void => {
     updateNode(nodeId, (node) => {
       const config = { ...node.config, [SWITCH_CASES]: cases }
@@ -247,7 +244,7 @@ export function WorkflowGraphEditor({
   return (
     <div className={css.graphLayout}>
       <div ref={canvas} className={css.canvas}>
-        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow }, editCases, canFail: canFailHere }}>
+        <NodeCardContext.Provider value={{ t, language: languageOf(definition), updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow }, editCases }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}
             edges={edges}
@@ -329,14 +326,6 @@ export function WorkflowGraphEditor({
                 },
               },
             })}
-          {...(canFailHere(selectedNode.data.definition)
-            ? {
-              errorPolicy: {
-                value: errorPolicyOf(selectedNode.data.definition),
-                onChange: (onError: NodeErrorPolicy) => { updateNode(selectedNode.id, node => ({ ...node, onError })) },
-              },
-            }
-            : {})}
         />
       )}
     </div>

@@ -118,7 +118,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 
 当 `autoRestart` 为 `false`、被中断节点的恢复策略为 `hold`，或其某个节点类型未注册时，重启后恢复的运行会进入 `interrupted`，而不是重新执行。执行器声明 `recovery: 'rerun' | 'hold'`（默认 `rerun`），工作流定义中的节点可以用自身的 `recovery` 覆盖它。interrupted 运行在调用 `resumeRun()` 或 `resume` Remote 后继续，并再次调用未完成的节点。
 
-节点的 `onError` 规定节点以它自己处理不了的错误失败时工作流怎么做；节点能处理的错误属于它自身的逻辑，因此图中没有处理错误的分支。唯一的策略、也是默认策略是 `exit`：工作流不再开始新的节点并带着错误结束，因此 `run` 工作流让已在工作的节点跑完，放弃等待外部结果的节点并记为 `cancelled`，运行以 `failed` 结束并记下节点的错误，Go 工作流提前返回。两种工作流都以节点名包装错误，节点名是它的标签，未命名时是它的类型；子工作流中的节点失败时子工作流随之失败，再由它的节点的策略处置，因此错误再包一层子工作流的名字，例如 `add-offset: sum: …`。`run` 工作流中除边界节点外的每个节点都可能失败；`code` 工作流中只有调用的函数另外返回错误的节点会失败，即最后一个结果是 `error` 的原子，以及被嵌入的工作流。编辑器在每个可能失败的节点卡片上标出它的策略，并在节点检查器中以 **出错时** 提供选择。
+节点只以它自己处理不了的错误失败；节点能处理的错误属于它自身的逻辑，因此图中没有处理错误的分支。失败的节点让工作流带着它的错误结束：工作流不再开始新的节点，因此 `run` 工作流让已在工作的节点跑完，放弃等待外部结果的节点并记为 `cancelled`，运行以 `failed` 结束并记下节点的错误，Go 工作流提前返回。两种工作流都以节点名包装错误，节点名是它的标签，未命名时是它的类型；子工作流中的节点失败时子工作流随之失败，因此错误再包一层子工作流的名字，例如 `add-offset: sum: …`。`run` 工作流中除边界节点外的每个节点都可能失败；`code` 工作流中只有调用的函数另外返回错误的节点会失败，即最后一个结果是 `error` 的原子，以及被嵌入的工作流。
 
 不应重复已完成工作的节点可以使用 `context.invocationKey`（同一运行中该节点每次调用都相同）和 `context.notepad`。`await context.notepad.save(value)` 会把 JSON 值保存到运行记录中，重启后再次被调用的节点可从 `context.notepad.value` 读取它。
 
@@ -147,7 +147,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 }
 ```
 
-第三方 Cordis 插件通过 `ctx.workflowNodeRegistry.register(executor, sourcePlugin)` 注册 `WorkflowNodeExecutor`。注册表按字段检查执行器，任何具备必需成员的对象都会被接受。必填的来源插件名会随每种节点类型显示在浏览器目录中，返回的 disposer 只移除该次注册。执行器声明连接端口、各输入是否必填、写入 `config` 的可选卡片控件，以及需要在卡片上渲染的输出。执行器返回 `{ outputs, next? }`，业务上的每种结局（例如审批被拒）都是这样一次完成，由输出值或触发的引脚区分；只有节点自己处理不了的错误才抛出，它使节点失败并按节点的错误策略处置，与 `code` 工作流中原子返回的错误相同。节点不能自行跳过，不适用时同样完成且不做任何事。完成意味着每个已声明的输出端口都有值，无内容时写 `null`。自行选择执行引脚的节点（例如按人工决定分支的节点）直接实现 `execute`，而不继承 `WorkflowNode`。执行上下文包含 `connected`（有入边的输入端口）和 `invocationKey`（即 `<runId>/<nodeId>`）。节点作者通常继承 `WorkflowNode`，它要求声明 `type`、`label`、`description`、业务 `ports` 和 `run()`；`run()` 返回输出或抛出错误。
+第三方 Cordis 插件通过 `ctx.workflowNodeRegistry.register(executor, sourcePlugin)` 注册 `WorkflowNodeExecutor`。注册表按字段检查执行器，任何具备必需成员的对象都会被接受。必填的来源插件名会随每种节点类型显示在浏览器目录中，返回的 disposer 只移除该次注册。执行器声明连接端口、各输入是否必填、写入 `config` 的可选卡片控件，以及需要在卡片上渲染的输出。执行器返回 `{ outputs, next? }`，业务上的每种结局（例如审批被拒）都是这样一次完成，由输出值或触发的引脚区分；只有节点自己处理不了的错误才抛出，它使节点失败并结束工作流，与 `code` 工作流中原子返回的错误相同。节点不能自行跳过，不适用时同样完成且不做任何事。完成意味着每个已声明的输出端口都有值，无内容时写 `null`。自行选择执行引脚的节点（例如按人工决定分支的节点）直接实现 `execute`，而不继承 `WorkflowNode`。执行上下文包含 `connected`（有入边的输入端口）和 `invocationKey`（即 `<runId>/<nodeId>`）。节点作者通常继承 `WorkflowNode`，它要求声明 `type`、`label`、`description`、业务 `ports` 和 `run()`；`run()` 返回输出或抛出错误。
 
 每条边都要声明 `kind`。`data` 边把一个输出端口的值送到一个输入端口，`sourcePort` 和 `targetPort` 默认为 `output` 和 `input`。`exec` 边不传递数据，只约束执行顺序：目标节点在源节点完成后才执行，`sourcePort` 和 `targetPort` 默认为每个节点都有的 `then` 和 `run` 执行引脚。执行边用于表达数据依赖无法表达的顺序——两个节点写同一条外部记录、一项检查必须先于它所保护的工作被记录，或两个人工提问不能同时发出。没有入执行边的节点在运行到达时即执行；有入执行边的节点只在该边的源节点完成后执行，源节点被跳过时该边失效，目标节点不被调用而直接跳过，因此跳过沿执行边传递。数据边不传递这一信号。同一个节点的 `run` 引脚可以接入多条执行边，全部触发后节点才执行；而数据输入端口仍然只接受一条边。引擎会拒绝引用不存在引脚的执行边、同一对引脚之间的重复执行边，以及数据边与执行边共同构成的环。
 
@@ -227,7 +227,7 @@ profile 直接加载 checkout 的 `lib/`。修改源码后，运行 `pnpm build`
 | [`src/client/WorkflowGraphEditor.tsx`](src/client/WorkflowGraphEditor.tsx) | React Flow 画布状态、节点编辑和连线 |
 | [`src/client/graph-model.ts`](src/client/graph-model.ts) | 定义与画布节点和边之间的转换，以及连线规则 |
 | [`src/client/NodeCard.tsx`](src/client/NodeCard.tsx) | 两个图共用的节点卡片：端口、内联控件和运行输出 |
-| [`src/client/NodeInspector.tsx`](src/client/NodeInspector.tsx) | 所选节点的详情面板：ID、标签、错误策略、代码节点的端口、配置和输出 |
+| [`src/client/NodeInspector.tsx`](src/client/NodeInspector.tsx) | 所选节点的详情面板：ID、标签、代码节点的端口、配置和输出 |
 | [`src/client/WorkflowBoundaryCard.tsx`](src/client/WorkflowBoundaryCard.tsx) | 显示边界节点所声明工作流端口的卡片 |
 | [`src/client/WorkflowSettings.tsx`](src/client/WorkflowSettings.tsx) | 工作流设置侧栏：描述、语言、输入和输出，以及删除 |
 | [`src/client/PortList.tsx`](src/client/PortList.tsx) | 编辑一组声明的端口，用于工作流和代码节点 |

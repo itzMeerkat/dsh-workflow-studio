@@ -9,7 +9,6 @@ import type {
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { assertNever, messageOf } from './shared/errors.ts'
-import { errorPolicyOf } from './shared/error-policy.ts'
 import { execSourcePin, inboundEdges, nodeExecPins, type InboundEdges } from './shared/graph.ts'
 import { execKindOf } from './flow-nodes.ts'
 import { enclosingEntries } from './subworkflow.ts'
@@ -112,15 +111,8 @@ export class RunExecutor {
           running.delete(settled)
           const { node, record } = nodeState(state, settled)
           if (record.status === 'failed') {
-            const policy = errorPolicyOf(node)
-            switch (policy) {
-              case 'exit':
-                failure ??= this.failureOf(node, record.error ?? '节点执行失败')
-                this.exit.abort(failure)
-                break
-              default:
-                assertNever(policy)
-            }
+            failure ??= this.failureOf(node, record.error ?? '节点执行失败')
+            this.exit.abort(failure)
           }
           continue
         }
@@ -299,7 +291,7 @@ export class RunExecutor {
   }
 
   /**
-   * 通过输入检查后调用执行器。节点抛出的错误和违反结果约定的返回值都记为 failed，交给它的错误策略；
+   * 通过输入检查后调用执行器。节点抛出的错误和违反结果约定的返回值都记为 failed，运行随之结束；
    * 运行取消，或节点的等待被放弃时，无论执行器返回什么，节点都记为 cancelled。
    */
   private async runNode(task: NodeTask, inputs: Record<string, unknown>): Promise<NodeEnd> {

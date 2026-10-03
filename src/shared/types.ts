@@ -54,15 +54,6 @@ export const DEFAULT_WORKFLOW_KIND: WorkflowKind = 'run'
  */
 export type NodeRecoveryPolicy = 'rerun' | 'hold'
 
-/**
- * 节点遇到它自己处理不了的错误时，工作流怎么做。
- * - `exit`：工作流不再开始新的节点，并返回以节点名包装的错误。`run` 工作流等已在工作的节点跑完、放弃等待外部结果的
- *   节点后，运行以 failed 结束；`code` 工作流生成的函数提前返回。
- *
- * 子工作流中的节点以 `exit` 失败时，子工作流随之失败，错误再由嵌入它的节点的策略处置，并再包一层它的名字。
- */
-export type NodeErrorPolicy = 'exit'
-
 /** 内置端口类型，按编辑器列出的先后排列；`run` 工作流只用它们。 */
 export const BUILTIN_PORT_TYPES = ['any', 'string', 'number', 'boolean'] as const
 
@@ -144,8 +135,6 @@ export interface DagNodeDefinition {
   config: Record<string, unknown>
   /** 覆盖执行器声明的中断恢复策略。 */
   recovery?: NodeRecoveryPolicy
-  /** 节点失败时工作流怎么做；省略时为 `exit`。 */
-  onError?: NodeErrorPolicy
   /** 可视化编辑器中的节点坐标。 */
   position?: { x: number; y: number }
   /** 可视化编辑器中卡片的宽度（像素）；省略时为默认宽度。 */
@@ -394,8 +383,9 @@ export interface WorkflowNodeExecutor {
    * 执行节点。
    * @param context - 执行上下文，`inputs` 包含所有已产生值的输入端口。
    * @returns 节点完成时的结果。
-   * @throws 节点自己处理不了的错误，例如配置或输入非法、依赖的服务出错；引擎把节点记为 failed，按它的
-   * {@link NodeErrorPolicy} 处置，与 `code` 工作流中原子返回的错误相同。
+   * @throws 节点自己处理不了的错误，例如配置或输入非法、依赖的服务出错。引擎把节点记为 failed，不再开始新的节点，
+   * 等已在工作的节点跑完、放弃等待外部结果的节点后，运行以 failed 结束，错误以节点名包装；子工作流中的失败再包一层
+   * 子工作流的名字。这与 `code` 工作流中原子返回错误时生成的函数提前返回相同。
    */
   execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult>
 }
