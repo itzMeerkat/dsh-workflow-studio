@@ -38,7 +38,7 @@ export interface RunHost {
 type NodeEnd =
   | { status: 'completed'; outputs: Record<string, unknown>; fired: readonly string[] }
   | { status: 'cancelled' }
-  | { status: 'failed'; error: string; outputs?: Record<string, unknown> }
+  | { status: 'failed'; error: string }
 
 /** 一次节点调用。 */
 interface NodeTask {
@@ -298,7 +298,10 @@ export class RunExecutor {
     await this.host.checkpoint(this.state)
   }
 
-  /** 通过输入检查后调用执行器；运行取消，或节点的等待被放弃时，无论执行器返回什么，节点都记为 cancelled。 */
+  /**
+   * 通过输入检查后调用执行器。节点抛出的错误和违反结果约定的返回值都记为 failed，交给它的错误策略；
+   * 运行取消，或节点的等待被放弃时，无论执行器返回什么，节点都记为 cancelled。
+   */
   private async runNode(task: NodeTask, inputs: Record<string, unknown>): Promise<NodeEnd> {
     const { node, executor } = task
     const context = this.nodeContext(task, inputs)
@@ -383,49 +386,36 @@ export class RunExecutor {
 
   private endNode({ record, info }: NodeTask, end: NodeEnd): void {
     record.status = end.status
-    if (end.status === 'completed') record.fired = [...end.fired]
+    if (end.status === 'completed') {
+      record.fired = [...end.fired]
+      record.outputs = structuredClone(end.outputs)
+    }
     if (end.status === 'failed') record.error = end.error
     if (end.status === 'cancelled' && this.abandon.reason !== undefined) record.error = String(this.abandon.reason)
-    if ('outputs' in end && end.outputs !== undefined) record.outputs = structuredClone(end.outputs)
     record.completedAt = Date.now()
     this.host.emit('dag/node-end', runInfo(this.state), { ...info, status: end.status })
   }
 }
 
-/** 节点返回结果对应的结束状态；completed 的输出须为已声明端口的 JSON 值。 */
+/** 节点返回结果对应的结束状态；输出须恰为已声明端口的 JSON 值，触发的引脚须已声明，否则节点失败。 */
 function resultEnd(node: DagNodeDefinition, executor: WorkflowNodeExecutor, result: NodeExecutionResult): NodeEnd {
-  const label = `节点 ${node.id} 的输出`
-  switch (result.status) {
-    case 'completed': {
-      const declared = (node.outputs ?? executor.outputs ?? []).map(port => port.name)
-      const undeclared = Object.keys(result.outputs).find(name => !declared.includes(name))
-      if (undeclared !== undefined) return { status: 'failed', error: `节点 ${node.id} 返回未声明的输出端口 ${undeclared}` }
-      const unproduced = declared.filter(name => result.outputs[name] === undefined)
-      if (unproduced.length > 0) {
-        return { status: 'failed', error: `节点 ${node.id} 完成时未产生输出端口 ${unproduced.join(', ')}；无内容时写 null` }
-      }
-      const pins = nodeExecPins(node, executor)
-      const fired = result.next ?? pins
-      const unknown = fired.find(pin => !pins.includes(pin))
-      if (unknown !== undefined) {
-        return { status: 'failed', error: `节点 ${node.id} 触发未声明的执行输出引脚 ${unknown}` }
-      }
-      try {
-        return { status: 'completed', outputs: toJsonObject(result.outputs, label), fired: [...fired] }
-      } catch (error: unknown) {
-        return { status: 'failed', error: messageOf(error) }
-      }
-    }
-    case 'failed': {
-      if (result.outputs === undefined) return { status: 'failed', error: result.error }
-      try {
-        return { status: 'failed', error: result.error, outputs: toJsonObject(result.outputs, label) }
-      } catch (error: unknown) {
-        return { status: 'failed', error: `${result.error}（诊断输出已丢弃: ${messageOf(error)}）` }
-      }
-    }
-    default:
-      return assertNever(result)
+  const declared = (node.outputs ?? executor.outputs ?? []).map(port => port.name)
+  const undeclared = Object.keys(result.outputs).find(name => !declared.includes(name))
+  if (undeclared !== undefined) return { status: 'failed', error: `节点 ${node.id} 返回未声明的输出端口 ${undeclared}` }
+  const unproduced = declared.filter(name => result.outputs[name] === undefined)
+  if (unproduced.length > 0) {
+    return { status: 'failed', error: `节点 ${node.id} 完成时未产生输出端口 ${unproduced.join(', ')}；无内容时写 null` }
+  }
+  const pins = nodeExecPins(node, executor)
+  const fired = result.next ?? pins
+  const unknown = fired.find(pin => !pins.includes(pin))
+  if (unknown !== undefined) {
+    return { status: 'failed', error: `节点 ${node.id} 触发未声明的执行输出引脚 ${unknown}` }
+  }
+  try {
+    return { status: 'completed', outputs: toJsonObject(result.outputs, `节点 ${node.id} 的输出`), fired: [...fired] }
+  } catch (error: unknown) {
+    return { status: 'failed', error: messageOf(error) }
   }
 }
 

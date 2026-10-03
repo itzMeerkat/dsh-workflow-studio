@@ -40,7 +40,7 @@ function executors(calls: Calls, behavior: HostBehavior, stepStarted: () => void
     outputs: [{ name: 'output', type: 'any' }],
     execute: ({ config }) => {
       calls.source++
-      return { status: 'completed', outputs: { output: config.value } }
+      return { outputs: { output: config.value } }
     },
   }
   const step: WorkflowNodeExecutor = {
@@ -57,9 +57,9 @@ function executors(calls: Calls, behavior: HostBehavior, stepStarted: () => void
       if (behavior.block) {
         stepStarted()
         await new Promise<void>((resolve) => { context.signal.addEventListener('abort', () => { resolve() }) })
-        return { status: 'failed', error: 'aborted' }
+        throw new Error('aborted')
       }
-      return { status: 'completed', outputs: { output: context.inputs.input } }
+      return { outputs: { output: context.inputs.input } }
     },
   }
   const bad: WorkflowNodeExecutor = {
@@ -67,7 +67,7 @@ function executors(calls: Calls, behavior: HostBehavior, stepStarted: () => void
     label: 'Bad output',
     description: 'Returns a value JSON cannot hold',
     outputs: [{ name: 'output', type: 'any' }],
-    execute: () => ({ status: 'completed', outputs: { output: new Date(0) } }),
+    execute: () => ({ outputs: { output: new Date(0) } }),
   }
   return behavior.registerStep === false ? [source, bad] : [source, step, bad]
 }
@@ -256,7 +256,7 @@ describe('运行持久化与恢复', () => {
       description: 'Captures its notepad',
       execute: (ctx) => {
         context.notepad = ctx.notepad
-        return { status: 'completed', outputs: {} }
+        return { outputs: {} }
       },
     }
     ctx.workflowNodeRegistry.register(probe, 'run-persistence-tests')
@@ -318,7 +318,7 @@ describe('运行持久化与恢复', () => {
         started.resolve()
         await new Promise<void>((resolve) => { context.signal.addEventListener('abort', () => { resolve() }) })
         saveAfterStop.resolve(await context.notepad.save(1).then(() => 'saved', (error: unknown) => error))
-        return { status: 'completed', outputs: {} }
+        return { outputs: {} }
       },
     }, 'run-persistence-tests')
     engine.start(await saveSingle(engine, 'late-save'))
@@ -340,7 +340,7 @@ describe('运行持久化与恢复', () => {
         await new Promise<void>((_resolve, reject) => {
           context.signal.addEventListener('abort', () => { reject(new Error('aborted')) })
         })
-        return { status: 'completed', outputs: {} }
+        return { outputs: {} }
       },
     }, 'run-persistence-tests')
     const run = engine.start(await saveSingle(engine, 'throw-on-abort'))
@@ -362,7 +362,7 @@ describe('运行持久化与恢复', () => {
       validateSignal: validateQuestionsSignal,
       async execute(context) {
         const answer = await askUser(context, 'q', [{ id: 'a', question: 'Go?', options: [{ label: 'yes' }] }])
-        return { status: 'completed', outputs: { output: answer.answers[0]?.selected[0] } }
+        return { outputs: { output: answer.answers[0]?.selected[0] } }
       },
     }, 'run-persistence-tests')
     const asked = signalRequested(ctx)

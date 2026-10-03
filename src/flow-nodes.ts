@@ -2,14 +2,14 @@
  * 引擎自有的流程控制节点。
  *
  * 这些节点的行为本身就是执行语义，因此由核心插件注册，而不是交给节点插件：
- * {@link BranchNode} 和 {@link SwitchNode} 是仅有的产生条件分支的节点，{@link MergeNode} 是唯一的 OR 连接点。
- * 其余节点类型一律是 AND 连接，且只能通过完成与否影响下游。
+ * {@link BranchNode} 和 {@link SwitchNode} 是仅有的决策节点，静态分析据此认定它们的引脚互斥；
+ * {@link MergeNode} 是唯一的 OR 连接点。其余节点类型一律是 AND 连接。
  * @module dsh-workflow-studio
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createCodeNodes } from './code-nodes.ts'
-import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from './node.ts'
+import { WorkflowNode, type WorkflowNodePorts } from './node.ts'
 import { SUBWORKFLOW_TYPE } from './shared/subworkflow.ts'
 import { SWITCH_DEFAULT_PIN, SWITCH_TYPE, switchCases, switchPin } from './shared/switch.ts'
 import { SUBWORKFLOW_DEFAULTS, SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE } from './subworkflow.ts'
@@ -44,14 +44,8 @@ export class BranchNode implements WorkflowNodeExecutor {
   readonly outputs: readonly PortDefinition[] = []
 
   execute({ inputs }: NodeExecutionContext): NodeExecutionResult {
-    if (typeof inputs.condition !== 'boolean') {
-      return { status: 'failed', error: 'condition 输入必须为布尔值' }
-    }
-    return {
-      status: 'completed',
-      outputs: {},
-      next: [inputs.condition ? BRANCH_TRUE_PIN : BRANCH_FALSE_PIN],
-    }
+    if (typeof inputs.condition !== 'boolean') throw new TypeError('condition 输入必须为布尔值')
+    return { outputs: {}, next: [inputs.condition ? BRANCH_TRUE_PIN : BRANCH_FALSE_PIN] }
   }
 }
 
@@ -73,8 +67,8 @@ export class SwitchNode implements WorkflowNodeExecutor {
 
   execute({ config, inputs }: NodeExecutionContext): NodeExecutionResult {
     const pin = switchPin(inputs.value, switchCases(config))
-    if (pin === undefined) return { status: 'failed', error: 'value 输入必须为字符串、数字或布尔值' }
-    return { status: 'completed', outputs: {}, next: [pin] }
+    if (pin === undefined) throw new TypeError('value 输入必须为字符串、数字或布尔值')
+    return { outputs: {}, next: [pin] }
   }
 }
 
@@ -101,7 +95,7 @@ export class MergeNode extends WorkflowNode<{ output: unknown }> {
   protected run({ inputs }: NodeExecutionContext): { output: unknown } {
     const supplied = Object.values(inputs)
     if (supplied.length !== 1) {
-      throw new NodeFailure(`merge 要求恰好一个送达的输入，实际为 ${supplied.length} 个`)
+      throw new Error(`merge 要求恰好一个送达的输入，实际为 ${supplied.length} 个`)
     }
     return { output: supplied[0] }
   }
@@ -124,9 +118,9 @@ export class WorkflowInputNode implements WorkflowNodeExecutor {
   execute({ config }: NodeExecutionContext): NodeExecutionResult {
     const values = config[WORKFLOW_INPUT_VALUES]
     if (typeof values !== 'object' || values === null || Array.isArray(values)) {
-      return { status: 'failed', error: '工作流输入节点缺少本次运行的输入值' }
+      throw new Error('工作流输入节点缺少本次运行的输入值')
     }
-    return { status: 'completed', outputs: { ...values as Record<string, unknown> } }
+    return { outputs: { ...values as Record<string, unknown> } }
   }
 }
 
@@ -145,7 +139,7 @@ export class WorkflowOutputNode implements WorkflowNodeExecutor {
   readonly outputs: readonly PortDefinition[] = []
 
   execute(): NodeExecutionResult {
-    return { status: 'completed', outputs: {} }
+    return { outputs: {} }
   }
 }
 
@@ -162,8 +156,8 @@ export class SubworkflowNode implements WorkflowNodeExecutor {
   readonly inputs: readonly PortDefinition[] = []
   readonly outputs: readonly PortDefinition[] = []
 
-  execute(): NodeExecutionResult {
-    return { status: 'failed', error: '子工作流节点在运行开始时已展开，不会被执行' }
+  execute(): never {
+    throw new Error('子工作流节点在运行开始时已展开，不会被执行')
   }
 }
 
@@ -183,9 +177,9 @@ export class SubworkflowEntryNode implements WorkflowNodeExecutor {
   execute({ config, inputs }: NodeExecutionContext): NodeExecutionResult {
     const defaults = config[SUBWORKFLOW_DEFAULTS]
     if (typeof defaults !== 'object' || defaults === null || Array.isArray(defaults)) {
-      return { status: 'failed', error: '子工作流入口缺少输入默认值' }
+      throw new Error('子工作流入口缺少输入默认值')
     }
-    return { status: 'completed', outputs: { ...defaults as Record<string, unknown>, ...inputs } }
+    return { outputs: { ...defaults as Record<string, unknown>, ...inputs } }
   }
 }
 
@@ -199,7 +193,7 @@ export class SubworkflowExitNode implements WorkflowNodeExecutor {
   readonly outputs: readonly PortDefinition[] = []
 
   execute(): NodeExecutionResult {
-    return { status: 'completed', outputs: {} }
+    return { outputs: {} }
   }
 }
 

@@ -60,7 +60,7 @@ const waiter: WorkflowNodeExecutor = {
   outputs: [{ name: 'output', type: 'any' }],
   execute: async (context) => {
     await context.awaitSignal('go', { kind: 'go' })
-    return { status: 'completed', outputs: { output: null } }
+    return { outputs: { output: null } }
   },
 }
 
@@ -77,7 +77,7 @@ const blocker: WorkflowNodeExecutor = {
   execute: async ({ signal }) => {
     blockRelease?.()
     await new Promise((_resolve, reject) => { signal.addEventListener('abort', () => { reject(signal.reason) }, { once: true }) })
-    return { status: 'completed', outputs: { output: null } }
+    return { outputs: { output: null } }
   },
 }
 
@@ -88,7 +88,7 @@ const flag: WorkflowNodeExecutor = {
   description: 'Outputs its configured boolean',
   inputs: [],
   outputs: [{ name: 'output', type: 'boolean' }],
-  execute: ({ config }) => ({ status: 'completed', outputs: { output: config.value === true } }),
+  execute: ({ config }) => ({ outputs: { output: config.value === true } }),
 }
 
 /** 完成但不触发任何执行引脚的节点，使其执行后继被跳过。 */
@@ -98,7 +98,7 @@ const decline: WorkflowNodeExecutor = {
   description: 'Completes without firing its execution pin',
   inputs: [],
   outputs: [{ name: 'output', type: 'any' }],
-  execute: () => ({ status: 'completed', outputs: { output: null }, next: [] }),
+  execute: () => ({ outputs: { output: null }, next: [] }),
 }
 
 const executors = [new MarkNode(), new SinkNode(), decline, flag, blocker, waiter]
@@ -201,15 +201,15 @@ describe('分支、合并与输出完整性', () => {
     const offenders: readonly [PortDefinition[], WorkflowNodeExecutor['execute'], RegExp][] = [
       [
         [{ name: 'output', type: 'any' }, { name: 'extra', type: 'any' }],
-        () => ({ status: 'completed', outputs: { output: 1 } }),
+        () => ({ outputs: { output: 1 } }),
         /完成时未产生输出端口 extra；无内容时写 null/,
       ],
       [
         [{ name: 'output', type: 'any' }],
-        () => ({ status: 'completed', outputs: { output: undefined } }),
+        () => ({ outputs: { output: undefined } }),
         /完成时未产生输出端口 output/,
       ],
-      [[], () => ({ status: 'completed', outputs: {}, next: ['nope'] }), /触发未声明的执行输出引脚 nope/],
+      [[], () => ({ outputs: {}, next: ['nope'] }), /触发未声明的执行输出引脚 nope/],
     ]
     for (const [outputs, execute, message] of offenders) {
       const offender: WorkflowNodeExecutor = {

@@ -4,7 +4,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
+import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import type { NodeExecutionContext } from '../src/shared/types.ts'
 import { RunId } from '../src/shared/types.ts'
 
@@ -37,14 +37,12 @@ class ProbeNode extends WorkflowNode {
   protected run({ config, inputs }: NodeExecutionContext): Record<string, unknown> | Promise<Record<string, unknown>> {
     this.seen = inputs
     switch (config.mode) {
-      case 'fail':
-        throw new NodeFailure('planned', { partial: 1 })
       case 'crash':
         throw new Error('unexpected')
       case 'async':
         return Promise.resolve({ output: 'later' })
-      case 'async-fail':
-        return Promise.reject(new NodeFailure('async planned'))
+      case 'async-crash':
+        return Promise.reject(new Error('async unexpected'))
       default:
         return { output: inputs.value }
     }
@@ -57,33 +55,22 @@ describe('WorkflowNode', () => {
     assert.deepEqual(new ProbeNode().outputs, [{ name: 'output', type: 'any' }])
   })
 
-  it('同步和异步 run 都返回 completed，且 run 收到全部输入', async () => {
+  it('同步和异步 run 的返回值都成为输出，且 run 收到全部输入', async () => {
     const node = new ProbeNode()
 
     assert.deepEqual(
       await node.execute(context({ inputs: { value: 3 } })),
-      { status: 'completed', outputs: { output: 3 } },
+      { outputs: { output: 3 } },
     )
     assert.deepEqual(node.seen, { value: 3 })
     assert.deepEqual(
       await node.execute(context({ config: { mode: 'async' } })),
-      { status: 'completed', outputs: { output: 'later' } },
+      { outputs: { output: 'later' } },
     )
   })
 
-  it('NodeFailure 转换为带诊断输出的失败结果', async () => {
-    const node = new ProbeNode()
-    assert.deepEqual(
-      await node.execute(context({ config: { mode: 'fail' } })),
-      { status: 'failed', error: 'planned', outputs: { partial: 1 } },
-    )
-    assert.deepEqual(
-      await node.execute(context({ config: { mode: 'async-fail' } })),
-      { status: 'failed', error: 'async planned' },
-    )
-  })
-
-  it('非 NodeFailure 错误原样抛出', async () => {
-    await assert.rejects(new ProbeNode().execute(context({ config: { mode: 'crash' } })), /unexpected/)
+  it('同步和异步 run 抛出的错误原样交给引擎', async () => {
+    await assert.rejects(new ProbeNode().execute(context({ config: { mode: 'crash' } })), /^Error: unexpected$/)
+    await assert.rejects(new ProbeNode().execute(context({ config: { mode: 'async-crash' } })), /async unexpected/)
   })
 })

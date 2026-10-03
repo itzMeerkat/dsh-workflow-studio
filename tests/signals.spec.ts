@@ -80,7 +80,7 @@ function executors(calls: Calls, options: { block?: boolean; recovery?: NodeReco
       if (options.block === true) {
         await new Promise<void>((resolve) => { context.signal.addEventListener('abort', () => { resolve() }) })
       }
-      return { status: 'completed', outputs: { answer } }
+      return { outputs: { answer } }
     },
   }
   const waiter: WorkflowNodeExecutor = {
@@ -90,7 +90,7 @@ function executors(calls: Calls, options: { block?: boolean; recovery?: NodeReco
     outputs: [{ name: 'output', type: 'any' }],
     async execute(context) {
       const result = await context.awaitSignal('job', { kind: 'job', jobId: '7' })
-      return { status: 'completed', outputs: { output: result } }
+      return { outputs: { output: result } }
     },
   }
   return [asker, waiter]
@@ -173,14 +173,14 @@ describe('节点等待外部结果', () => {
       description: 'Works until released',
       async execute() {
         await release.promise
-        return { status: 'completed', outputs: {} }
+        return { outputs: {} }
       },
     }
     const failer: WorkflowNodeExecutor = {
       type: 'failer',
       label: 'Failer',
       description: 'Fails',
-      execute: () => ({ status: 'failed', error: 'down' }),
+      execute: () => { throw new Error('down') },
     }
     const { engine } = await hosts.start(await hosts.root(), [...executors({ asks: 0 }), worker, failer])
     const run = engine.start(await engine.save(workflow({ w: 'waiter', work: 'worker', fail: 'failer' }, [], { name: 'exit' })))

@@ -2,7 +2,7 @@
  * 测试用节点：覆盖引擎需要的普通节点、流程控制节点和可变输入节点。
  */
 
-import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
+import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { askUser, validateQuestionsSignal } from '../src/shared/questions.ts'
 import type { NodeControlDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/shared/types.ts'
 
@@ -41,7 +41,7 @@ export class SumNode extends WorkflowNode<{ result: number }> {
     const { left, right } = inputs
     const offset = config.offset ?? 0
     if (typeof left !== 'number' || typeof right !== 'number' || typeof offset !== 'number') {
-      throw new NodeFailure('left、right 和 offset 必须为数值')
+      throw new TypeError('left、right 和 offset 必须为数值')
     }
     return { result: left + right + offset }
   }

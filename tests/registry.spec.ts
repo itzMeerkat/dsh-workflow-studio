@@ -14,7 +14,7 @@ function executor(type: string, fields: Partial<WorkflowNodeExecutor> = {}): Wor
     type,
     label: type,
     description: `${type} node`,
-    execute: () => ({ status: 'completed', outputs: {} }),
+    execute: () => ({ outputs: {} }),
     ...fields,
   }
 }

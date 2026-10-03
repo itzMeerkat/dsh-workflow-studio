@@ -21,11 +21,10 @@ Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node
 
 ## Implement a node
 
-Treat `context.config` and `context.inputs` as runtime JSON. Validate values that `run()` relies on. Return the outputs, or throw `NodeFailure` for an expected business failure; any other thrown error also fails the node, with its message.
+Treat `context.config` and `context.inputs` as runtime JSON. Validate values that `run()` relies on. Return the outputs. Express every business outcome, such as a rejected approval, as output values or the execution pins the node fires, so the graph branches on it. Throw only for an error the node cannot handle, such as invalid configuration or a failed dependency: the engine records the node as failed with the error's message and applies its error policy, exactly as a `code` workflow returns when an atom returns an error.
 
 ```ts
 import {
-  NodeFailure,
   WorkflowNode,
   type NodeControlDefinition,
   type NodeExecutionContext,
@@ -50,18 +49,18 @@ export class PrefixTextNode extends WorkflowNode<{ output: string }> {
   protected run(context: NodeExecutionContext): { output: string } {
     const input = context.inputs.input
     const prefix = context.config.prefix ?? ''
-    if (typeof input !== 'string') throw new NodeFailure('input must be a string')
-    if (typeof prefix !== 'string') throw new NodeFailure('prefix must be a string')
+    if (typeof input !== 'string') throw new TypeError('input must be a string')
+    if (typeof prefix !== 'string') throw new TypeError('prefix must be a string')
     return { output: `${prefix}${input}` }
   }
 }
 ```
 
-Every key in the returned outputs must match a declared output port. `NodeFailure` may carry diagnostic outputs but must provide an actionable message.
+Every key in the returned outputs must match a declared output port. A thrown error's message is all the run record keeps, so make it actionable.
 
 `context.inputs` contains only ports whose upstream produced a value, and `run()` never sees `condition`. Use `context.connected.has(name)` to distinguish a connected port whose upstream produced nothing from a disconnected port. `context.invocationKey` is `<runId>/<nodeId>`; use it to name or deduplicate external work when the node may run again.
 
-A plain object that implements `WorkflowNodeExecutor` is also accepted. It returns the result union from `execute()` itself, may implement `preflight()`, and receives no condition input unless it declares one.
+A plain object that implements `WorkflowNodeExecutor` is also accepted. It returns `{ outputs, next? }` from `execute()` itself, or throws, may implement `preflight()`, and receives no condition input unless it declares one.
 
 ## Register with Cordis ownership
 
@@ -150,7 +149,7 @@ Before finishing, confirm:
 - The type is kebab-case and unique.
 - User-visible text is concise and locale ownership is respected for client changes.
 - Every used input and produced output is declared.
-- Expected invalid data throws `NodeFailure` (or returns `failed` from a plain executor) with a useful error.
+- Business outcomes are outputs or fired pins; only an error the node cannot handle is thrown, with a useful message.
 - Async work observes cancellation and releases resources.
 - A second call of `run()` for the same `invocationKey` is safe, or `recovery` is `hold`.
 - Outputs and notepad values are JSON values.

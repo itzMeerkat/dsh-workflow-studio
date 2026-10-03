@@ -1,12 +1,12 @@
 /**
  * `code` 工作流的节点：每个节点携带一段它所在工作流的语言的代码。
  *
- * 这些节点只被写成源码，从不运行，所以 `execute` 明确失败。生成器按类型决定怎么写它们，
+ * 这些节点只被写成源码，从不运行，所以 `execute` 总是抛出。生成器按类型决定怎么写它们，
  * 因此它们与生成器一起由本插件注册。
  * @module dsh-workflow-studio
  */
 
-import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from './node.ts'
+import { WorkflowNode, type WorkflowNodePorts } from './node.ts'
 import { CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD } from './shared/language.ts'
 import type { NodeControlDefinition, WorkflowKind, WorkflowNodeExecutor } from './shared/types.ts'
 
@@ -22,7 +22,7 @@ abstract class CodeNode extends WorkflowNode {
   }
 
   protected run(): never {
-    throw new NodeFailure(`${this.type} 节点只被写成源码，不能运行`)
+    throw new Error(`${this.type} 节点只被写成源码，不能运行`)
   }
 }
 

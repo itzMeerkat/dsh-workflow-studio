@@ -253,9 +253,13 @@ export interface NodeNotepad {
   save(value: JsonValue): Promise<void>
 }
 
-/** 节点执行成功结果。 */
-export interface NodeExecutionCompleted {
-  status: 'completed'
+/**
+ * 节点完成时的结果。
+ *
+ * 业务上的每一种结局都是一次完成，例如审批被拒：它由输出端口的值和触发的执行引脚表达，下游据此分支。
+ * 节点不能自行跳过：不适用时同样完成且不做任何事。
+ */
+export interface NodeExecutionResult {
   /** 输出端口数据；每个已声明的输出端口都必须有值，无内容时写 null。 */
   outputs: Record<string, unknown>
   /**
@@ -264,18 +268,6 @@ export interface NodeExecutionCompleted {
    */
   next?: readonly string[]
 }
-
-/** 节点执行失败结果。 */
-export interface NodeExecutionFailed {
-  status: 'failed'
-  /** 可直接写入运行记录的失败原因。 */
-  error: string
-  /** 失败前已产生的诊断输出。 */
-  outputs?: Record<string, unknown>
-}
-
-/** 节点执行结果。节点不能自行跳过：不适用时以 completed 结束且不做任何事。 */
-export type NodeExecutionResult = NodeExecutionCompleted | NodeExecutionFailed
 
 /** 节点运行状态。等待外部结果的节点仍为 running；skipped 只由失效的执行边产生。 */
 export type NodeRunStatus =
@@ -376,7 +368,7 @@ export interface WorkflowNodeExecutor {
   readonly outputs?: readonly PortDefinition[]
   /**
    * 节点声明的执行输出引脚；省略时只有 `then`，在节点完成时触发。
-   * 声明多个引脚的节点通过 {@link NodeExecutionCompleted.next} 选择本次触发哪些。
+   * 声明多个引脚的节点通过 {@link NodeExecutionResult.next} 选择本次触发哪些。
    */
   readonly execOutputs?: readonly string[]
   /** 浏览器节点卡片直接渲染的配置控件。 */
@@ -401,7 +393,9 @@ export interface WorkflowNodeExecutor {
   /**
    * 执行节点。
    * @param context - 执行上下文，`inputs` 包含所有已产生值的输入端口。
-   * @returns 节点执行结果。
+   * @returns 节点完成时的结果。
+   * @throws 节点自己处理不了的错误，例如配置或输入非法、依赖的服务出错；引擎把节点记为 failed，按它的
+   * {@link NodeErrorPolicy} 处置，与 `code` 工作流中原子返回的错误相同。
    */
   execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult>
 }

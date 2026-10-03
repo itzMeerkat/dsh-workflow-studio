@@ -54,7 +54,7 @@ export { toJsonValue, toJsonObject } from './shared/json.ts'
 export {
   EXEC_RUN_PIN, EXEC_THEN_PIN, execOutputPins, execSourcePin, execTargetPin, isDataEdge, isExecEdge,
 } from './shared/graph.ts'
-export { NodeFailure, WorkflowNode, toFailureResult } from './node.ts'
+export { WorkflowNode } from './node.ts'
 export { BRANCH_FALSE_PIN, BRANCH_TRUE_PIN, BranchNode, MergeNode, SwitchNode } from './flow-nodes.ts'
 export {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, boundaryPorts, boundarySide, isBoundaryNode, withBoundaryPorts,
@@ -92,7 +92,7 @@ export type {
   DagWorkflowDefinition, DagNodeDefinition, DagEdgeDefinition,
   WorkflowNodeExecutor, NodeExecutionContext, NodeExecutionResult,
   DagDataEdge, DagExecEdge,
-  NodeExecutionCompleted, NodeExecutionFailed, NodeControlDefinition,
+  NodeControlDefinition, NodeErrorPolicy,
   WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
   NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, NodeSignalRequest,
   NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, NodeExecKind, WorkflowKind,

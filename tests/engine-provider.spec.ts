@@ -11,7 +11,7 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { TestHosts } from './host.ts'
 import { createFixtureNodes } from './fixture-nodes.ts'
 import { workflow } from './graph-fixtures.ts'
-import { NodeFailure, WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
+import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
@@ -49,7 +49,6 @@ const plain: WorkflowNodeExecutor = {
   inputs: [{ name: 'input', type: 'any', required: false }],
   outputs: [{ name: 'output', type: 'any' }],
   execute: ({ connected, invocationKey, inputs }) => ({
-    status: 'completed',
     outputs: { output: { connected: [...connected], invocationKey, inputs } },
   }),
 }
@@ -57,10 +56,10 @@ const plain: WorkflowNodeExecutor = {
 const fail: WorkflowNodeExecutor = {
   type: 'fail',
   label: 'Fail',
-  description: 'Returns a deterministic failure',
+  description: 'Throws a deterministic error',
   inputs: [],
   outputs: [{ name: 'output', type: 'any' }],
-  execute: () => ({ status: 'failed', error: 'planned failure' }),
+  execute: () => { throw new Error('planned failure') },
 }
 
 const binary: WorkflowNodeExecutor = {
@@ -69,7 +68,7 @@ const binary: WorkflowNodeExecutor = {
   description: 'Requires two inputs',
   inputs: [{ name: 'left', type: 'any' }, { name: 'right', type: 'any' }],
   outputs: [{ name: 'output', type: 'any' }],
-  execute: ({ inputs }) => ({ status: 'completed', outputs: { output: [inputs.left, inputs.right] } }),
+  execute: ({ inputs }) => ({ outputs: { output: [inputs.left, inputs.right] } }),
 }
 
 /** 等待一个外部结果；结果为 `{ ok: false }` 时节点失败。 */
@@ -82,7 +81,7 @@ class WaiterNode extends WorkflowNode<{ output: unknown }> {
   protected async run(context: NodeExecutionContext): Promise<{ output: unknown }> {
     const result = await context.awaitSignal('go', { kind: 'go' })
     if (typeof result === 'object' && result !== null && 'ok' in result && result.ok === false) {
-      throw new NodeFailure('外部结果为拒绝')
+      throw new Error('外部结果为拒绝')
     }
     return { output: result }
   }

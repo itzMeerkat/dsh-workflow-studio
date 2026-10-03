@@ -20,7 +20,7 @@ const codeOnly: WorkflowNodeExecutor = {
   kinds: ['code'],
   inputs: [],
   outputs: [],
-  execute: () => ({ status: 'completed', outputs: {} }),
+  execute: () => ({ outputs: {} }),
 }
 
 function registry(): { registry: WorkflowNodeRegistry; dispose: () => Promise<void> } {
