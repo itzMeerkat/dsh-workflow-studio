@@ -1,6 +1,6 @@
 /** The panel's wording of a failed Remote call: a refusal in the active locale, anything else by its own message. */
 
-import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+import type { RemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
 import { assertNever, messageOf } from '../shared/errors.ts'
 import type { WorkflowRefusal } from '../shared/refusal.ts'
 import type { Translate, WorkflowStudioKey } from './locale.ts'
@@ -13,8 +13,16 @@ import type { Translate, WorkflowStudioKey } from './locale.ts'
  * it reports something the author cannot fix.
  */
 export function failureText(error: unknown, t: Translate): string {
-  const remote = remoteErrorOf(error)
-  return remote?.code === 'workflowStudio/refused' ? refusalText(remote.details.refusal, t) : messageOf(error)
+  return isRemoteFailure(error) && error.code === 'workflowStudio/refused' ? refusalText(error.details.refusal, t) : messageOf(error)
+}
+
+/**
+ * Whether a value is a Remote failure, by the protocol's structural marker. The Web host serves no runtime copy of
+ * `@deepseek-ai/dsh-typert-protocol`, so the client cannot import its `remoteErrorOf`; the marker is what that
+ * function checks, and the Gateway rebuilds every failure with it.
+ */
+function isRemoteFailure(value: unknown): value is RemoteFailure {
+  return typeof value === 'object' && value !== null && 'isDSHRemoteError' in value && value.isDSHRemoteError === true
 }
 
 /**
