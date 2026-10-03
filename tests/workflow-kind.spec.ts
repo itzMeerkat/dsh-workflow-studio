@@ -38,7 +38,7 @@ describe('工作流种类', () => {
 
   it('快照保留节点类型的执行语义和适用种类', () => {
     const snapshot = workflowStudioSnapshotSchema.parse({
-      workflows: [{ id: 'w', name: 'w', kind: 'code', definition: '{}' }],
+      workflows: [{ id: 'w', name: 'w', kind: 'code', definition: { name: 'w', kind: 'code', language: 'go', nodes: [], edges: [] } }],
       nodeTypes: [{
         type: 'merge',
         label: '分支合并',

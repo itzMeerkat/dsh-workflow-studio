@@ -19,7 +19,7 @@ import { messageOf } from '../shared/errors.ts'
 import { withCallees, type Callees } from '../shared/callees.ts'
 import { SUBWORKFLOW_TYPE, embedFault } from '../shared/subworkflow.ts'
 import {
-  WorkflowId, type DagWorkflowDefinition, type NodeTypeSummary, type SavedWorkflow, type WorkflowKind,
+  WorkflowId, type DagWorkflowDefinition, type JsonObject, type NodeTypeSummary, type SavedWorkflow, type WorkflowKind,
   type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import {
@@ -28,7 +28,6 @@ import {
 import {
   CODE_LANGUAGES, atomLibrary, languageOf, type AtomLibrary,
 } from '../shared/language.ts'
-import { atomFilesSchema } from '../shared/workflow-schema.ts'
 import { analyzeEditorGraph } from './analysis-model.ts'
 import { CARD_WIDTH } from './graph-model.ts'
 import { AtomsPanel } from './AtomsPanel.tsx'
@@ -41,11 +40,8 @@ import {
   appendAtomNode,
   appendEditorNode,
   appendSubworkflowNode,
-  formatEditorDefinition,
   nextWorkflowName,
   openFault,
-  parseEditorDefinition,
-  parseSnapshot,
   type EmbedChoice,
   type WorkflowRow,
 } from './model.ts'
@@ -121,7 +117,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
 
   const select = (workflow: WorkflowRow): void => {
     try {
-      replaceDefinition(editable(parseEditorDefinition(workflow.definition)))
+      replaceDefinition(editable(workflow.definition))
       setSelectedId(workflow.id)
     } catch (error: unknown) {
       setNotice(messageOf(error))
@@ -132,7 +128,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
     setAtomsRead(value => value + 1)
     setPhase('loading')
     setNotice(undefined)
-    const next = await callRemote(() => remote.snapshot(), parseSnapshot, setNotice)
+    const next = await callRemote(() => remote.snapshot(), setNotice)
     if (next !== undefined) {
       setSnapshot(next)
       const selected = next.workflows.find(row => row.id === preferredId)
@@ -155,17 +151,14 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
     setLibrary(undefined)
     if (folder === undefined || atomSyntax === undefined) return
     let current = true
-    void callRemote(
-      () => remote.atomFiles(folder, definition.language!),
-      files => atomLibrary(folder, atomFilesSchema.parse(JSON.parse(files)), atomSyntax),
-      setNotice,
-    ).then((next) => { if (current) setLibrary(next) })
+    void callRemote(() => remote.atomFiles(folder, definition.language!), setNotice)
+      .then((files) => { if (current && files !== undefined) setLibrary(atomLibrary(folder, files, atomSyntax)) })
     return () => { current = false }
   }, [definition.atomFolder, definition.language, atomsRead])
 
   // The saved workflows, which subworkflow nodes link to by ID.
   const saved = useMemo(
-    () => new Map(snapshot.workflows.map(row => [row.id, parseEditorDefinition(row.definition)])),
+    () => new Map(snapshot.workflows.map(row => [row.id, row.definition])),
     [snapshot.workflows],
   )
   const callees = useMemo<Callees>(() => ({
@@ -183,10 +176,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
 
   /** Save the edited definition; failures show as the notice. */
   const persist = async (): Promise<SavedWorkflow | undefined> => {
-    const source = formatEditorDefinition(definition)
     const result = await callRemote(
-      () => selectedId === undefined ? remote.save(source) : remote.update(selectedId, source),
-      json => JSON.parse(json) as SavedWorkflow,
+      () => selectedId === undefined ? remote.save(definition) : remote.update(selectedId, definition),
       setNotice,
     )
     if (result !== undefined) setSelectedId(result.workflowId)
@@ -218,7 +209,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   const remove = async (id: string): Promise<void> => {
     setPhase('saving')
     setNotice(undefined)
-    const deleted = await callRemote(() => remote.delete(id), () => true, setNotice)
+    const deleted = await callRemote(() => remote.delete(id), setNotice)
     if (deleted === undefined) {
       setPhase('ready')
       return
@@ -230,14 +221,14 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   }
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
-  const startRun = async (inputs: string): Promise<void> => {
+  const startRun = async (inputs: JsonObject): Promise<void> => {
     setRunPrompt(false)
     setPhase('running')
     setNotice(undefined)
     const result = await persist()
     const runId = result === undefined
       ? undefined
-      : await callRemote(() => remote.start(result.workflowId, inputs), id => id, setNotice)
+      : await callRemote(() => remote.start(result.workflowId, inputs), setNotice)
     if (runId !== undefined) {
       runs.setFilter('workflow')
       setView('runs')
@@ -249,7 +240,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   /** A workflow that declares inputs asks for their values first; one that declares none just runs. */
   const run = (): void => {
     if (workflowInputPorts(definition).length > 0) setRunPrompt(true)
-    else void startRun('{}')
+    else void startRun({})
   }
 
   /** Load one picked file into the editor as an unsaved workflow. */

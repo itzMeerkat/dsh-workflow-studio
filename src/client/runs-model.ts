@@ -6,29 +6,9 @@ import type {
   AskUserQuestionAnswer,
   AskUserQuestionItem,
 } from '@deepseek-ai/dsh-user-questions/types'
-import { z } from 'zod'
 import type {
   JsonValue, NodeRunRecord, NodeSignalRequest, WorkflowRunRecord, WorkflowRunStatus, WorkflowRunSummary,
 } from '../shared/types.ts'
-import { workflowRunRecordSchema, workflowRunSummarySchema } from '../shared/workflow-schema.ts'
-
-/**
- * Parse the `listRuns` Remote result.
- * @param source - JSON array of run summaries.
- * @returns The rows in Host order (newest first).
- */
-export function parseRunSummaries(source: string): WorkflowRunSummary[] {
-  return z.array(workflowRunSummarySchema).parse(JSON.parse(source) as unknown)
-}
-
-/**
- * Parse a run record returned by `getRun` or a control Remote.
- * @param source - JSON run record.
- * @returns The parsed record.
- */
-export function parseRunRecord(source: string): WorkflowRunRecord {
-  return workflowRunRecordSchema.parse(JSON.parse(source) as unknown)
-}
 
 /**
  * Whether a run still needs attention: it is unfinished, or it waits for an answer.

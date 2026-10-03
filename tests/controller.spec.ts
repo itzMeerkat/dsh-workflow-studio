@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ATOM_FIELD, CODE_ATOM_TYPE } from '../src/shared/language.ts'
 import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE } from '../src/shared/subworkflow.ts'
-import { RunId, type SavedWorkflow } from '../src/shared/types.ts'
+import { RunId, type DagWorkflowDefinition, type SavedWorkflow } from '../src/shared/types.ts'
 import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
 
@@ -30,33 +30,22 @@ describe('WorkflowStudioController', () => {
   }
 
   /** 保存结果中的工作流 ID。 */
-  const idOf = (saved: string): string => (JSON.parse(saved) as { workflowId: string }).workflowId
+  const idOf = (saved: SavedWorkflow): string => saved.workflowId
 
   /** 快照中第一个工作流保存下来的定义。 */
-  function savedDefinition(controller: WorkflowStudioController): { nodes: Record<string, unknown>[] } {
-    const snapshot = JSON.parse(controller.snapshot()) as { workflows: { definition: string }[] }
-    return JSON.parse(snapshot.workflows[0]!.definition) as { nodes: Record<string, unknown>[] }
+  function savedDefinition(controller: WorkflowStudioController): DagWorkflowDefinition {
+    return controller.snapshot().workflows[0]!.definition
   }
 
   it('保存定义、列出节点并返回完整运行结果', async () => {
     const controller = await setup()
-    const workflowId = idOf(await controller.save(JSON.stringify(workflow({
+    const workflowId = idOf(await controller.save(workflow({
       left: { type: 'value', config: { value: 10 }, position: { x: 24, y: 48 } },
       right: { type: 'value', config: { value: 20 } },
       add: { type: 'sum', config: { offset: 0 } },
-    }, ['left>add:left', 'right>add:right'], { name: 'sum' }))))
+    }, ['left>add:left', 'right>add:right'], { name: 'sum' })))
 
-    const snapshot = JSON.parse(controller.snapshot()) as {
-      workflows: Array<{ id: string; name: string }>
-      nodeTypes: Array<{
-        type: string
-        sourcePlugin: string
-        inputs: Array<{ name: string }>
-        outputs: Array<{ name: string; display?: string }>
-        execOutputs: string[]
-        controls: Array<{ name: string; kind: string }>
-      }>
-    }
+    const snapshot = controller.snapshot()
     assert.deepEqual(
       snapshot.workflows.map(({ id, name }) => ({ id, name })),
       [{ id: workflowId, name: 'sum' }],
@@ -81,17 +70,17 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(gate?.execOutputs, ['true', 'false'])
     assert.deepEqual(savedDefinition(controller).nodes.find(node => node.id === 'left')?.position, { x: 24, y: 48 })
 
-    const result = await runEnded(host, RunId(controller.start(workflowId)))
+    const result = await runEnded(host, RunId(controller.start(workflowId, {})))
     assert.equal(result.status, 'completed')
     assert.deepEqual(result.nodes.find(node => node.nodeId === 'add')?.outputs, { result: 30 })
   })
 
   it('保存的定义保留边界节点声明的端口和默认值', async () => {
     const controller = await setup()
-    await controller.save(JSON.stringify(workflow({
+    await controller.save(workflow({
       in: { type: 'workflow-input', outputs: [{ name: 'threshold', type: 'number', default: 3 }] },
       out: { type: 'workflow-output', inputs: [{ name: 'verdict', type: 'string', required: false }] },
-    }, [], { name: 'declared' })))
+    }, [], { name: 'declared' }))
 
     // A schema that does not declare `default` drops it, so the round trip is what proves it persists.
     assert.deepEqual(savedDefinition(controller).nodes.find(node => node.id === 'in')?.outputs, [
@@ -101,26 +90,22 @@ describe('WorkflowStudioController', () => {
 
   it('等待中的请求经 signal Remote 校验后送达结果', async () => {
     const controller = await setup()
-    const workflowId = idOf(await controller.save(JSON.stringify(
+    const workflowId = idOf(await controller.save(
       workflow({ ask: 'ask' }, [], { name: 'ask' }),
-    )))
+    ))
     const asked = signalRequested(host)
-    const runId = RunId(controller.start(workflowId))
+    const runId = RunId(controller.start(workflowId, {}))
     await asked
-    const pending = (JSON.parse(controller.getRun(runId)) as {
-      nodes: { status: string; requests?: { id: string; request: { kind: string } }[] }[]
-    }).nodes[0]!
+    const pending = controller.getRun(runId).nodes[0]!
     assert.equal(pending.status, 'running')
-    assert.deepEqual(pending.requests?.map(item => [item.id, item.request.kind]), [['pick', 'questions']])
+    assert.deepEqual(pending.requests?.map(item => [item.id, (item.request as { kind: string }).kind]), [['pick', 'questions']])
 
     await assert.rejects(
-      controller.signal(runId, 'ask', 'pick', JSON.stringify({ answers: [] })),
+      controller.signal(runId, 'ask', 'pick', { answers: [] }),
       /缺少问题 "decision"/,
     )
     const answer = { answers: [{ id: 'decision', selected: ['yes'] }] }
-    const after = JSON.parse(await controller.signal(runId, 'ask', 'pick', JSON.stringify(answer))) as {
-      nodes: Array<{ requests?: Array<{ result?: unknown }> }>
-    }
+    const after = await controller.signal(runId, 'ask', 'pick', answer)
     assert.deepEqual(after.nodes[0]?.requests?.[0]?.result, answer)
 
     const result = await runEnded(host, runId)
@@ -131,14 +116,12 @@ describe('WorkflowStudioController', () => {
   it('按 ID 更新返回改名后的新 ID，快照只列出改名后的工作流', async () => {
     const controller = await setup()
     const source = workflow({ input: { type: 'value', config: { value: 1 } } }, [], { name: 'before' })
-    assert.equal(idOf(await controller.save(JSON.stringify(source))), 'before')
+    assert.equal(idOf(await controller.save(source)), 'before')
 
-    const renamed = idOf(await controller.update('before', JSON.stringify({ ...source, name: 'after' })))
+    const renamed = idOf(await controller.update('before', { ...source, name: 'after' }))
 
     assert.equal(renamed, 'after')
-    const snapshot = JSON.parse(controller.snapshot()) as {
-      workflows: Array<{ id: string; name: string }>
-    }
+    const snapshot = controller.snapshot()
     assert.deepEqual(
       snapshot.workflows.map(({ id, name }) => ({ id, name })),
       [{ id: 'after', name: 'after' }],
@@ -149,13 +132,10 @@ describe('WorkflowStudioController', () => {
     const controller = await setup()
     const run = workflow({ input: { type: 'value', config: { value: 1 } } }, [], { name: 'shared' })
     const code = workflow({}, [], { name: 'shared', kind: 'code', language: 'go' })
-    await controller.save(JSON.stringify(run))
-    await controller.save(JSON.stringify({ ...code, name: 'compiled' }))
+    await controller.save(run)
+    await controller.save({ ...code, name: 'compiled' })
 
-    const snapshot = JSON.parse(controller.snapshot()) as {
-      workflows: Array<{ id: string; kind: string }>
-      nodeTypes: Array<{ type: string; kinds: string[] }>
-    }
+    const snapshot = controller.snapshot()
     assert.deepEqual(
       snapshot.workflows.map(({ id, kind }) => ({ id, kind })).sort((a, b) => a.id.localeCompare(b.id)),
       [{ id: 'compiled', kind: 'code' }, { id: 'shared', kind: 'run' }],
@@ -165,16 +145,35 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(kindsOf('sum'), ['run'])
     assert.deepEqual(kindsOf('branch'), ['run', 'code'])
 
-    await assert.rejects(controller.save(JSON.stringify(code)), /名称 "shared" 已被一个 run 工作流使用/)
-    await assert.rejects(controller.update('shared', JSON.stringify({ ...code, nodes: [] })), /是 run 工作流，不能改为 code 工作流/)
-    assert.throws(() => controller.start('compiled'), /是 code 工作流，只写成源码，不能运行/)
+    await assert.rejects(controller.save(code), /名称 "shared" 已被一个 run 工作流使用/)
+    await assert.rejects(controller.update('shared', { ...code, nodes: [] }), /是 run 工作流，不能改为 code 工作流/)
+    assert.throws(() => controller.start('compiled', {}), /是 code 工作流，只写成源码，不能运行/)
   })
 
-  it('拒绝无效 JSON 和未注册节点', async () => {
+  it('watchRuns 先给出当前的运行列表，运行变化时再给出新的列表，取消后结束', async () => {
     const controller = await setup()
-    await assert.rejects(controller.save('{'), /JSON/)
+    const workflowId = idOf(await controller.save(workflow({ v: { type: 'value', config: { value: 1 } } }, [], { name: 'watched' })))
+    const watching = new AbortController()
+    const lists: string[][] = []
+    const watch = (async () => {
+      for await (const list of controller.watchRuns(watching.signal)) {
+        lists.push(list.map(run => run.status))
+        if (list[0]?.status === 'completed') watching.abort()
+      }
+    })()
+    await new Promise(resolve => setImmediate(resolve))
+    controller.start(workflowId, {})
+    await watch
+
+    assert.deepEqual(lists[0], [])
+    assert.deepEqual(lists.at(-1), ['completed'])
+  })
+
+  it('拒绝不完整的定义和未注册节点', async () => {
+    const controller = await setup()
+    await assert.rejects(controller.save({ name: 'no-graph' }), /nodes/)
     await assert.rejects(
-      controller.save(JSON.stringify(workflow({ node: 'missing' }, [], { name: 'bad' }))),
+      controller.save(workflow({ node: 'missing' }, [], { name: 'bad' })),
       /未知节点类型/,
     )
   })
@@ -189,10 +188,10 @@ describe('WorkflowStudioController', () => {
         say: { type: CODE_ATOM_TYPE, config: { [ATOM_FIELD]: file }, inputs: [{ name: 'name', type: 'string' }] },
       }, ['in:name>say:name'], { name: 'hello', kind: 'code', language: 'go', atomFolder: folder })
 
-      assert.match((JSON.parse(await controller.save(JSON.stringify(greet('gone.go')))) as { sourceError: string }).sourceError, /gone\.go/)
+      assert.match((await controller.save(greet('gone.go'))).sourceError ?? '', /gone\.go/)
       assert.deepEqual(await readdir(folder), ['greet.go'])
 
-      await controller.save(JSON.stringify(greet('greet.go')))
+      await controller.save(greet('greet.go'))
       assert.equal(await readFile(join(folder, 'hello.workflow.go'), 'utf8'), [
         '// Code generated from workflow "hello". DO NOT EDIT.',
         '',
@@ -206,28 +205,28 @@ describe('WorkflowStudioController', () => {
       ].join('\n'))
 
       // 嵌入它的工作流按它的签名调用它，所以它的签名一变，嵌入方的文件随之重写；写不出时删除并给出原因。
-      await controller.save(JSON.stringify(workflow({
+      await controller.save(workflow({
         in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'name', type: 'string' }] },
         sub: { type: SUBWORKFLOW_TYPE, config: { [SUBWORKFLOW_FIELD]: 'hello' }, inputs: [{ name: 'name', type: 'string' }] },
-      }, ['in:name>sub:name'], { name: 'outer', kind: 'code', language: 'go', atomFolder: folder })))
+      }, ['in:name>sub:name'], { name: 'outer', kind: 'code', language: 'go', atomFolder: folder }))
       assert.match(await readFile(join(folder, 'outer.workflow.go'), 'utf8'), /err = hello\(name\)/)
       const widened = greet('greet.go')
       widened.nodes[0]!.outputs!.push({ name: 'greeting', type: 'string' })
-      const saved = JSON.parse(await controller.update('hello', JSON.stringify(widened))) as SavedWorkflow
+      const saved = await controller.update('hello', widened) as SavedWorkflow
       assert.deepEqual(saved.embedderErrors?.map(({ name }) => name), ['outer'])
       assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'hello.workflow.go'])
       await assert.rejects(controller.delete('hello'), /被 "outer" 作为子工作流嵌入，不能删除/)
-      await controller.save(JSON.stringify(greet('greet.go')))
+      await controller.save(greet('greet.go'))
 
       // 改名后文件随新 ID 改名，旧文件不再留在包里。
-      await controller.save(JSON.stringify(workflow({}, [], { name: 'outer', kind: 'code', language: 'go', atomFolder: folder })))
-      await controller.update('hello', JSON.stringify({ ...greet('greet.go'), name: 'greeting' }))
+      await controller.save(workflow({}, [], { name: 'outer', kind: 'code', language: 'go', atomFolder: folder }))
+      await controller.update('hello', { ...greet('greet.go'), name: 'greeting' })
       assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'greeting.workflow.go', 'outer.workflow.go'])
 
       // 删除工作流同时删除它的文件。
       await controller.delete('greeting')
       assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'outer.workflow.go'])
-      assert.deepEqual((JSON.parse(controller.snapshot()) as { workflows: Array<{ id: string }> }).workflows.map(({ id }) => id), ['outer'])
+      assert.deepEqual((controller.snapshot()).workflows.map(({ id }) => id), ['outer'])
       await assert.rejects(controller.delete('greeting'), /不存在/)
     } finally {
       await rm(folder, { recursive: true, force: true })
@@ -237,7 +236,7 @@ describe('WorkflowStudioController', () => {
   it('同时到达的保存逐个执行，换了两次原子目录的工作流只在最后一个目录留下文件', async () => {
     const controller = await setup()
     const folders = await Promise.all([1, 2, 3].map(async () => mkdtemp(join(tmpdir(), 'dsh-workflow-files-'))))
-    const moved = (folder: string): string => JSON.stringify(workflow({}, [], { name: 'mover', kind: 'code', language: 'go', atomFolder: folder }))
+    const moved = (folder: string): DagWorkflowDefinition => workflow({}, [], { name: 'mover', kind: 'code', language: 'go', atomFolder: folder })
     try {
       await controller.save(moved(folders[0]!))
       await Promise.all([controller.update('mover', moved(folders[1]!)), controller.update('mover', moved(folders[2]!))])

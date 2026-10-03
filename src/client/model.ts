@@ -9,7 +9,6 @@ import {
   type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import type { WorkflowStudioKey } from './locale.ts'
-import { workflowDefinitionSchema, workflowStudioSnapshotSchema } from '../shared/workflow-schema.ts'
 
 /** One saved workflow in the editor snapshot. */
 export type WorkflowRow = WorkflowStudioSnapshot['workflows'][number]
@@ -36,15 +35,6 @@ export interface ExecutionPlan {
   readonly stages: readonly ExecutionStage[]
   readonly dependencies: readonly ExecutionDependency[]
   readonly cyclicNodeIds: readonly string[]
-}
-
-/**
- * Parse the `snapshot` Remote result.
- * @param source - JSON snapshot.
- * @returns The workflows and node catalog.
- */
-export function parseSnapshot(source: string): WorkflowStudioSnapshot {
-  return workflowStudioSnapshotSchema.parse(JSON.parse(source) as unknown)
 }
 
 /** Filter node types by user-visible metadata and source plugin. */
@@ -310,12 +300,7 @@ export function openFault(definition: DagWorkflowDefinition): OpenFault | undefi
   return undefined
 }
 
-/** Parse a workflow with the same schema used by Host persistence. */
-export function parseEditorDefinition(source: string): DagWorkflowDefinition {
-  return workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-}
-
-/** Encode one editor definition for the Host parser. */
+/** Encode one editor definition as the JSON an exported file holds. */
 export function formatEditorDefinition(definition: DagWorkflowDefinition): string {
   return JSON.stringify(definition, null, 2)
 }

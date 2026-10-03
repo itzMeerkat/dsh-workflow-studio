@@ -444,8 +444,7 @@ export interface WorkflowStudioSnapshot {
     readonly name: string
     readonly kind: WorkflowKind
     readonly description?: string
-    /** 格式化的定义 JSON。 */
-    readonly definition: string
+    readonly definition: DagWorkflowDefinition
   }>
   readonly nodeTypes: readonly NodeTypeSummary[]
 }

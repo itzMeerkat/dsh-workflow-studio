@@ -3,23 +3,36 @@
  * @module dsh-workflow-studio
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Events } from '@deepseek-ai/cordis'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { z } from 'zod'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
-import { NodeId, RunId, WorkflowId, type WorkflowStudioSnapshot } from './shared/types.ts'
+import type { WorkflowFiles } from './workflow-files.ts'
+import type { AtomFile } from './shared/language.ts'
+import {
+  NodeId, RunId, WorkflowId, type FolderListing, type SavedWorkflow, type WorkflowRunRecord,
+  type WorkflowRunSummary, type WorkflowStudioSnapshot,
+} from './shared/types.ts'
 import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 import { messageOf } from './shared/errors.ts'
-import { parseJsonObject } from './shared/json.ts'
+import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { codeLanguageOf } from './shared/language.ts'
 import { listFolders, readAtomFiles } from './atom-folder.ts'
-import type { WorkflowFiles } from './workflow-files.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     workflowStudioController: WorkflowStudioController
   }
 }
+
+/** Engine events after which the run list may read differently. */
+const RUN_EVENTS = [
+  'dag/start', 'dag/node-start', 'dag/node-end', 'dag/paused', 'dag/resumed', 'dag/signal-requested',
+  'dag/signal-received', 'dag/interrupted', 'dag/end',
+] as const satisfies readonly (keyof Events)[]
+
+const jsonObjectSchema = z.record(z.string(), z.json())
 
 /** Host controller backing the `workflowStudio` Remote namespace. */
 export class WorkflowStudioController extends TypertRemoteService {
@@ -39,165 +52,140 @@ export class WorkflowStudioController extends TypertRemoteService {
   /**
    * Return what the editor works with: every saved workflow, of either kind, and every registered node type. Each
    * node type lists the workflow kinds it may appear in, and the editor offers only the ones fitting the open workflow.
-   * @returns The snapshot encoded as JSON.
+   * @returns The workflows with their definitions, and the node catalog.
    */
   @Remote
-  snapshot(): string {
-    const payload: WorkflowStudioSnapshot = {
+  snapshot(): WorkflowStudioSnapshot {
+    return {
       // list() 与 get() 同步读取同一张表，列出的 ID 一定存在。
-      workflows: this.engine.list().map(summary => ({
-        ...summary,
-        definition: JSON.stringify(this.engine.get(summary.id)!, null, 2),
-      })),
+      workflows: this.engine.list().map(summary => ({ ...summary, definition: this.engine.get(summary.id)! })),
       nodeTypes: this.registry.listTypes(),
     }
-    return JSON.stringify(payload)
   }
 
   /**
-   * Parse, validate, and save one browser-authored definition. A code workflow with an atom folder is
-   * written into that folder as `<id>` plus its language's output suffix, and the files of the workflows embedding it
-   * are rewritten; a workflow whose source cannot be written is still saved, and its file is removed.
-   * @param source - Complete workflow definition encoded as JSON.
-   * @returns JSON `{ workflowId, sourceError?, embedderErrors? }`: the saved workflow ID, why its source could not be
-   * written, and which embedding workflows could not be rewritten and why.
+   * Validate and save one browser-authored definition, replacing a saved workflow of the same name. A code workflow
+   * with an atom folder is written into that folder as `<id>` plus its language's output suffix, and the files of the
+   * workflows embedding it are rewritten; a workflow whose source cannot be written is still saved, and its file is
+   * removed.
+   * @param definition - Complete workflow definition.
+   * @returns The saved workflow ID, why its source could not be written, and which embedding workflows could not be
+   * rewritten and why.
    */
   @Remote
-  async save(source: string): Promise<string> {
-    try {
-      const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return JSON.stringify(await this.files.save(definition))
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
+  async save(definition: unknown): Promise<SavedWorkflow> {
+    return this.guard(async () => this.files.save(workflowDefinitionSchema.parse(definition)))
   }
 
   /**
    * Replace one existing browser-authored definition, re-keying it when its name changed, and write it into
    * its atom folder as {@link save} does.
    * @param workflowId - Existing workflow ID returned by {@link save}.
-   * @param source - Complete replacement definition encoded as JSON.
-   * @returns JSON as {@link save} returns; renaming a workflow returns a new ID.
+   * @param definition - Complete replacement definition.
+   * @returns As {@link save} returns; renaming a workflow returns a new ID.
    */
   @Remote
-  async update(workflowId: string, source: string): Promise<string> {
-    try {
-      const definition = workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
-      return JSON.stringify(await this.files.update(WorkflowId(workflowId), definition))
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
+  async update(workflowId: string, definition: unknown): Promise<SavedWorkflow> {
+    return this.guard(async () => this.files.update(WorkflowId(workflowId), workflowDefinitionSchema.parse(definition)))
   }
 
   /**
    * Delete one saved workflow and the file it wrote into its atom folder; its retained runs stay.
    * @param workflowId - Workflow ID returned by {@link save}.
-   * @returns An empty string once the workflow is deleted.
+   * @returns null once the workflow is deleted.
    */
   @Remote
-  async delete(workflowId: string): Promise<string> {
-    try {
+  async delete(workflowId: string): Promise<null> {
+    return this.guard(async () => {
       await this.files.delete(WorkflowId(workflowId))
-      return ''
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
+      return null
+    })
   }
 
   /**
    * Read the atom files of one folder, for the browser to parse into its node library.
    * @param folder - Absolute path of the atom folder.
    * @param language - Name of a code language.
-   * @returns The folder's files of that language, as a JSON array of `{ file, text }`.
+   * @returns The folder's files of that language.
    */
   @Remote
-  async atomFiles(folder: string, language: string): Promise<string> {
-    try {
-      return JSON.stringify(await readAtomFiles(folder, codeLanguageOf(language).functions.atoms))
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
+  async atomFiles(folder: string, language: string): Promise<AtomFile[]> {
+    return this.guard(async () => readAtomFiles(folder, codeLanguageOf(language).functions.atoms))
   }
 
   /**
    * List the subfolders of one Host folder, for choosing an atom folder.
    * @param path - Absolute folder path; empty for the Host user's home folder.
-   * @returns The listing encoded as JSON.
+   * @returns The listing.
    */
   @Remote
-  async folders(path: string): Promise<string> {
-    try {
-      return JSON.stringify(await listFolders(path))
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
+  async folders(path: string): Promise<FolderListing> {
+    return this.guard(async () => listFolders(path))
   }
 
   /**
    * Start one saved workflow without waiting for it to settle.
    * @param workflowId - ID returned by {@link save}.
-   * @param inputs - Values for the declared input ports, encoded as a JSON object; omitted ports use their default.
+   * @param inputs - Values for the declared input ports; omitted ports use their default.
    * @returns The new run ID.
    */
   @Remote
-  start(workflowId: string, inputs?: string): string {
-    try {
-      const values = inputs === undefined ? {} : parseJsonObject(inputs, '工作流输入')
-      return this.engine.start(WorkflowId(workflowId), values).runId
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
+  start(workflowId: string, inputs: unknown): RunId {
+    return this.guardSync(() =>
+      this.engine.start(WorkflowId(workflowId), toJsonObject(jsonObjectSchema.parse(inputs), 'inputs')).runId)
   }
 
   /**
-   * List retained runs, newest first.
-   * @returns The run summaries encoded as JSON.
+   * Watch the retained runs: the run list now, then again whenever a run starts, moves a node, pauses, resumes,
+   * waits for or receives a result, is interrupted, or ends, until the browser stops watching.
+   * @param signal - Carrier cancellation.
+   * @returns The run summaries, newest first, one list per change.
    */
-  @Remote
-  listRuns(): string {
-    return JSON.stringify(this.engine.listRuns())
+  @Remote({ mode: 'stream' })
+  watchRuns(signal: AbortSignal): AsyncIterable<WorkflowRunSummary[]> {
+    return this.runLists(signal)
   }
 
   /**
    * Read one retained run record with its definition snapshot and node records.
    * @param runId - Run ID returned by {@link start}.
-   * @returns The run record encoded as JSON.
+   * @returns The run record.
    */
   @Remote
-  getRun(runId: string): string {
+  getRun(runId: string): WorkflowRunRecord {
     return this.record(runId)
   }
 
   /**
-   * Request a pause after the current level of a running run.
+   * Request a pause: no new node starts, and the run pauses once the started ones settle.
    * @param runId - Run ID.
-   * @returns The run record after the request, encoded as JSON.
+   * @returns The run record after the request.
    */
   @Remote
-  pause(runId: string): string {
-    this.control(() => { this.engine.pauseRun(RunId(runId)) })
+  pause(runId: string): WorkflowRunRecord {
+    this.guardSync(() => { this.engine.pauseRun(RunId(runId)) })
     return this.record(runId)
   }
 
   /**
    * Resume a paused or interrupted run.
    * @param runId - Run ID.
-   * @returns The run record after resuming, encoded as JSON.
+   * @returns The run record after resuming.
    */
   @Remote
-  resume(runId: string): string {
-    this.control(() => { this.engine.resumeRun(RunId(runId)) })
+  resume(runId: string): WorkflowRunRecord {
+    this.guardSync(() => { this.engine.resumeRun(RunId(runId)) })
     return this.record(runId)
   }
 
   /**
    * Cancel an unfinished run.
    * @param runId - Run ID.
-   * @returns The run record after the request, encoded as JSON.
+   * @returns The run record after the request.
    */
   @Remote
-  cancel(runId: string): string {
-    this.control(() => { this.engine.cancelRun(RunId(runId), '用户取消') })
+  cancel(runId: string): WorkflowRunRecord {
+    this.guardSync(() => { this.engine.cancelRun(RunId(runId), '用户取消') })
     return this.record(runId)
   }
 
@@ -206,28 +194,61 @@ export class WorkflowStudioController extends TypertRemoteService {
    * @param runId - Run ID.
    * @param nodeId - Node that declared the request.
    * @param requestId - Request ID from the node record's `requests`.
-   * @param result - The result encoded as JSON; the node type decides its format.
-   * @returns The run record after the result is saved, encoded as JSON.
+   * @param result - The result; the node type decides its format.
+   * @returns The run record after the result is saved.
    */
   @Remote
-  async signal(runId: string, nodeId: string, requestId: string, result: string): Promise<string> {
-    try {
-      await this.engine.signal(RunId(runId), NodeId(nodeId), requestId, JSON.parse(result) as unknown)
-    } catch (error: unknown) {
-      throw new RemoteError('gateway/bad-request', messageOf(error), {})
-    }
+  async signal(runId: string, nodeId: string, requestId: string, result: unknown): Promise<WorkflowRunRecord> {
+    await this.guard(async () => this.engine.signal(RunId(runId), NodeId(nodeId), requestId, toJsonValue(result, 'result')))
     return this.record(runId)
   }
 
-  private record(runId: string): string {
-    const record = this.engine.getRun(RunId(runId))
-    if (record === undefined) throw new RemoteError('gateway/bad-request', `运行 ${runId} 不存在`, {})
-    return JSON.stringify(record)
+  /**
+   * The run list once, then once per batch of engine events, until `signal` aborts. Events arriving while the browser
+   * reads one list are folded into the next, so a busy run cannot queue up stale lists.
+   */
+  private async *runLists(signal: AbortSignal): AsyncGenerator<WorkflowRunSummary[]> {
+    let changed = true
+    let wake: (() => void) | undefined
+    const notify = (): void => {
+      changed = true
+      wake?.()
+    }
+    const disposers = RUN_EVENTS.map(name => this.ctx.on(name, notify))
+    signal.addEventListener('abort', notify)
+    try {
+      while (!signal.aborted) {
+        if (changed) {
+          changed = false
+          yield this.engine.listRuns()
+          continue
+        }
+        await new Promise<void>((resolve) => { wake = resolve })
+        wake = undefined
+      }
+    } finally {
+      signal.removeEventListener('abort', notify)
+      for (const dispose of disposers) dispose()
+    }
   }
 
-  private control(action: () => void): void {
+  private record(runId: string): WorkflowRunRecord {
+    const record = this.engine.getRun(RunId(runId))
+    if (record === undefined) throw new RemoteError('gateway/bad-request', `运行 ${runId} 不存在`, {})
+    return record
+  }
+
+  private async guard<T>(action: () => Promise<T>): Promise<T> {
     try {
-      action()
+      return await action()
+    } catch (error: unknown) {
+      throw new RemoteError('gateway/bad-request', messageOf(error), {})
+    }
+  }
+
+  private guardSync<T>(action: () => T): T {
+    try {
+      return action()
     } catch (error: unknown) {
       throw new RemoteError('gateway/bad-request', messageOf(error), {})
     }

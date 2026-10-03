@@ -1,7 +1,7 @@
 /**
  * 工作流定义、运行记录与编辑器快照的共享 JSON schema。
  *
- * Host 用它校验持久化记录和 Remote 入参，浏览器用它解析 Remote 返回值。
+ * Host 用它校验持久化记录和 Remote 入参，浏览器的 Remote 编解码器用它校验返回值。
  * @module dsh-workflow-studio
  */
 
@@ -18,6 +18,7 @@ import type {
   WorkflowRunSummary,
   WorkflowStudioSnapshot,
   FolderListing,
+  SavedWorkflow,
 } from './types.ts'
 import type { AtomFile } from './language.ts'
 import { DEFAULT_WORKFLOW_KIND } from './types.ts'
@@ -191,7 +192,7 @@ export const workflowStudioSnapshotSchema = declared<WorkflowStudioSnapshot>()(z
     name: z.string(),
     kind: workflowKindSchema,
     description: z.string().optional(),
-    definition: z.string(),
+    definition: workflowDefinitionSchema,
   })),
   nodeTypes: z.array(z.object({
     type: z.string(),
@@ -206,6 +207,13 @@ export const workflowStudioSnapshotSchema = declared<WorkflowStudioSnapshot>()(z
     controls: z.array(nodeControlSchema),
     variadicInputs: z.object({ min: z.number(), outputType: z.literal('same').optional() }).optional(),
   })),
+}))
+
+/** 一次保存结果的 Remote JSON schema。 */
+export const savedWorkflowSchema = declared<SavedWorkflow>()(z.object({
+  workflowId: z.string().min(1),
+  sourceError: z.string().optional(),
+  embedderErrors: z.array(z.object({ name: z.string(), error: z.string() })).optional(),
 }))
 
 /** Host 读出的原子目录文件的 Remote JSON schema。 */

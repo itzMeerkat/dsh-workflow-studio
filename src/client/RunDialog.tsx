@@ -2,7 +2,7 @@
 
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useState } from 'react'
-import type { PortDefinition } from '../shared/types.ts'
+import type { JsonObject, PortDefinition } from '../shared/types.ts'
 import type { Translate } from './locale.ts'
 import { workflowRunDefaults, workflowRunInputs } from './workflow-ports.ts'
 import css from './WorkflowStudioPanel.module.css'
@@ -13,7 +13,7 @@ import css from './WorkflowStudioPanel.module.css'
  * @param busy - Whether a run is already starting.
  * @param t - Translator for the dialog's copy.
  * @param onCancel - Closes the dialog without starting a run.
- * @param onRun - Receives the values encoded as a JSON object.
+ * @param onRun - Receives the values to start the run with.
  */
 export function RunDialog({
   ports,
@@ -26,7 +26,7 @@ export function RunDialog({
   readonly busy: boolean
   readonly t: Translate
   readonly onCancel: () => void
-  readonly onRun: (inputs: string) => void
+  readonly onRun: (inputs: JsonObject) => void
 }) {
   const [typed, setTyped] = useState(() => workflowRunDefaults(ports))
   const parsed = workflowRunInputs(ports, typed)
@@ -45,7 +45,7 @@ export function RunDialog({
             size="sm"
             variant="primary"
             disabled={busy || fault !== undefined}
-            onClick={() => { if ('values' in parsed) onRun(JSON.stringify(parsed.values)) }}
+            onClick={() => { if ('values' in parsed) onRun(parsed.values) }}
           >
             {t('run.start')}
           </Button>

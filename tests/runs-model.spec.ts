@@ -8,13 +8,19 @@ import {
   buildAnswer,
   groupRuns,
   isAnswerComplete,
-  parseRunRecord,
-  parseRunSummaries,
   pendingRequests,
   runActions,
   runRecordsByNode,
 } from '../src/client/runs-model.ts'
 import { RunId, WorkflowId, type WorkflowRunSummary } from '../src/shared/types.ts'
+import { z } from 'zod'
+import { workflowRunRecordSchema, workflowRunSummarySchema } from '../src/shared/workflow-schema.ts'
+
+/** Run summaries as the Remote codec reads them. */
+const parseRunSummaries = (source: string) => z.array(workflowRunSummarySchema).parse(JSON.parse(source) as unknown)
+
+/** A run record as the Remote codec reads it. */
+const parseRunRecord = (source: string) => workflowRunRecordSchema.parse(JSON.parse(source) as unknown)
 
 function row(runId: string, status: WorkflowRunSummary['status'], workflowId = 'w1', pendingRequests = 0): WorkflowRunSummary {
   return {

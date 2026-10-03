@@ -13,7 +13,6 @@ import {
   formatEditorDefinition,
   nextWorkflowName,
   openFault,
-  parseEditorDefinition,
   reduceExecutionDependencies,
 } from '../src/client/model.ts'
 import { estimateNodeCardHeight, executionLayout } from '../src/client/execution-layout.ts'
@@ -46,6 +45,9 @@ import {
   NodeId, RunId, WorkflowId, type NodeRunRecord, type NodeTypeSummary, type PortDefinition,
 } from '../src/shared/types.ts'
 import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
+
+/** A definition as the Host schema reads it back from JSON. */
+const parseEditorDefinition = (source: string) => workflowDefinitionSchema.parse(JSON.parse(source) as unknown)
 
 describe('workflow editor model', () => {
   it('round-trips node positions and explicit ports', () => {

@@ -2,16 +2,17 @@
 
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { useEffect, useRef, useState } from 'react'
+import { messageOf } from '../shared/errors.ts'
 import type { JsonValue, WorkflowRunRecord, WorkflowRunSummary } from '../shared/types.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import type { RunAction, RunsFilter } from './RunsView.tsx'
-import { parseRunRecord, parseRunSummaries } from './runs-model.ts'
 
-/** How often the panel refreshes run statuses while it is mounted. */
-const RUNS_REFRESH_MS = 2000
+/** How long the panel waits before watching the runs again after the Host stream ended or failed. */
+const REWATCH_DELAY_MS = 2000
 
 /**
- * Poll the run list and the selected run while mounted.
+ * Keep the run list and the selected run current while mounted. The Host pushes the run list whenever a run changes;
+ * the selected run's record is read again when its row changes.
  * @param remote - The `workflowStudio` Remote.
  * @param setNotice - Shows a failure message; undefined clears it.
  * @returns Run state and the callbacks that change it.
@@ -25,42 +26,59 @@ export function useRuns(
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [record, setRecord] = useState<WorkflowRunRecord>()
   const [busy, setBusy] = useState(false)
-  // Read by in-flight refreshes so a late response for a previously selected run is dropped.
+  // Read by in-flight reads so a late response for a previously selected run is dropped.
   const selectedRunRef = useRef<string | undefined>(undefined)
   selectedRunRef.current = selectedRunId
 
-  const refresh = async (): Promise<void> => {
-    const list = await callRemote(() => remote.listRuns(), parseRunSummaries, setNotice)
-    if (list === undefined) return
-    setRuns(list)
+  const readSelected = async (): Promise<void> => {
     const runId = selectedRunRef.current
     if (runId === undefined) return
-    const detail = await callRemote(() => remote.getRun(runId), parseRunRecord, setNotice)
+    const detail = await callRemote(() => remote.getRun(runId), setNotice)
     if (detail !== undefined && selectedRunRef.current === runId) setRecord(detail)
   }
 
   useEffect(() => {
-    void refresh()
-    const timer = setInterval(() => { void refresh() }, RUNS_REFRESH_MS)
-    return () => { clearInterval(timer) }
+    const controller = new AbortController()
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const watch = async (): Promise<void> => {
+      const handle = remote.watchRuns(controller.signal)
+      try {
+        let seen: number | undefined
+        for await (const list of handle) {
+          setRuns(list)
+          const selected = list.find(row => row.runId === selectedRunRef.current)?.updatedAt
+          if (selected !== seen) {
+            seen = selected
+            void readSelected()
+          }
+        }
+      } catch (error: unknown) {
+        if (!controller.signal.aborted) setNotice(messageOf(error))
+      } finally {
+        handle.dispose()
+      }
+      if (!controller.signal.aborted) retry = setTimeout(() => { void watch() }, REWATCH_DELAY_MS)
+    }
+    void watch()
+    return () => {
+      controller.abort()
+      clearTimeout(retry)
+    }
   }, [])
 
   const select = (runId: string): void => {
     selectedRunRef.current = runId
     setSelectedRunId(runId)
     setRecord(undefined)
-    void refresh()
+    void readSelected()
   }
 
   /** Apply a run control or answer and show the record it returns. */
-  const control = async (call: () => Promise<RemoteResult<string>>): Promise<void> => {
+  const control = async (call: () => Promise<RemoteResult<WorkflowRunRecord>>): Promise<void> => {
     setBusy(true)
     setNotice(undefined)
-    const next = await callRemote(call, parseRunRecord, setNotice)
-    if (next !== undefined) {
-      setRecord(next)
-      await refresh()
-    }
+    const next = await callRemote(call, setNotice)
+    if (next !== undefined && selectedRunRef.current === next.runId) setRecord(next)
     setBusy(false)
   }
 
@@ -78,7 +96,7 @@ export function useRuns(
     },
     signal: (nodeId: string, requestId: string, result: JsonValue): void => {
       const runId = selectedRunRef.current
-      if (runId !== undefined) void control(() => remote.signal(runId, nodeId, requestId, JSON.stringify(result)))
+      if (runId !== undefined) void control(() => remote.signal(runId, nodeId, requestId, result))
     },
   }
 }

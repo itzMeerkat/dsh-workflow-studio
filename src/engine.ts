@@ -74,7 +74,7 @@ declare module '@deepseek-ai/cordis' {
      */
     'dag/interrupted'(info: DagRunInfo, reason: string): void
     /**
-     * 运行结束（无论何种原因）。
+     * 运行结束（无论何种原因）。在最终状态写入、超出保留数量的运行被删除之后派发；写入失败时也派发。
      * @mode emit
      * @param info - 已结束的运行信息。
      * @param result - 最终状态与可选错误。

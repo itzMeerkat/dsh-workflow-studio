@@ -95,17 +95,17 @@ describe('运行中的多路分支', () => {
 
   /** 把 2 送进有 `cases` 的多路分支，`pin` 引脚接 `hit`，default 接 `miss`。 */
   const saved = async (controller: WorkflowStudioController, cases: string[], pin: string) =>
-    (JSON.parse(await controller.save(JSON.stringify(workflow({
+    (await controller.save(workflow({
       two: { type: 'value', config: { value: 2 } },
       s: sw(...cases),
       hit: { type: 'value', config: { value: 1 } },
       miss: { type: 'value', config: { value: 0 } },
       out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [] },
-    }, ['two>s:value', `s.${pin}>hit`, 's.default>miss'], { name: 'switch' })))) as { workflowId: string }).workflowId
+    }, ['two>s:value', `s.${pin}>hit`, 's.default>miss'], { name: 'switch' })) as { workflowId: string }).workflowId
 
   it('触发值匹配的 case，其他引脚后的节点被跳过', async () => {
     const controller = await setup()
-    const record = await runEnded(host, RunId(controller.start(await saved(controller, ['1', '2'], '2'))))
+    const record = await runEnded(host, RunId(controller.start(await saved(controller, ['1', '2'], '2'), {})))
     assert.equal(record.status, 'completed')
     assert.deepEqual(record.nodes.filter(node => node.nodeId !== 'out').map(node => [node.nodeId, node.status]), [
       ['two', 'completed'], ['s', 'completed'], ['hit', 'completed'], ['miss', 'skipped'],

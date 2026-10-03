@@ -466,11 +466,11 @@ export class DagEngineProvider extends DagEngine {
       state.resultResolve(toRunRecord(state))
       return
     }
-    this.emitEvent('dag/end', runInfo(state), { ...outcome })
     try {
       await this.checkpoint(state)
     } catch (error: unknown) {
       this.ctx.logger.error(`dag: 运行 ${state.runId} 最终状态写入失败: ${messageOf(error)}`)
+      this.emitEvent('dag/end', runInfo(state), { ...outcome })
       state.resultResolve(toRunRecord(state))
       return
     }
@@ -478,6 +478,8 @@ export class DagEngineProvider extends DagEngine {
     try {
       await this.enqueueMutation(() => this.pruneRuns())
     } finally {
+      // 在清理之后派发，监听者此时读到的运行列表已不含被清理的运行。
+      this.emitEvent('dag/end', runInfo(state), { ...outcome })
       state.resultResolve(toRunRecord(state))
     }
   }
