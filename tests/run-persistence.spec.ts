@@ -11,6 +11,7 @@ import type { DagEngineConfig, DagEngineProvider } from '../src/engine-provider.
 import { TestHosts, runEnded, signalRequested } from './host.ts'
 import { workflow } from './graph-fixtures.ts'
 import { askUser, validateQuestionsSignal } from '../src/shared/questions.ts'
+import { WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { NodeId, type RunId, type WorkflowId, type WorkflowRunRecord } from '../src/shared/types.ts'
 import type {
   NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor,
@@ -128,6 +129,21 @@ describe('运行持久化与恢复', () => {
     assert.deepEqual(stored.record.nodes.map(node => [node.nodeId, node.attempts]), [['source', 1], ['step', 1]])
     assert.equal(engine.getRun(result.runId)?.status, 'completed')
     assert.deepEqual(engine.listRuns().map(run => [run.runId, run.name, run.status]), [[result.runId, 'chain', 'completed']])
+  })
+
+  it('已结束运行的工作流输出在 Host 重启后仍可查询', async () => {
+    const root = await hosts.root()
+    const first = await host(root, freshCalls(), { block: false })
+    const result = await first.engine.start(await first.engine.save(workflow({
+      source: { type: 'source', config: { value: 7 } },
+      out: { type: WORKFLOW_OUTPUT_TYPE, inputs: [{ name: 'answer', type: 'any', required: false }] },
+    }, ['source>out:answer'], { name: 'answer' }))).result
+    assert.deepEqual(result.outputs, { answer: 7 })
+    await hosts.stop(first.ctx)
+
+    const second = await host(root, freshCalls(), { block: false })
+    await second.engine.recovered
+    assert.deepEqual(second.engine.getRun(result.runId)?.outputs, { answer: 7 })
   })
 
   it('Host 停止不写入结束状态；重启后自动重新调用未完成节点，已完成节点不重复执行', async () => {
