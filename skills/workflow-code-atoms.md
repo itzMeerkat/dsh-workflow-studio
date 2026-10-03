@@ -1,6 +1,6 @@
 # Split code into workflow atoms
 
-Turn existing Go code into a `code` workflow. Each step of the logic becomes an **atom**: one file in an atom folder, exporting one function. The graph wires the atoms together, and saving the workflow writes the whole flow as one Go function, `<id>.workflow.go` (the workflow's ID is its name in kebab-case), into the same folder. The graph then shows the program's data flow and branches, and anyone can rewire it in the Code Workflows panel.
+Turn existing Go code into a `code` workflow. Each step of the logic becomes an **atom**: one file in an atom folder, exporting one function. The graph wires the atoms together, and saving the workflow writes the whole flow as one Go function, `<id>.workflow.go` (the workflow's ID is its name in kebab-case), into the same folder. The graph then shows the program's data flow and branches, and anyone can rewire it in the Workflow Studio panel.
 
 ## 1. Read the code and choose atoms
 
@@ -148,4 +148,4 @@ The workflow is saved anyway, but its file is not written (the save reports why,
 
 ## 5. Report
 
-Tell the user the workflow's name, the atom files you wrote and why each is a separate step, what stayed inside an atom (loops, error handling), and whether `go vet` passed. They can open the workflow in the **Code Workflows** panel to see and rewire the graph.
+Tell the user the workflow's name, the atom files you wrote and why each is a separate step, what stayed inside an atom (loops, error handling), and whether `go vet` passed. They can open the workflow in the **Workflow Studio** panel to see and rewire the graph.

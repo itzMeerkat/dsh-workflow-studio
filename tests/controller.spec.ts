@@ -34,7 +34,7 @@ describe('WorkflowStudioController', () => {
 
   /** 快照中第一个工作流保存下来的定义。 */
   function savedDefinition(controller: WorkflowStudioController): { nodes: Record<string, unknown>[] } {
-    const snapshot = JSON.parse(controller.snapshot('run')) as { workflows: { definition: string }[] }
+    const snapshot = JSON.parse(controller.snapshot()) as { workflows: { definition: string }[] }
     return JSON.parse(snapshot.workflows[0]!.definition) as { nodes: Record<string, unknown>[] }
   }
 
@@ -46,7 +46,7 @@ describe('WorkflowStudioController', () => {
       add: { type: 'sum', config: { offset: 0 } },
     }, ['left>add:left', 'right>add:right'], { name: 'sum' }))))
 
-    const snapshot = JSON.parse(controller.snapshot('run')) as {
+    const snapshot = JSON.parse(controller.snapshot()) as {
       workflows: Array<{ id: string; name: string }>
       nodeTypes: Array<{
         type: string
@@ -64,7 +64,8 @@ describe('WorkflowStudioController', () => {
     assert.deepEqual(
       snapshot.nodeTypes.map(node => node.type).sort(),
       [
-        'ask', 'branch', 'greater', 'merge', 'subworkflow', 'sum', 'switch', 'value', 'workflow-input', 'workflow-output',
+        'ask', 'branch', 'code-atom', 'code-block', 'code-condition', 'greater', 'merge', 'subworkflow',
+        'subworkflow-entry', 'subworkflow-exit', 'sum', 'switch', 'value', 'workflow-input', 'workflow-output',
       ],
     )
     const sum = snapshot.nodeTypes.find(node => node.type === 'sum')
@@ -135,7 +136,7 @@ describe('WorkflowStudioController', () => {
     const renamed = idOf(await controller.update('before', JSON.stringify({ ...source, name: 'after' })))
 
     assert.equal(renamed, 'after')
-    const snapshot = JSON.parse(controller.snapshot('run')) as {
+    const snapshot = JSON.parse(controller.snapshot()) as {
       workflows: Array<{ id: string; name: string }>
     }
     assert.deepEqual(
@@ -144,22 +145,25 @@ describe('WorkflowStudioController', () => {
     )
   })
 
-  it('两种工作流互不相见：快照只含一种，名称不跨种类复用，种类不能改变，code 工作流不能运行', async () => {
+  it('快照含两种工作流和各自可用的节点类型，名称不跨种类复用，种类不能改变，code 工作流不能运行', async () => {
     const controller = await setup()
     const run = workflow({ input: { type: 'value', config: { value: 1 } } }, [], { name: 'shared' })
     const code = workflow({}, [], { name: 'shared', kind: 'code', language: 'go' })
     await controller.save(JSON.stringify(run))
     await controller.save(JSON.stringify({ ...code, name: 'compiled' }))
 
-    const snapshot = (kind: string) => JSON.parse(controller.snapshot(kind)) as {
-      workflows: Array<{ id: string }>
-      nodeTypes: Array<{ type: string }>
+    const snapshot = JSON.parse(controller.snapshot()) as {
+      workflows: Array<{ id: string; kind: string }>
+      nodeTypes: Array<{ type: string; kinds: string[] }>
     }
-    assert.deepEqual(snapshot('run').workflows.map(({ id }) => id), ['shared'])
-    assert.deepEqual(snapshot('code').workflows.map(({ id }) => id), ['compiled'])
-    assert.ok(snapshot('code').nodeTypes.some(({ type }) => type === 'code-atom'))
-    assert.ok(!snapshot('code').nodeTypes.some(({ type }) => type === 'sum'))
-    assert.throws(() => controller.snapshot('other'), /run|code/)
+    assert.deepEqual(
+      snapshot.workflows.map(({ id, kind }) => ({ id, kind })).sort((a, b) => a.id.localeCompare(b.id)),
+      [{ id: 'compiled', kind: 'code' }, { id: 'shared', kind: 'run' }],
+    )
+    const kindsOf = (type: string) => snapshot.nodeTypes.find(item => item.type === type)?.kinds
+    assert.deepEqual(kindsOf('code-atom'), ['code'])
+    assert.deepEqual(kindsOf('sum'), ['run'])
+    assert.deepEqual(kindsOf('branch'), ['run', 'code'])
 
     await assert.rejects(controller.save(JSON.stringify(code)), /名称 "shared" 已被一个 run 工作流使用/)
     await assert.rejects(controller.update('shared', JSON.stringify({ ...code, nodes: [] })), /是 run 工作流，不能改为 code 工作流/)
@@ -223,7 +227,7 @@ describe('WorkflowStudioController', () => {
       // 删除工作流同时删除它的文件。
       await controller.delete('greeting')
       assert.deepEqual((await readdir(folder)).sort(), ['greet.go', 'outer.workflow.go'])
-      assert.deepEqual((JSON.parse(controller.snapshot('code')) as { workflows: Array<{ id: string }> }).workflows.map(({ id }) => id), ['outer'])
+      assert.deepEqual((JSON.parse(controller.snapshot()) as { workflows: Array<{ id: string }> }).workflows.map(({ id }) => id), ['outer'])
       await assert.rejects(controller.delete('greeting'), /不存在/)
     } finally {
       await rm(folder, { recursive: true, force: true })

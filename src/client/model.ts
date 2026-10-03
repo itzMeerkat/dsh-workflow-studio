@@ -76,15 +76,12 @@ export function filterWorkflows<W extends Pick<WorkflowRow, 'name'>>(
     workflow.name.toLocaleLowerCase().includes(needle))
 }
 
-/**
- * The stem of a new workflow's name. The kinds share one name space but each panel sees only its own
- * workflows, so distinct stems keep a suggested name from belonging to the other kind.
- */
+/** The stem of a new workflow's name, so a suggested name tells which kind of workflow it starts. */
 const NAME_STEM: Readonly<Record<WorkflowKind, string>> = { run: 'workflow', code: 'code-workflow' }
 
 /**
  * The first available `<stem>-N` name for a new workflow of one kind.
- * @param workflows - The panel's workflows, all of `kind`.
+ * @param workflows - Every saved workflow; the kinds share one name space.
  * @param kind - The kind of the new workflow.
  */
 export function nextWorkflowName(workflows: readonly Pick<WorkflowRow, 'name'>[], kind: WorkflowKind): string {
@@ -286,30 +283,28 @@ function hasAlternatePath(
   return false
 }
 
-/** Why a panel cannot open a definition: the locale key of the reason and what it names. */
+/** Why the panel cannot open a definition: the locale key of the reason and what it names. */
 export interface OpenFault {
   readonly key: Extract<WorkflowStudioKey, `open.${string}`>
   readonly detail: string
 }
 
 /**
- * Why the panel for `kind` cannot edit a definition.
+ * Why the panel cannot edit a definition.
  *
- * A panel edits one kind of workflow, every view assumes each edge joins two nodes, and a code
- * workflow's source is written in the language it names; a saved record or an imported file may
- * break any of these, so the panel refuses it here instead of failing in whichever view reads it.
+ * Every view assumes each edge joins two nodes, and a code workflow's source is written in the language it names;
+ * a saved record or an imported file may break either, so the panel refuses it here instead of failing in whichever
+ * view reads it.
  * @param definition - The parsed definition.
- * @param kind - The kind the panel edits.
  * @returns The first reason, or undefined when the panel can edit it.
  */
-export function openFault(definition: DagWorkflowDefinition, kind: WorkflowKind): OpenFault | undefined {
-  if (definition.kind !== kind) return { key: 'open.otherKind', detail: definition.kind }
+export function openFault(definition: DagWorkflowDefinition): OpenFault | undefined {
   const ids = new Set<string>(definition.nodes.map(node => node.id))
   const dangling = definition.edges.find(edge => !ids.has(edge.source) || !ids.has(edge.target))
   if (dangling !== undefined) {
     return { key: 'open.danglingEdge', detail: `${dangling.id} (${dangling.source} → ${dangling.target})` }
   }
-  if (kind === 'code' && !CODE_LANGUAGES.some(language => language.name === definition.language)) {
+  if (definition.kind === 'code' && !CODE_LANGUAGES.some(language => language.name === definition.language)) {
     return { key: 'open.language', detail: CODE_LANGUAGES.map(language => language.name).join(', ') }
   }
   return undefined

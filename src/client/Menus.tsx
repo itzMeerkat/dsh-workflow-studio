@@ -2,8 +2,10 @@
 
 import {
   Button,
+  IconBranchOutlineRegular,
   IconCheckOutlineRegular,
   IconChevronDownOutlineRegular,
+  IconCodeOutlineRegular,
   IconFolderCloseRegular,
   IconPlusOutlineRegular,
   IconSearchOutlineRegular,
@@ -11,12 +13,21 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useRef, useState } from 'react'
 import { SUBWORKFLOW_TYPE } from '../shared/subworkflow.ts'
-import type { NodeTypeSummary } from '../shared/types.ts'
+import type { NodeTypeSummary, WorkflowKind } from '../shared/types.ts'
 import type { Translate } from './locale.ts'
 import { filterNodeTypes, filterWorkflows, type EmbedChoice, type WorkflowRow } from './model.ts'
 import css from './WorkflowStudioPanel.module.css'
 
-/** Pick a saved workflow or start a new one. */
+/** The icon marking each kind of workflow in the picker. */
+const KIND_ICONS = { run: IconBranchOutlineRegular, code: IconCodeOutlineRegular } as const satisfies Record<WorkflowKind, unknown>
+
+/** The picker's row for starting a new workflow of each kind, in the order listed. */
+const NEW_WORKFLOWS = [
+  { kind: 'run', key: 'workflows.new' },
+  { kind: 'code', key: 'workflows.newCode' },
+] as const satisfies readonly { kind: WorkflowKind; key: string }[]
+
+/** Pick a saved workflow of either kind, or start a new one of a chosen kind. */
 export function WorkflowPicker({
   disabled,
   workflows,
@@ -29,7 +40,7 @@ export function WorkflowPicker({
   readonly workflows: readonly WorkflowRow[]
   readonly selectedId: string | undefined
   readonly t: Translate
-  readonly onCreate: () => void
+  readonly onCreate: (kind: WorkflowKind) => void
   readonly onSelect: (workflow: WorkflowRow) => void
 }) {
   const menu = useMenu()
@@ -54,28 +65,35 @@ export function WorkflowPicker({
         <div className={css.workflowMenu} role="dialog" aria-label={t('workflows.title')}>
           <MenuSearch menu={menu} label={t('workflows.search')} />
           <div className={css.workflowMenuList}>
-            <button
-              type="button"
-              className={rowClass(selectedId === undefined)}
-              onClick={() => { onCreate(); menu.close() }}
-            >
-              <IconPlusOutlineRegular size={14} />
-              <span>{t('workflows.new')}</span>
-              {selectedId === undefined && <IconCheckOutlineRegular size={14} />}
-            </button>
+            {NEW_WORKFLOWS.map(({ kind, key }) => (
+              <button
+                type="button"
+                className={rowClass(false)}
+                key={kind}
+                onClick={() => { onCreate(kind); menu.close() }}
+              >
+                <IconPlusOutlineRegular size={14} />
+                <span>{t(key)}</span>
+              </button>
+            ))}
             {matches.length === 0
               ? <p className={css.menuEmpty}>{t('workflows.empty')}</p>
-              : matches.map(workflow => (
-                  <button
-                    type="button"
-                    className={rowClass(selectedId === workflow.id)}
-                    key={workflow.id}
-                    onClick={() => { onSelect(workflow); menu.close() }}
-                  >
-                    <strong>{workflow.name}</strong>
-                    {selectedId === workflow.id && <IconCheckOutlineRegular size={14} />}
-                  </button>
-                ))}
+              : matches.map((workflow) => {
+                  const KindIcon = KIND_ICONS[workflow.kind]
+                  return (
+                    <button
+                      type="button"
+                      className={rowClass(selectedId === workflow.id)}
+                      key={workflow.id}
+                      title={t(`kind.${workflow.kind}`)}
+                      onClick={() => { onSelect(workflow); menu.close() }}
+                    >
+                      <KindIcon size={14} />
+                      <strong>{workflow.name}</strong>
+                      {selectedId === workflow.id && <IconCheckOutlineRegular size={14} />}
+                    </button>
+                  )
+                })}
           </div>
         </div>
       )}

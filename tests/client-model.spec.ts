@@ -243,12 +243,12 @@ describe('workflow import and export', () => {
     assert.equal(importedWorkflowName('Weekly Report', saved), 'Weekly Report')
   })
 
-  it('refuses a workflow of the other kind, one with an edge to a missing node, and a code workflow without a language', () => {
+  it('opens either kind, but refuses one with an edge to a missing node and a code workflow without a language', () => {
     const dangling = workflow({ a: 'value' }, ['a>gone'])
-    assert.deepEqual(openFault(dangling, 'code'), { key: 'open.otherKind', detail: 'run' })
-    assert.deepEqual(openFault(dangling, 'run'), { key: 'open.danglingEdge', detail: 'e0 (a → gone)' })
-    assert.deepEqual(openFault({ ...definition, kind: 'code' }, 'code'), { key: 'open.language', detail: 'go' })
-    assert.equal(openFault({ ...definition, kind: 'code', language: 'go' }, 'code'), undefined)
+    assert.deepEqual(openFault(dangling), { key: 'open.danglingEdge', detail: 'e0 (a → gone)' })
+    assert.deepEqual(openFault({ ...definition, kind: 'code' }), { key: 'open.language', detail: 'go' })
+    assert.equal(openFault({ ...definition, kind: 'code', language: 'go' }), undefined)
+    assert.equal(openFault(definition), undefined)
   })
 })
 

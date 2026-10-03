@@ -72,25 +72,30 @@ const VIEWS = [
 /** Props the `main` slot passes to the panel. */
 export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
   remote: WorkflowStudioRemoteNamespace
-  /** Which kind of workflow this panel lists, creates and edits. */
-  kind: WorkflowKind
-  /** Renders a paused node's signal form; `code` workflows never run, so that panel passes undefined. */
-  renderRequest: RequestRenderer | undefined
+  /** Renders a paused node's signal form in a run workflow's Runs view. */
+  renderRequest: RequestRenderer
 }
 
-/** Main workflow authoring surface. */
-export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: WorkflowStudioPanelProps) {
+/**
+ * Main workflow authoring surface for both kinds of workflow. The open workflow's kind decides the rest: a run
+ * workflow has the Runs view and the Run action, a code workflow has its language and atom folder instead.
+ */
+export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudioPanelProps) {
   const [snapshot, setSnapshot] = useState<WorkflowStudioSnapshot>({ workflows: [], nodeTypes: [] })
   const [selectedId, setSelectedId] = useState<string>()
-  const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1', kind))
+  const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1', 'run'))
   // Incremented when the canvas must discard its local graph and reload `definition`.
   const [revision, setRevision] = useState(0)
-  const [view, setView] = useState<View>('canvas')
+  // The view last chosen; a workflow of a kind without that view shows the canvas instead.
+  const [chosenView, setView] = useState<View>('canvas')
   const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'running'>('loading')
   const [notice, setNotice] = useState<string>()
-  // Code workflows compile instead of running, so their panel has no runs to poll or start.
+  const { kind } = definition
+  // Code workflows compile instead of running, so they have no runs to start or show.
   const runnable = kind === 'run'
-  const runs = useRuns(remote, setNotice, runnable)
+  const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
+  const view = views.some(entry => entry.view === chosenView) ? chosenView : 'canvas'
+  const runs = useRuns(remote, setNotice)
   // Set while the run dialog is collecting values for the workflow's declared inputs.
   const [runPrompt, setRunPrompt] = useState(false)
   // The atoms read from the workflow's atom folder; reading again after a refresh picks up edited files.
@@ -107,9 +112,9 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     setNotice(undefined)
   }
 
-  /** The definition, or an error naming why this panel cannot edit it. */
+  /** The definition, or an error naming why the panel cannot edit it. */
   const editable = (next: DagWorkflowDefinition): DagWorkflowDefinition => {
-    const fault = openFault(next, kind)
+    const fault = openFault(next)
     if (fault !== undefined) throw new Error(`${t(fault.key)} ${fault.detail}`)
     return next
   }
@@ -127,8 +132,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     setAtomsRead(value => value + 1)
     setPhase('loading')
     setNotice(undefined)
-    // The Host sends only this panel's kind of workflows, and only the node types usable in them.
-    const next = await callRemote(() => remote.snapshot(kind), parseSnapshot, setNotice)
+    const next = await callRemote(() => remote.snapshot(), parseSnapshot, setNotice)
     if (next !== undefined) {
       setSnapshot(next)
       const selected = next.workflows.find(row => row.id === preferredId)
@@ -159,7 +163,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
     return () => { current = false }
   }, [definition.atomFolder, definition.language, atomsRead])
 
-  // The saved workflows of this panel's kind, which subworkflow nodes link to by ID.
+  // The saved workflows, which subworkflow nodes link to by ID.
   const saved = useMemo(
     () => new Map(snapshot.workflows.map(row => [row.id, parseEditorDefinition(row.definition)])),
     [snapshot.workflows],
@@ -277,15 +281,16 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
   const busy = phase !== 'ready'
   const { workflows } = snapshot
   const parentId = selectedId === undefined ? undefined : WorkflowId(selectedId)
-  const embedChoices = workflows.filter(row => row.id !== parentId).map((row): EmbedChoice => {
+  // A workflow embeds only workflows of its own kind, so the others are not offered at all.
+  const embedChoices = workflows.filter(row => row.kind === kind && row.id !== parentId).map((row): EmbedChoice => {
     const fault = embedFault(definition, parentId, row.id, saved.get(row.id)!, id => saved.get(id))
     return fault === undefined ? row : { ...row, fault }
   })
   const embeddable = embedChoices.filter(choice => choice.fault === undefined)
-  const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
-  // A workflow has at most one boundary node per side, so the library stops offering a second; a subworkflow
-  // node is added from the menu's workflows, so the node types do not offer one linked to nothing.
-  const addableNodeTypes = snapshot.nodeTypes.filter(type => type.type !== SUBWORKFLOW_TYPE
+  // The library offers the node types usable in this kind of workflow. A workflow has at most one boundary node per
+  // side, so the library stops offering a second; a subworkflow node is added from the menu's workflows, so the node
+  // types do not offer one linked to nothing.
+  const addableNodeTypes = snapshot.nodeTypes.filter(type => type.kinds.includes(kind) && type.type !== SUBWORKFLOW_TYPE
     && ((type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
       || !definition.nodes.some(node => node.type === type.type)))
   const overlay = runs.record?.workflowId === selectedId ? runs.record : undefined
@@ -316,9 +321,9 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
             workflows={workflows}
             selectedId={selectedId}
             t={t}
-            onCreate={() => {
+            onCreate={(created) => {
               setSelectedId(undefined)
-              replaceDefinition(emptyDefinition(nextWorkflowName(workflows, kind), kind))
+              replaceDefinition(emptyDefinition(nextWorkflowName(workflows, created), created))
             }}
             onSelect={select}
           />
@@ -349,12 +354,12 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
         </div>
         <div className={css.actions}>
           {phase === 'loading' && <span className={css.headerStatus}>{t('status.loading')}</span>}
-          {activeRuns > 0 && (
+          {runnable && activeRuns > 0 && (
             <button type="button" className={css.runBadge} onClick={showAllRuns}>
               {activeRuns} {t('runs.activeCount')}
             </button>
           )}
-          {waitingRequests > 0 && (
+          {runnable && waitingRequests > 0 && (
             <button type="button" className={css.runBadge} data-status="waiting" onClick={showAllRuns}>
               {waitingRequests} {t('runs.waitingCount')}
             </button>
@@ -531,7 +536,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest, kind }: Workflow
  * They are ordinary nodes, so a new workflow could start without them; seeding them means the
  * place to declare an input is on screen from the start instead of hiding in the node library.
  * @param name - The new workflow's name.
- * @param kind - The panel's kind; a code workflow starts in the first code language.
+ * @param kind - The new workflow's kind; a code workflow starts in the first code language.
  */
 function emptyDefinition(name: string, kind: WorkflowKind): DagWorkflowDefinition {
   return {
