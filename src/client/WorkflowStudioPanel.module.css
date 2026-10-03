@@ -188,7 +188,7 @@
   min-height: 32px;
   box-sizing: border-box;
   align-items: center;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   padding: 6px 8px;
   border: 0;
@@ -197,10 +197,6 @@
   color: var(--dsw-alias-label-primary);
   text-align: left;
   cursor: pointer;
-}
-
-.workflowMenuRow:first-child {
-  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .workflowMenuRow:hover,
@@ -215,6 +211,29 @@
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workflowMenuRow[data-fault] {
+  cursor: default;
+}
+
+.workflowMenuRow[data-fault]:hover {
+  background: transparent;
+}
+
+.workflowFault {
+  display: grid;
+}
+
+.workflowFault strong {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.workflowFault small {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: normal;
 }
 
 .menuGroup {

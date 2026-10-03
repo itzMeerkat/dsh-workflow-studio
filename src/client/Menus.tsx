@@ -9,13 +9,15 @@ import {
   IconFolderCloseRegular,
   IconPlusOutlineRegular,
   IconSearchOutlineRegular,
+  IconTrashOutlineRegular,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useRef, useState } from 'react'
 import { SUBWORKFLOW_TYPE } from '../shared/subworkflow.ts'
 import type { NodeTypeSummary, WorkflowKind } from '../shared/types.ts'
 import type { Translate } from './locale.ts'
-import { filterNodeTypes, filterWorkflows, type EmbedChoice, type WorkflowRow } from './model.ts'
+import { refusalText } from './failure-text.ts'
+import { filterNodeTypes, filterWorkflows, type EmbedChoice, type PickerRow, type WorkflowRow } from './model.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 /** The icon marking each kind of workflow in the picker. */
@@ -27,7 +29,10 @@ const NEW_WORKFLOWS = [
   { kind: 'code', key: 'workflows.newCode' },
 ] as const satisfies readonly { kind: WorkflowKind; key: string }[]
 
-/** Pick a saved workflow of either kind, or start a new one of a chosen kind. */
+/**
+ * Pick a saved workflow of either kind, or start a new one of a chosen kind. A workflow the panel cannot open is listed
+ * with the reason and can only be deleted.
+ */
 export function WorkflowPicker({
   disabled,
   workflows,
@@ -35,13 +40,15 @@ export function WorkflowPicker({
   t,
   onCreate,
   onSelect,
+  onDelete,
 }: {
   readonly disabled: boolean
-  readonly workflows: readonly WorkflowRow[]
+  readonly workflows: readonly PickerRow[]
   readonly selectedId: string | undefined
   readonly t: Translate
   readonly onCreate: (kind: WorkflowKind) => void
   readonly onSelect: (workflow: WorkflowRow) => void
+  readonly onDelete: (workflow: WorkflowRow) => void
 }) {
   const menu = useMenu()
   const matches = filterWorkflows(workflows, menu.query)
@@ -78,8 +85,28 @@ export function WorkflowPicker({
             ))}
             {matches.length === 0
               ? <p className={css.menuEmpty}>{t('workflows.empty')}</p>
-              : matches.map((workflow) => {
+              : matches.map(({ fault, ...workflow }) => {
                   const KindIcon = KIND_ICONS[workflow.kind]
+                  if (fault !== undefined) {
+                    return (
+                      <div className={css.workflowMenuRow} data-fault="" key={workflow.id} title={t(`kind.${workflow.kind}`)}>
+                        <KindIcon size={14} />
+                        <span className={css.workflowFault}>
+                          <strong>{workflow.name}</strong>
+                          <small>{refusalText(fault, t)}</small>
+                        </span>
+                        <button
+                          type="button"
+                          className={css.detailsClose}
+                          aria-label={t('settings.delete')}
+                          title={t('settings.delete')}
+                          onClick={() => { if (window.confirm(t('settings.deleteConfirm'))) onDelete(workflow) }}
+                        >
+                          <IconTrashOutlineRegular size={14} />
+                        </button>
+                      </div>
+                    )
+                  }
                   return (
                     <button
                       type="button"

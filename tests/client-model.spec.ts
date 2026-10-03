@@ -250,8 +250,13 @@ describe('workflow import and export', () => {
 
   it('opens either kind, but refuses one with an edge to a missing node and a code workflow without a language', () => {
     const dangling = workflow({ a: 'value' }, ['a>gone'])
-    assert.deepEqual(openFault(dangling), { key: 'open.danglingEdge', detail: 'e0 (a → gone)' })
-    assert.deepEqual(openFault({ ...definition, kind: 'code' }), { key: 'open.language', detail: 'go' })
+    assert.deepEqual(openFault(dangling), { code: 'edge-node-missing', edge: 'e0', end: 'target', node: 'gone' })
+    assert.deepEqual(openFault({ ...definition, kind: 'code' }), { code: 'language-unknown', language: '', languages: ['go'] })
+    // A record saved while Studio still offered another language.
+    assert.deepEqual(
+      openFault({ ...definition, kind: 'code', language: 'python' }),
+      { code: 'language-unknown', language: 'python', languages: ['go'] },
+    )
     assert.equal(openFault({ ...definition, kind: 'code', language: 'go' }), undefined)
     assert.equal(openFault(definition), undefined)
   })

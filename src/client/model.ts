@@ -8,7 +8,7 @@ import {
   NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowId, type WorkflowKind,
   type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
-import type { WorkflowStudioKey } from './locale.ts'
+import type { WorkflowRefusal } from '../shared/refusal.ts'
 
 /** One saved workflow in the editor snapshot. */
 export type WorkflowRow = WorkflowStudioSnapshot['workflows'][number]
@@ -273,32 +273,29 @@ function hasAlternatePath(
   return false
 }
 
-/** Why the panel cannot open a definition: the locale key of the reason and what it names. */
-export interface OpenFault {
-  readonly key: Extract<WorkflowStudioKey, `open.${string}`>
-  readonly detail: string
-}
-
 /**
  * Why the panel cannot edit a definition.
  *
- * Every view assumes each edge joins two nodes, and a code workflow's source is written in the language it names;
- * a saved record or an imported file may break either, so the panel refuses it here instead of failing in whichever
- * view reads it.
+ * Every view assumes each edge joins two nodes, and a code workflow's source is written in the language it names.
+ * Saving refuses a definition breaking either, but a record saved by an older version or an imported file may break
+ * one, so the panel checks here instead of failing in whichever view reads it.
  * @param definition - The parsed definition.
- * @returns The first reason, or undefined when the panel can edit it.
+ * @returns The first reason, as the refusal the Host gives for the same fault, or undefined when the panel can edit it.
  */
-export function openFault(definition: DagWorkflowDefinition): OpenFault | undefined {
+export function openFault(definition: DagWorkflowDefinition): WorkflowRefusal | undefined {
   const ids = new Set<string>(definition.nodes.map(node => node.id))
-  const dangling = definition.edges.find(edge => !ids.has(edge.source) || !ids.has(edge.target))
-  if (dangling !== undefined) {
-    return { key: 'open.danglingEdge', detail: `${dangling.id} (${dangling.source} → ${dangling.target})` }
+  for (const edge of definition.edges) {
+    if (!ids.has(edge.source)) return { code: 'edge-node-missing', edge: edge.id, end: 'source', node: edge.source }
+    if (!ids.has(edge.target)) return { code: 'edge-node-missing', edge: edge.id, end: 'target', node: edge.target }
   }
   if (definition.kind === 'code' && !CODE_LANGUAGES.some(language => language.name === definition.language)) {
-    return { key: 'open.language', detail: CODE_LANGUAGES.map(language => language.name).join(', ') }
+    return { code: 'language-unknown', language: definition.language ?? '', languages: CODE_LANGUAGES.map(language => language.name) }
   }
   return undefined
 }
+
+/** A saved workflow in the picker, with why the panel cannot open it. */
+export type PickerRow = WorkflowRow & { readonly fault?: WorkflowRefusal }
 
 /** Encode one editor definition as the JSON an exported file holds. */
 export function formatEditorDefinition(definition: DagWorkflowDefinition): string {

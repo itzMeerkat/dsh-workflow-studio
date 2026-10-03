@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import { CODE_LANGUAGES, languageOf } from '../shared/language.ts'
 import type { DagWorkflowDefinition, SavedWorkflow, WorkflowKind, WorkflowStudioSnapshot } from '../shared/types.ts'
-import { failureText } from './failure-text.ts'
+import { failureText, refusalText } from './failure-text.ts'
 import type { Translate } from './locale.ts'
 import { nextWorkflowName, openFault, type WorkflowRow } from './model.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
@@ -39,32 +39,38 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
     setNotice(undefined)
   }
 
-  /** The definition, or an error naming why the panel cannot edit it. */
-  const editable = (next: DagWorkflowDefinition): DagWorkflowDefinition => {
-    const fault = openFault(next)
-    if (fault !== undefined) throw new Error(`${t(fault.key)} ${fault.detail}`)
-    return next
-  }
-
-  const select = (workflow: WorkflowRow): void => {
-    try {
-      replace(editable(workflow.definition))
-      setSelectedId(workflow.id)
-    } catch (error: unknown) {
-      setNotice(messageOf(error))
+  /**
+   * Open a saved workflow.
+   * @returns Whether the panel could open it; when not, the notice says why.
+   */
+  const select = (workflow: WorkflowRow): boolean => {
+    const fault = openFault(workflow.definition)
+    if (fault !== undefined) {
+      setNotice(refusalText(fault, t))
+      return false
     }
+    replace(workflow.definition)
+    setSelectedId(workflow.id)
+    return true
   }
 
-  /** Read the saved workflows again and open `preferredId`, else the open one, else the first. */
-  const load = async (preferredId?: string): Promise<void> => {
+  /**
+   * Read the saved workflows again.
+   * @param open - Which workflow to open: one ID, else the open one, else the first the panel can open; `keep` reads the
+   * list without reopening anything, so unsaved edits stay.
+   */
+  const load = async (open?: string | 'keep'): Promise<void> => {
     setPhase('loading')
     setNotice(undefined)
     const next = await callRemote(() => remote.snapshot(), fail)
     if (next !== undefined) {
       setSnapshot(next)
-      const selected = next.workflows.find(row => row.id === preferredId)
-        ?? next.workflows.find(row => row.id === selectedId)
-        ?? next.workflows[0]
+      const openable = next.workflows.filter(row => openFault(row.definition) === undefined)
+      const selected = open === 'keep'
+        ? undefined
+        : next.workflows.find(row => row.id === open)
+          ?? openable.find(row => row.id === selectedId)
+          ?? openable[0]
       if (selected !== undefined) select(selected)
     }
     setPhase('ready')
@@ -112,7 +118,10 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
     setNotice([saved, ...(result.embedderErrors ?? []).map(({ name, error }) => `${t('notice.embedderNoFile')} ${name}: ${error}`)].join(' '))
   }
 
-  /** Delete a saved workflow, then open another, or a new one of the same kind when none is left. */
+  /**
+   * Delete a saved workflow. Deleting the open one opens another, or a new one of the same kind when none is left;
+   * deleting another one leaves the open workflow and its unsaved edits alone.
+   */
   const remove = async (id: string): Promise<void> => {
     setPhase('saving')
     setNotice(undefined)
@@ -121,9 +130,13 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
       setPhase('ready')
       return
     }
-    setSelectedId(undefined)
-    replace(emptyDefinition(nextWorkflowName(snapshot.workflows, definition.kind), definition.kind))
-    await load()
+    if (id === selectedId) {
+      setSelectedId(undefined)
+      replace(emptyDefinition(nextWorkflowName(snapshot.workflows, definition.kind), definition.kind))
+      await load()
+    } else {
+      await load('keep')
+    }
     setNotice(t('notice.deleted'))
   }
 
@@ -133,7 +146,12 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
    */
   const importFile = async (file: File): Promise<boolean> => {
     try {
-      const imported = editable(parseImportedWorkflow(await file.text()))
+      const imported = parseImportedWorkflow(await file.text())
+      const fault = openFault(imported)
+      if (fault !== undefined) {
+        setNotice(refusalText(fault, t))
+        return false
+      }
       setSelectedId(undefined)
       replace({ ...imported, name: importedWorkflowName(imported.name, snapshot.workflows) })
       setNotice(t('notice.imported'))

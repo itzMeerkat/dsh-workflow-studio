@@ -34,7 +34,9 @@ import {
   appendAtomNode,
   appendEditorNode,
   appendSubworkflowNode,
+  openFault,
   type EmbedChoice,
+  type PickerRow,
 } from './model.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import { RunDialog } from './RunDialog.tsx'
@@ -153,6 +155,13 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
 
   const busy = phase !== 'ready'
   const { workflows } = snapshot
+  const pickerRows = useMemo(
+    () => workflows.map((row): PickerRow => {
+      const fault = openFault(row.definition)
+      return fault === undefined ? row : { ...row, fault }
+    }),
+    [workflows],
+  )
   const parentId = selectedId === undefined ? undefined : WorkflowId(selectedId)
   // A workflow embeds only workflows of its own kind, so the others are not offered at all.
   const embedChoices = workflows.filter(row => row.kind === kind && row.id !== parentId).map((row): EmbedChoice => {
@@ -191,11 +200,12 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
           />
           <WorkflowPicker
             disabled={busy}
-            workflows={workflows}
+            workflows={pickerRows}
             selectedId={selectedId}
             t={t}
             onCreate={editor.create}
             onSelect={editor.select}
+            onDelete={(row) => { void editor.remove(row.id) }}
           />
           <div className={css.viewTabs} role="tablist" aria-label={t('view.label')}>
             {views.map(({ view: tab, Icon }) => (
