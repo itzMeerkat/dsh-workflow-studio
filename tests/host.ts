@@ -2,23 +2,22 @@
  * 测试用 Host：在指定存储根目录上挂载存储、节点注册表、引擎和工作流文件服务。
  */
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp,rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import {
-  apply as storageJsonApply, Config as storageJsonConfig,
-  inject as storageJsonInject, name as storageJsonName,
+apply as storageJsonApply,Config as storageJsonConfig,
+inject as storageJsonInject,name as storageJsonName,
 } from '@deepseek-ai/dsh-storage-json'
 import {
-  apply as storageDomainApply, Config as storageDomainConfig,
-  inject as storageDomainInject, name as storageDomainName,
+apply as storageDomainApply,Config as storageDomainConfig,
+inject as storageDomainInject,name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
-import { DagEngineProvider, type DagEngineConfig } from '../src/engine-provider.ts'
-import { WorkflowFiles } from '../src/workflow-files.ts'
-import { TERMINAL_STATUSES, type RunId, type WorkflowNodeExecutor, type WorkflowRunRecord } from '../src/shared/types.ts'
+import { DagEngineProvider,type DagEngineConfig } from '../src/engine-provider.ts'
+import { TERMINAL_STATUSES,type RunId,type WorkflowNodeExecutor,type WorkflowRunRecord } from '../src/shared/types.ts'
 
 /** 一组测试共享的 Host 与临时目录；`cleanup()` 在 afterEach 中调用。 */
 export class TestHosts {
@@ -65,7 +64,6 @@ export class TestHosts {
     // The plugin Config schema fills the fields a test omits.
     else await ctx.plugin(DagEngineProvider, config as DagEngineConfig)
     const engine = ctx.dagEngine as DagEngineProvider
-    await ctx.plugin(WorkflowFiles)
     await engine.recovered
     return { ctx, engine }
   }

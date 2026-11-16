@@ -26,7 +26,7 @@ type PanelProps = PropsLocale<typeof NS> & PropsRenderSlots<'workflowStudio.requ
   remote: WorkflowStudioRemoteNamespace
 }
 
-/** The editor of both workflow kinds; a run workflow's Runs view renders waiting requests through the child slot. */
+/** The workflow editor; its Runs view renders waiting requests through the child slot. */
 function WorkflowPanel({ renderSlot, ...props }: PanelProps) {
   return <WorkflowStudioPanel {...props} renderRequest={renderSlot} />
 }

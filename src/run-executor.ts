@@ -105,7 +105,13 @@ export class RunExecutor {
             else running.set(id, this.runTracked(node))
           }
         }
-        if (skipped) await this.host.checkpoint(state)
+        // A failed write is a failure like a node's: the nodes already started still settle before the run ends.
+        if (skipped) {
+          await this.host.checkpoint(state).catch((error: unknown) => {
+            failure ??= messageOf(error)
+            this.exit.abort(failure)
+          })
+        }
 
         if (running.size > 0) {
           const settled = await Promise.race(running.values())
@@ -137,7 +143,7 @@ export class RunExecutor {
   }
 
   /**
-   * 以节点名包装的错误，与 `code` 工作流生成的函数一样逐层包装：先是它所在的各层子工作流，由外到内，再是节点本身。
+   * 以节点名逐层包装的错误：先是它所在的各层子工作流，由外到内，再是节点本身。
    * 节点名是它的标签，未命名时是它的类型。
    * @param node - 失败的节点。
    * @param error - 它的错误。

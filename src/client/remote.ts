@@ -9,13 +9,12 @@ import type {
   RemoteResult, RemoteStreamHandle, TypertCodec, TypertRemoteContribution, TypertSchema,
 } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
-import type { AtomFile } from '../shared/language.ts'
 import type {
-  DagWorkflowDefinition, FolderListing, JsonObject, JsonValue, RunId, SavedWorkflow, WorkflowRunRecord,
+  DagWorkflowDefinition, JsonObject, JsonValue, RunId, SavedWorkflow, WorkflowRunRecord,
   WorkflowRunSummary, WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import {
-  atomFilesSchema, folderListingSchema, savedWorkflowSchema, workflowDefinitionSchema, workflowRunRecordSchema,
+  savedWorkflowSchema, workflowDefinitionSchema, workflowRunRecordSchema,
   workflowRunSummarySchema, workflowStudioSnapshotSchema,
 } from '../shared/workflow-schema.ts'
 
@@ -33,8 +32,6 @@ export interface WorkflowStudioRemoteNamespace {
   resume(runId: string): Promise<RemoteResult<WorkflowRunRecord>>
   cancel(runId: string): Promise<RemoteResult<WorkflowRunRecord>>
   signal(runId: string, nodeId: string, requestId: string, result: JsonValue): Promise<RemoteResult<WorkflowRunRecord>>
-  atomFiles(folder: string, language: string): Promise<RemoteResult<AtomFile[]>>
-  folders(path: string): Promise<RemoteResult<FolderListing>>
 }
 
 type Method = keyof WorkflowStudioRemoteNamespace
@@ -76,8 +73,6 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'workflowStudio/resume': WorkflowStudioRemoteNamespace['resume']
     'workflowStudio/cancel': WorkflowStudioRemoteNamespace['cancel']
     'workflowStudio/signal': WorkflowStudioRemoteNamespace['signal']
-    'workflowStudio/atomFiles': WorkflowStudioRemoteNamespace['atomFiles']
-    'workflowStudio/folders': WorkflowStudioRemoteNamespace['folders']
   }
 }
 
@@ -128,8 +123,6 @@ const contribution: TypertRemoteContribution = {
     descriptor('resume', [['runId', STRING]], RUN_RECORD),
     descriptor('cancel', [['runId', STRING]], RUN_RECORD),
     descriptor('signal', [['runId', STRING], ['nodeId', STRING], ['requestId', STRING], ['result', JSON_VALUE]], RUN_RECORD),
-    descriptor('atomFiles', [['folder', STRING], ['language', STRING]], codec('AtomFile[]', atomFilesSchema)),
-    descriptor('folders', [['path', STRING]], codec('FolderListing', folderListingSchema)),
   ],
 }
 

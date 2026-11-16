@@ -17,7 +17,6 @@ Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node
 - `controls`: optional browser controls backed by fields in `context.config`.
 - `execOutputs`: the execution pins the node fires on completion; omitted means the single pin `then`. A node that picks among several pins returns them in `next`.
 - `exclusiveExecOutputs`: set it when every completion fires exactly one of at least two pins, as an approval does. The node becomes a decision node: the analysis treats its pins as mutually exclusive, and the engine fails a completion that fires any other number.
-- `kinds`: the workflow kinds the node belongs in; omitted means `run` only. Code workflows are compiled, never run, so a node with `execute()` work belongs in `run`.
 - `recovery`: `hold` when a person must decide whether calling the node again after a Host restart is safe; omitted means `rerun`.
 - `variadicInputs`: declare the minimum instance input count and optional same-type output requirement.
 - `validateSignal`: declare it when the node waits for a result with `awaitSignal` and that result has a required format.

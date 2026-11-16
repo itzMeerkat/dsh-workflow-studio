@@ -1,4 +1,4 @@
-/** Main workflow authoring panel: workflow selection, save and run, and the canvas, execution, and runs views. */
+/** Main workflow authoring panel: workflow selection, save and run, and the canvas, execution, description, and runs views. */
 
 import {
   Button,
@@ -10,28 +10,25 @@ import {
   IconPlayOutlineRegular,
   IconRefreshOutlineRegular,
   IconSettingsOutlineRegular,
-  IconWorkspaceTreeOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { XYPosition } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { withCallees, type Callees } from '../shared/callees.ts'
-import { SUBWORKFLOW_TYPE, embedFault } from '../shared/subworkflow.ts'
-import { WorkflowId, type JsonObject, type NodeTypeSummary, type WorkflowKind } from '../shared/types.ts'
+import {
+  EXPANSION_NODE_TYPES, SUBWORKFLOW_TYPE, embedsCycle, withSubworkflows, type WorkflowLookup,
+} from '../shared/subworkflow.ts'
+import { WorkflowId, type JsonObject, type NodeTypeSummary } from '../shared/types.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE, workflowInputPorts,
 } from '../shared/workflow-boundary.ts'
-import { languageOf } from '../shared/language.ts'
 import { analyzeEditorGraph } from './analysis-model.ts'
 import { CARD_WIDTH } from './graph-model.ts'
-import { AtomsPanel } from './AtomsPanel.tsx'
+import { DescriptionView } from './DescriptionView.tsx'
 import { DiagnosticsView } from './DiagnosticsView.tsx'
 import { ExecutionOrderView } from './ExecutionOrderView.tsx'
-import { SourceView } from './SourceView.tsx'
 import type { NS } from './locale.ts'
 import { NodeLibraryMenu, WorkflowPicker } from './Menus.tsx'
 import {
-  appendAtomNode,
   appendEditorNode,
   appendSubworkflowNode,
   openFault,
@@ -43,79 +40,53 @@ import { RunDialog } from './RunDialog.tsx'
 import { RunsView, type RequestRenderer } from './RunsView.tsx'
 import { isActiveRun, runRecordsByNode } from './runs-model.ts'
 import { downloadWorkflow } from './transfer.ts'
-import { useAtomLibrary } from './use-atom-library.ts'
 import { useRuns } from './use-runs.ts'
 import { useWorkflowEditor } from './use-workflow-editor.ts'
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.tsx'
 import { WorkflowSettings } from './WorkflowSettings.tsx'
 import css from './WorkflowStudioPanel.module.css'
 
-type View = 'canvas' | 'execution' | 'source' | 'runs'
+type View = 'canvas' | 'execution' | 'description' | 'runs'
 
 const VIEWS = [
-  { view: 'canvas', Icon: IconBranchOutlineRegular, kinds: ['run', 'code'] },
-  { view: 'execution', Icon: IconListPenOutlineRegular, kinds: ['run', 'code'] },
-  { view: 'source', Icon: IconCodeOutlineRegular, kinds: ['run', 'code'] },
-  { view: 'runs', Icon: IconPlayOutlineRegular, kinds: ['run'] },
-] as const satisfies readonly { view: View; Icon: unknown; kinds: readonly WorkflowKind[] }[]
+  { view: 'canvas', Icon: IconBranchOutlineRegular },
+  { view: 'execution', Icon: IconListPenOutlineRegular },
+  { view: 'description', Icon: IconCodeOutlineRegular },
+  { view: 'runs', Icon: IconPlayOutlineRegular },
+] as const satisfies readonly { view: View; Icon: unknown }[]
 
 /** Props the `main` slot passes to the panel. */
 export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
   remote: WorkflowStudioRemoteNamespace
-  /** Renders a paused node's signal form in a run workflow's Runs view. */
+  /** Renders a paused node's signal form in the Runs view. */
   renderRequest: RequestRenderer
 }
 
-/**
- * Main workflow authoring surface for both kinds of workflow. The open workflow's kind decides the rest: a run
- * workflow has the Runs view and the Run action, a code workflow has its language and atom folder instead.
- */
+/** Main workflow authoring surface. */
 export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudioPanelProps) {
   const editor = useWorkflowEditor(remote, t)
   const { snapshot, selectedId, definition, revision, phase, notice, setNotice, replace } = editor
-  // The view last chosen; a workflow of a kind without that view shows the canvas instead.
-  const [chosenView, setView] = useState<View>('canvas')
-  const { kind } = definition
-  // Code workflows compile instead of running, so they have no runs to start or show.
-  const runnable = kind === 'run'
-  const views = VIEWS.filter(entry => (entry.kinds as readonly WorkflowKind[]).includes(kind))
-  const view = views.some(entry => entry.view === chosenView) ? chosenView : 'canvas'
+  const [view, setView] = useState<View>('canvas')
   const runs = useRuns(remote, editor.fail, () => { setNotice(undefined) })
-  const atoms = useAtomLibrary(remote, definition, editor.fail)
-  const { library } = atoms
   // Set while the run dialog is collecting values for the workflow's declared inputs.
   const [runPrompt, setRunPrompt] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(true)
-  const [atomsOpen, setAtomsOpen] = useState(true)
   const importInput = useRef<HTMLInputElement>(null)
   const viewCenter = useRef<() => XYPosition>()
-
-  const language = languageOf(definition)
-  const atomSyntax = language.functions?.atoms
 
   // The saved workflows, which subworkflow nodes link to by ID.
   const saved = useMemo(
     () => new Map(snapshot.workflows.map(row => [row.id, row.definition])),
     [snapshot.workflows],
   )
-  const callees = useMemo<Callees>(() => ({
-    atoms: library?.atoms ?? new Map(),
-    workflows: saved,
-    ...(library === undefined ? {} : { package: library.package }),
-  }), [library, saved])
+  const lookup = useMemo<WorkflowLookup>(() => id => saved.get(id), [saved])
 
-  // Atom and subworkflow nodes take their ports from what they call, so a folder read again, a workflow saved
-  // again, or a workflow opened on them may move those ports.
+  // Subworkflow nodes take their ports from the workflows they embed, so a workflow saved again, or a workflow
+  // opened on them, may move those ports.
   useEffect(() => {
-    const signed = withCallees(definition, callees)
-    if (signed !== definition) replace(signed)
-  }, [callees, revision])
-
-  /** Read the saved workflows and the atom folder again. */
-  const refresh = (): void => {
-    atoms.reload()
-    void editor.load()
-  }
+    const linked = withSubworkflows(definition, lookup)
+    if (linked !== definition) replace(linked)
+  }, [lookup, revision])
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
   const startRun = async (inputs: JsonObject): Promise<void> => {
@@ -163,16 +134,14 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
     [workflows],
   )
   const parentId = selectedId === undefined ? undefined : WorkflowId(selectedId)
-  // A workflow embeds only workflows of its own kind, so the others are not offered at all.
-  const embedChoices = workflows.filter(row => row.kind === kind && row.id !== parentId).map((row): EmbedChoice => {
-    const fault = embedFault(definition, parentId, row.id, saved.get(row.id)!, id => saved.get(id))
-    return fault === undefined ? row : { ...row, fault }
-  })
+  const embedChoices = workflows.filter(row => row.id !== parentId).map((row): EmbedChoice =>
+    embedsCycle(parentId, row.id, saved.get(row.id)!, lookup) ? { ...row, fault: 'cycle' } : row)
   const embeddable = embedChoices.filter(choice => choice.fault === undefined)
-  // The library offers the node types usable in this kind of workflow. A workflow has at most one boundary node per
-  // side, so the library stops offering a second; a subworkflow node is added from the menu's workflows, so the node
-  // types do not offer one linked to nothing.
-  const addableNodeTypes = snapshot.nodeTypes.filter(type => type.kinds.includes(kind) && type.type !== SUBWORKFLOW_TYPE
+  // The library leaves out the node types only a subworkflow's expansion places. A workflow has at most one boundary
+  // node per side, so the library stops offering a second; a subworkflow node is added from the menu's workflows, so
+  // the node types do not offer one linked to nothing.
+  const addableNodeTypes = snapshot.nodeTypes.filter(type => !EXPANSION_NODE_TYPES.includes(type.type)
+    && type.type !== SUBWORKFLOW_TYPE
     && ((type.type !== WORKFLOW_INPUT_TYPE && type.type !== WORKFLOW_OUTPUT_TYPE)
       || !definition.nodes.some(node => node.type === type.type)))
   const overlay = runs.record?.workflowId === selectedId ? runs.record : undefined
@@ -208,7 +177,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             onDelete={(row) => { void editor.remove(row.id) }}
           />
           <div className={css.viewTabs} role="tablist" aria-label={t('view.label')}>
-            {views.map(({ view: tab, Icon }) => (
+            {VIEWS.map(({ view: tab, Icon }) => (
               <button
                 key={tab}
                 type="button"
@@ -234,26 +203,15 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
         </div>
         <div className={css.actions}>
           {phase === 'loading' && <span className={css.headerStatus}>{t('status.loading')}</span>}
-          {runnable && activeRuns > 0 && (
+          {activeRuns > 0 && (
             <button type="button" className={css.runBadge} onClick={showAllRuns}>
               {activeRuns} {t('runs.activeCount')}
             </button>
           )}
-          {runnable && waitingRequests > 0 && (
+          {waitingRequests > 0 && (
             <button type="button" className={css.runBadge} data-status="waiting" onClick={showAllRuns}>
               {waitingRequests} {t('runs.waitingCount')}
             </button>
-          )}
-          {atomSyntax !== undefined && (
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<IconWorkspaceTreeOutlineRegular size={14} />}
-              aria-pressed={atomsOpen}
-              onClick={() => { setAtomsOpen(open => !open) }}
-            >
-              {t('atoms.panel')}
-            </Button>
           )}
           <Button
             size="sm"
@@ -269,7 +227,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             variant="outline"
             icon={<IconRefreshOutlineRegular size={14} />}
             disabled={busy}
-            onClick={refresh}
+            onClick={() => { void editor.load() }}
           >
             {t('action.refresh')}
           </Button>
@@ -306,38 +264,19 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
           <Button size="sm" variant="outline" disabled={busy} onClick={() => { void editor.save() }}>
             {phase === 'saving' ? t('action.saving') : t('action.save')}
           </Button>
-          {runnable && (
-            <Button
-              size="sm"
-              variant="primary"
-              icon={<IconPlayOutlineRegular size={14} />}
-              disabled={busy}
-              onClick={run}
-            >
-              {phase === 'running' ? t('action.running') : t('action.run')}
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<IconPlayOutlineRegular size={14} />}
+            disabled={busy}
+            onClick={run}
+          >
+            {phase === 'running' ? t('action.running') : t('action.run')}
+          </Button>
         </div>
       </header>
 
       <div className={css.workspace}>
-        {atomsOpen && atomSyntax !== undefined && (
-          <AtomsPanel
-            definition={definition}
-            language={language}
-            syntax={atomSyntax}
-            library={library}
-            remote={remote}
-            t={t}
-            onChange={replace}
-            onAdd={(atom) => {
-              replace(appendAtomNode(definition, atom, placement()))
-              setView('canvas')
-            }}
-            onReload={atoms.reload}
-            onClose={() => { setAtomsOpen(false) }}
-          />
-        )}
         <section className={css.editor}>
           {view === 'runs' && (
             <RunsView
@@ -363,8 +302,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
               nodeTypes={snapshot.nodeTypes}
               runRecords={runRecords}
               diagnostics={analysis?.byNode ?? new Map()}
-              callees={callees}
               workflows={embeddable}
+              lookup={lookup}
               t={t}
               onChange={editor.edit}
               onError={setNotice}
@@ -380,9 +319,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
               t={t}
             />
           )}
-          {view === 'source' && (
-            <SourceView ir={analysis?.ir} language={language} callees={callees} t={t} />
-          )}
+          {view === 'description' && <DescriptionView ir={analysis?.ir} workflows={lookup} t={t} />}
           {view === 'canvas' && <DiagnosticsView diagnostics={analysis?.diagnostics} t={t} />}
           {notice !== undefined && <p className={css.notice} role="alert">{notice}</p>}
           {runPrompt && (
@@ -398,7 +335,6 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
         {settingsOpen && (
           <WorkflowSettings
             definition={definition}
-            callees={callees}
             t={t}
             onChange={replace}
             onClose={() => { setSettingsOpen(false) }}

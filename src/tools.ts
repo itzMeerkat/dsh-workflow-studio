@@ -6,12 +6,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { DIAGNOSTIC_SEVERITY, analyzeWorkflow, indexNodeTypes, type WorkflowAnalysis } from './shared/analysis.ts'
-import { describeDiagnostic, describeRenderFault } from './shared/diagnostic-message.ts'
+import { describeDiagnostic } from './shared/diagnostic-message.ts'
+import { describeWorkflow } from './shared/description.ts'
 import { buildWorkflowIr } from './shared/ir.ts'
-import { workflowCallees } from './atom-folder.ts'
-import { withCallees } from './shared/callees.ts'
-import { CODE_LANGUAGES, languageOf } from './shared/language.ts'
-import { RenderError, renderWorkflow } from './shared/source.ts'
+import { withSubworkflows } from './shared/subworkflow.ts'
 import { RunId, type JsonObject, type NodeTypeSummary } from './shared/types.ts'
 import { toJsonObject } from './shared/json.ts'
 import { refuse } from './shared/refusal.ts'
@@ -19,7 +17,7 @@ import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 
 /**
  * 注册所有工作流模型工具；每个工具随 `ctx` 卸载。
- * @param ctx - Cordis context，需已加载 dagEngine、workflowNodeRegistry 与 workflowFiles 服务。
+ * @param ctx - Cordis context，需已加载 dagEngine 与 workflowNodeRegistry 服务。
  */
 export function registerWorkflowTools(ctx: Context): void {
   const engine = ctx.dagEngine
@@ -35,23 +33,6 @@ export function registerWorkflowTools(ctx: Context): void {
     parameters: {
       name: { type: 'string', required: true, description: '工作流名称' },
       description: { type: 'string', description: '工作流描述' },
-      kind: {
-        type: 'string',
-        description: '工作流种类：run（默认）由引擎执行；code 的节点携带 language 的代码，用 describe_workflow 写成源码。',
-      },
-      language: {
-        type: 'string',
-        description: `code 工作流的语言：${CODE_LANGUAGES.map(({ name }) => name).join('、')}。`
-      },
-      atomFolder: {
-        type: 'string',
-        description: 'go 工作流的原子目录，Host 上的绝对路径，一个 Go 包。目录中每个 .go 文件导出一个函数，自定义类型声明在 types.go，'
-          + '用 { type: "code-atom", config: { atom: "<文件名>" } } 的节点调用它；保存时按该函数的签名填写节点的 inputs 和 outputs，'
-          + '端口名就是参数名和结果名（未命名的结果为 output 或 output1、output2……），指针参数是可选端口。'
-          + '端口类型就是 Go 类型的写法，例如 int、Order、*Coupon，但 float64、bool、string、any 写作 number、boolean、string、any；'
-          + '工作流边界端口也这样声明类型，数据边两端的类型必须相同，除非一端是 any。'
-          + '保存还把工作流函数写成目录中的 <工作流 ID>.workflow.go；写不出时工作流照样保存，目录中不留该文件，原因在 warnings 中。',
-      },
       nodes: {
         type: 'array',
         required: true,
@@ -59,9 +40,9 @@ export function registerWorkflowTools(ctx: Context): void {
           + '工作流自身的输入输出由两个边界节点承担：类型 workflow-input 的节点，其 outputs 就是'
           + '工作流接受的输入，每个端口可带 default；类型 workflow-output 的节点，其 inputs 就是'
           + '工作流产出的输出，通常声明为 required: false。每侧最多一个。'
-          + '{ type: "subworkflow", config: { workflow: "<工作流 ID>" } } 把另一个同种类的已保存工作流当作一个节点：'
-          + '它的输入输出端口就是那个工作流声明的输入和输出，保存时自动填写；run 工作流运行时展开它，'
-          + 'code 工作流调用它生成的函数，因此两者须在同一原子目录。不能形成嵌入环，被嵌入的工作流不能改名。',
+          + '{ type: "subworkflow", config: { workflow: "<工作流 ID>" } } 把另一个已保存工作流当作一个节点：'
+          + '它的输入输出端口就是那个工作流声明的输入和输出，保存时自动填写；运行时展开它。'
+          + '不能形成嵌入环，被嵌入的工作流不能改名。',
         items: { type: 'json' },
       },
       edges: {
@@ -83,7 +64,7 @@ export function registerWorkflowTools(ctx: Context): void {
           nodeCount: { type: 'number', description: '节点数量' },
           warnings: {
             type: 'array',
-            description: '整图分析给出的告警，以及源码写不出的原因；它们不阻止保存。',
+            description: '整图分析给出的告警；它们不阻止保存。',
             items: { type: 'string' },
           },
         },
@@ -99,32 +80,18 @@ export function registerWorkflowTools(ctx: Context): void {
         name: args.name,
         nodes: args.nodes,
         edges: args.edges,
-        ...(args.kind === undefined ? {} : { kind: args.kind }),
-        ...(args.language === undefined ? {} : { language: args.language }),
-        ...(args.atomFolder === undefined ? {} : { atomFolder: args.atomFolder }),
         ...(args.description === undefined ? {} : { description: args.description }),
       })
-      const def = withCallees(parsed, await workflowCallees(parsed, engine))
-      const { workflowId, sourceError, embedderErrors = [] } = await ctx.workflowFiles.save(def)
-      return {
-        workflowId,
-        name: args.name,
-        nodeCount: args.nodes.length,
-        warnings: [
-          ...warningsOf(analyzeWorkflow(def, catalog())),
-          ...(sourceError === undefined ? [] : [`源码写不出，文件未写出: ${sourceError}`]),
-          ...embedderErrors.map(({ name, error }) => `嵌入它的工作流 "${name}" 源码写不出，文件已删除: ${error}`),
-        ],
-      }
+      const def = withSubworkflows(parsed, id => engine.get(id))
+      const workflowId = await engine.save(def)
+      return { workflowId, name: args.name, nodeCount: args.nodes.length, warnings: warningsOf(analyzeWorkflow(def, catalog())) }
     },
   })), 'workflow-tools:create_workflow')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'describe_workflow',
-    description: '把一个已定义的工作流写成它的语言的一个函数：按执行顺序缩进，分支写成 if/else。'
-      + 'run 工作流写成伪代码，节点是对节点类型的调用、数据边是实参，读它比读节点/边 JSON 更快看出工作流做什么；'
-      + 'code 工作流写成它指定的语言，语句节点的代码按位置和所属分支原样写出，原子节点按数据边调用原子目录中的函数；'
-      + '子工作流写成对它嵌入的工作流的调用。源码与保存时写进原子目录的文件相同。同时给出整图分析的告警。',
+    description: '把一个已定义的工作流写成伪代码描述：按执行顺序缩进，分支写成 if/else，节点是对节点类型的调用、'
+      + '数据边是实参，子工作流写成对它嵌入的工作流的调用。读它比读节点/边 JSON 更快看出工作流做什么。同时给出整图分析的告警。',
     parameters: {
       name: { type: 'string', required: true, description: '工作流名称' },
     },
@@ -133,14 +100,13 @@ export function registerWorkflowTools(ctx: Context): void {
         type: 'object',
         properties: {
           name: { type: 'string', description: '工作流名称' },
-          language: { type: 'string', description: '写成的语言' },
-          source: { type: 'string', description: '生成的源码' },
+          description: { type: 'string', description: '伪代码描述' },
           warnings: { type: 'array', description: '整图分析给出的告警。', items: { type: 'string' } },
         },
         additionalProperties: false,
       },
-      render: (_args, { source = '', warnings = [] }) => [
-        { type: 'text', text: source },
+      render: (_args, { description = '', warnings = [] }) => [
+        { type: 'text', text: description },
         ...warnings.map(warning => ({ type: 'text' as const, text: `告警: ${warning}` })),
       ],
     },
@@ -148,17 +114,10 @@ export function registerWorkflowTools(ctx: Context): void {
       const summary = engine.findByName(args.name)
       if (summary === undefined) refuse({ code: 'workflow-missing', workflow: args.name })
       const definition = engine.get(summary.id)!
-      const language = languageOf(definition)
       const types = catalog()
       const analysis = analyzeWorkflow(definition, types)
-      let source: string
-      try {
-        source = renderWorkflow(buildWorkflowIr(definition, types, analysis), language, await workflowCallees(definition, engine))
-      } catch (error: unknown) {
-        if (error instanceof RenderError) throw new Error(describeRenderFault(error.fault))
-        throw error
-      }
-      return { name: args.name, language: language.name, source, warnings: warningsOf(analysis) }
+      const description = describeWorkflow(buildWorkflowIr(definition, types, analysis), id => engine.get(id))
+      return { name: args.name, description, warnings: warningsOf(analysis) }
     },
   })), 'workflow-tools:describe_workflow')
 

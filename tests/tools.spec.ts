@@ -2,17 +2,21 @@
  * 模型面工作流工具测试。
  */
 
-import { describe, it } from 'node:test'
+import { describe,it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { registerWorkflowTools } from '../src/tools.ts'
 import { WorkflowId } from '../src/shared/types.ts'
 import type { DagWorkflowDefinition } from '../src/shared/types.ts'
-import { nodeType, workflow } from './graph-fixtures.ts'
+import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
+import { nodeType,workflow } from './graph-fixtures.ts'
 
-/** 已保存的唯一一个工作流：一个空的 Go 工作流。 */
-const CODE_FLOW = workflow({}, [], { name: 'code-flow', kind: 'code', language: 'go' })
+/** 已保存的唯一一个工作流：把输入交给一个审批节点。 */
+const SAVED_FLOW = workflow({
+  in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'order', type: 'any' }] },
+  approval: { type: 'hitl', inputs: [{ name: 'input', type: 'any' }] },
+}, ['in:order>approval'], { name: 'review order' })
 
 interface CallableTool {
   execute(args: Record<string, unknown>, execution: unknown): unknown
@@ -24,20 +28,19 @@ function setup() {
   const disposers: Array<() => void> = []
   const ctx = {
     effect(register: () => () => void) { disposers.push(register()) },
-    workflowFiles: {
+    dagEngine: {
       async save(definition: DagWorkflowDefinition) {
         saved = definition
-        return { workflowId: WorkflowId('workflow-id') }
+        return WorkflowId('workflow-id')
       },
-    },
-    dagEngine: {
-      findByName: (name: string) => name === CODE_FLOW.name ? { id: WorkflowId('code-flow') } : undefined,
-      list: () => [{ id: WorkflowId('code-flow') }],
-      get: () => CODE_FLOW,
+      findByName: (name: string) => name === SAVED_FLOW.name ? { id: WorkflowId('review-order') } : undefined,
+      list: () => [{ id: WorkflowId('review-order') }],
+      get: () => SAVED_FLOW,
     },
     workflowNodeRegistry: {
       listTypes: () => [
-        nodeType('hitl', { kinds: ['code'], outputs: [{ name: 'output', type: 'any' }] }),
+        nodeType('hitl', { inputs: [{ name: 'input', type: 'any' }], outputs: [{ name: 'output', type: 'any' }] }),
+        nodeType(WORKFLOW_INPUT_TYPE),
       ],
     },
     tools: {
@@ -55,61 +58,15 @@ function setup() {
 }
 
 describe('workflow tools', () => {
-  it('create_workflow 拒绝伪造缺失字段，保留工作流种类和语言', async () => {
-    const fixture = setup()
-    const create = fixture.definitions.get('create_workflow') as unknown as CallableTool
 
-    await assert.rejects(
-      async () => create.execute({
-        name: 'invalid',
-        kind: 'run' as const,
-        nodes: [{ type: 'source' }],
-        edges: [],
-      }, {}),
-      /id/,
-    )
-
-    await create.execute({
-      name: 'valid',
-      kind: 'code',
-      language: 'go',
-      nodes: [{
-        id: 'approval',
-        type: 'hitl',
-        config: {},
-        inputs: [],
-        outputs: [{ name: 'output', type: 'any' }],
-      }],
-      edges: [],
-    }, {})
-
-    assert.deepEqual(fixture.saved()?.nodes[0]?.outputs, [{ name: 'output', type: 'any' }])
-    assert.equal(fixture.saved()?.kind, 'code')
-    assert.equal(fixture.saved()?.language, 'go')
-  })
-
-  it('describe_workflow 写成工作流指定的语言', async () => {
+  it('describe_workflow 把工作流写成伪代码', async () => {
     const fixture = setup()
     const describeTool = fixture.definitions.get('describe_workflow') as unknown as CallableTool
 
-    assert.deepEqual(await describeTool.execute({ name: 'code-flow' }, {}), {
-      name: 'code-flow',
-      language: 'go',
-      source: '// Code generated from workflow "code-flow". DO NOT EDIT.\n\nfunc code_flow() (err error) {\n\treturn\n}\n',
+    assert.deepEqual(await describeTool.execute({ name: 'review order' }, {}), {
+      name: 'review order',
+      description: 'workflow review_order(order):\n  hitl = hitl(input: order)\n',
       warnings: [],
     })
-  })
-
-  it('run_workflow 对未知名称抛错，卸载 context 时移除全部工具', async () => {
-    const fixture = setup()
-    const run = fixture.definitions.get('run_workflow') as unknown as CallableTool
-
-    await assert.rejects(
-      async () => run.execute({ name: 'missing' }, {}),
-      { refusal: { code: 'workflow-missing', workflow: 'missing' } },
-    )
-
-    fixture.dispose()
-    assert.equal(fixture.definitions.size, 0)
   })
 })

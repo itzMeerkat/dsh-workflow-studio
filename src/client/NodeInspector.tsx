@@ -1,12 +1,8 @@
-/** Details panel for the selected canvas node: label, own ports, configuration JSON, and the latest run result. */
+/** Details panel for the selected canvas node: label, configuration JSON, and the latest run result. */
 
 import { Button, IconCloseOutlineRegular, IconTrashOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { Language } from '../shared/language.ts'
-import type { PortDefinition, PortType } from '../shared/types.ts'
-import { nodeInputPorts, nodeOutputPorts, type WorkflowFlowNode } from './graph-model.ts'
+import type { WorkflowFlowNode } from './graph-model.ts'
 import type { Translate } from './locale.ts'
-import { PortList } from './PortList.tsx'
-import type { WorkflowPortEdit, WorkflowPortSide } from './workflow-ports.ts'
 import css from './WorkflowStudioPanel.module.css'
 
 /** Render the settings of one selected node. */
@@ -20,7 +16,6 @@ export function NodeInspector({
   onApplyConfig,
   onDelete,
   onClose,
-  ports,
 }: {
   readonly node: WorkflowFlowNode
   /** Configuration JSON as the user is typing it; applied only by `onApplyConfig`. */
@@ -32,13 +27,6 @@ export function NodeInspector({
   readonly onApplyConfig: () => void
   readonly onDelete: () => void
   readonly onClose: () => void
-  /** The sides whose ports the author declares, and how to change them; absent for a node that has none. */
-  readonly ports?: {
-    readonly sides: readonly WorkflowPortSide[]
-    readonly types: readonly PortType[]
-    readonly language: Language
-    readonly onChange: (side: WorkflowPortSide, ports: readonly PortDefinition[], edit: WorkflowPortEdit) => void
-  }
 }) {
   return (
     <section className={css.detailsPanel}>
@@ -69,19 +57,6 @@ export function NodeInspector({
                 onChange={event => { onLabel(event.currentTarget.value) }}
               />
             </label>
-            {ports?.sides.map(side => (
-              <PortList
-                key={side}
-                title={t(side === 'inputs' ? 'nodePorts.inputs' : 'nodePorts.outputs')}
-                side={side}
-                ports={side === 'inputs' ? nodeInputPorts(node.data) : nodeOutputPorts(node.data)}
-                types={ports.types}
-                language={ports.language}
-                defaults={false}
-                t={t}
-                onChange={(next, edit) => { ports.onChange(side, next, edit) }}
-              />
-            ))}
             <label>
               <span>{t('inspector.config')}</span>
               <textarea

@@ -14,10 +14,8 @@ import {
   portsAreCompatible,
   topologicalLevels,
 } from './shared/graph.ts'
-import { isAbsolute } from 'node:path'
-import { languageOf } from './shared/language.ts'
+import { EXPANSION_NODE_TYPES } from './shared/subworkflow.ts'
 import { SWITCH_TYPE, invalidCase, switchCases } from './shared/switch.ts'
-import { DEFAULT_WORKFLOW_KIND } from './shared/types.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './shared/workflow-boundary.ts'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type {
@@ -42,26 +40,17 @@ export function topologicalSort(definition: DagWorkflowDefinition): DagNodeDefin
  * 按注册表验证一个作者保存的定义。
  *
  * 边界节点是普通节点，因此端口、边和拓扑校验对它们一视同仁；这里只多一条它们独有的规则，
- * 以及每个节点类型都属于工作流的种类、`code` 工作流必须指定一种语言、原子目录必须是能读原子的语言中的绝对路径。
- * 种类只约束作者放置的节点；运行开始时展开子工作流放置的节点不属于任何种类，所以 {@link resolveExecutors} 不查它。
+ * 以及作者不能放置只由子工作流展开放置的节点。运行开始时展开后的图含有这些节点，所以 {@link resolveExecutors} 不查它。
  * @param registry - 提供节点类型的注册表。
  * @param definition - 待验证的定义。
  * @throws 定义违反任一可由注册表确定的不变量时。
  */
 export function validateWorkflow(registry: WorkflowNodeRegistry, definition: DagWorkflowDefinition): void {
-  const language = languageOf(definition)
-  if (definition.atomFolder !== undefined && (language.functions?.atoms === undefined || !isAbsolute(definition.atomFolder))) {
-    refuse({ code: 'atom-folder-invalid', folder: definition.atomFolder })
-  }
+  const reserved = definition.nodes.find(node => EXPANSION_NODE_TYPES.includes(node.type))
+  if (reserved !== undefined) refuse({ code: 'node-reserved', type: reserved.type })
   assertSingleBoundary(definition, WORKFLOW_INPUT_TYPE, 'inputs')
   assertSingleBoundary(definition, WORKFLOW_OUTPUT_TYPE, 'outputs')
-  const executors = resolveExecutors(registry, definition)
-  for (const node of definition.nodes) {
-    const kinds = executors.get(node.id)!.kinds ?? [DEFAULT_WORKFLOW_KIND]
-    if (!kinds.includes(definition.kind)) {
-      refuse({ code: 'node-kind', type: node.type, kinds, kind: definition.kind })
-    }
-  }
+  resolveExecutors(registry, definition)
 }
 
 /**
@@ -155,7 +144,6 @@ export function resolveExecutors(
  * 告警由保存结果带回给作者，不阻止保存，因为分析不知道运行期会选哪条分支。
  * @param registry - 提供节点类型的注册表。
  * @param definition - 已通过逐条规则校验的定义。
- * @returns 分析给出的全部告警。
  * @throws 定义包含环，或存在严重程度为 error 的诊断时。
  */
 function assertNoAnalysisErrors(registry: WorkflowNodeRegistry, definition: DagWorkflowDefinition): void {

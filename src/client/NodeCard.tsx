@@ -7,7 +7,6 @@ import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
 import { EXEC_RUN_PIN } from '../shared/graph.ts'
-import { typeName, type Language } from '../shared/language.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf } from '../shared/subworkflow.ts'
 import { SWITCH_TYPE, invalidCase, switchCases } from '../shared/switch.ts'
 import type { WorkflowId } from '../shared/types.ts'
@@ -30,8 +29,6 @@ export type NodeCardGraph = 'data' | 'execution'
 /** What the cards React Flow renders need from the view around them. */
 export interface NodeCardActions {
   readonly t: Translate
-  /** The workflow's language, which names the port types. */
-  readonly language: Language
   /** Set when the card may edit configuration; absent in a read-only graph. */
   readonly updateConfig?: (nodeId: string, name: string, value: unknown) => void
   /** Set when a subworkflow card may change the workflow it links to; absent in a read-only graph. */
@@ -78,12 +75,12 @@ export function NodeCard({
   const inputs = nodeInputPorts(data)
   const outputs = nodeOutputPorts(data)
   const updateNodeInternals = useUpdateNodeInternals()
-  // A switch's pins follow its cases and a code node's ports follow its author; React Flow measures a card's handles
+  // A switch's pins follow its cases and a subworkflow node's ports follow its workflow; React Flow measures a card's handles
   // again only when told they changed.
   const handles = [...pins, '', ...inputs.map(port => port.name), '', ...outputs.map(port => port.name)].join('\u0000')
   useEffect(() => { updateNodeInternals(data.definition.id) }, [handles])
   if (actions === undefined) throw new Error('Workflow node card rendered outside its view')
-  const { t, language, updateConfig, linkWorkflow, editCases } = actions
+  const { t, updateConfig, linkWorkflow, editCases } = actions
   const controls = data.catalog?.controls ?? []
   const runOutputs = displayedOutputs(data)
   const connectable = graph === 'data'
@@ -122,8 +119,8 @@ export function NodeCard({
         </div>
       </div>
       <div className={css.ports}>
-        <div>{inputs.map(port => <PortRow key={port.name} port={port} language={language} side="input" connectable={connectable} />)}</div>
-        <div>{outputs.map(port => <PortRow key={port.name} port={port} language={language} side="output" connectable={connectable} />)}</div>
+        <div>{inputs.map(port => <PortRow key={port.name} port={port} side="input" connectable={connectable} />)}</div>
+        <div>{outputs.map(port => <PortRow key={port.name} port={port} side="output" connectable={connectable} />)}</div>
       </div>
       {data.definition.type === SUBWORKFLOW_TYPE && linkWorkflow !== undefined && (
         <div className={css.nodeControls}>
@@ -238,7 +235,7 @@ function displayedOutputs(data: WorkflowNodeData): readonly CardRunValue[] {
   if (produced === undefined) return []
   return nodeOutputPorts(data)
     .filter(port => port.display !== undefined && Object.hasOwn(produced, port.name))
-    .map(port => ({ name: port.name, value: produced[port.name], display: port.display ?? 'value' }))
+    .map(port => ({ name: port.name, value: produced[port.name], display: port.display! }))
 }
 
 function ExecPin({ pin, side, connectable, branch = false }: {
@@ -270,14 +267,13 @@ function ExecPin({ pin, side, connectable, branch = false }: {
   )
 }
 
-function PortRow({ port, language, side, connectable }: {
+function PortRow({ port, side, connectable }: {
   readonly port: PortDefinition
-  readonly language: Language
   readonly side: 'input' | 'output'
   readonly connectable: boolean
 }) {
   const isInput = side === 'input'
-  const type = typeName(language, port.type)
+  const { type } = port
   // The row cuts a long name or type short, so its tooltip carries both in full.
   const title = [`${port.name} ${type}`, ...port.description === undefined ? [] : [port.description]].join('\n')
   return (
@@ -488,8 +484,7 @@ function NodeControl({ control, value, onChange, readOnly }: NodeControlProps) {
 const DEFAULT_TEXTAREA_ROWS = 6
 
 function formatOutput(value: unknown, display: 'value' | 'json'): string {
-  if (display === 'json') return JSON.stringify(value, null, 2) ?? 'undefined'
-  return typeof value === 'string' ? value : String(value)
+  return display === 'json' ? JSON.stringify(value, null, 2) ?? 'undefined' : String(value)
 }
 
 /**

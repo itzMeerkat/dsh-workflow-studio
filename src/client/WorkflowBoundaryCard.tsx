@@ -3,7 +3,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { useContext } from 'react'
 import { EXEC_RUN_PIN, EXEC_THEN_PIN } from '../shared/graph.ts'
-import { typeName } from '../shared/language.ts'
 import { boundaryPorts, boundarySide } from '../shared/workflow-boundary.ts'
 import { handleId, type WorkflowFlowNode } from './graph-model.ts'
 import type { WorkflowStudioKey } from './locale.ts'
@@ -26,7 +25,7 @@ export function WorkflowBoundaryCard({ data, selected, graph = 'data' }: NodePro
 }) {
   const actions = useContext(NodeCardContext)
   if (actions === undefined) throw new Error('Workflow boundary card rendered outside its view')
-  const { t, language } = actions
+  const { t } = actions
   const node = data.definition
   const side = boundarySide(node)
   const ports = boundaryPorts(node)
@@ -52,7 +51,7 @@ export function WorkflowBoundaryCard({ data, selected, graph = 'data' }: NodePro
       <div className={css.ports}>
         <div>
           {ports.map((port) => {
-            const type = typeName(language, port.type)
+            const { type } = port
             const described = port.default === undefined ? type : `${type} = ${formatWorkflowPortDefault(port.default, port.type)}`
             return (
               <div key={port.name} className={`${css.port} ${isInput ? css.portOutput : css.portInput}`} title={`${port.name} ${described}`}>

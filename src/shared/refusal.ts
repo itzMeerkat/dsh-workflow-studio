@@ -9,21 +9,14 @@
 import type { WorkflowDiagnostic } from './analysis.ts'
 import { describeDiagnostic } from './diagnostic-message.ts'
 import { assertNever } from './errors.ts'
-import type { WorkflowKind } from './types.ts'
 
 /** 一次拒绝；`code` 决定其余字段。 */
 export type WorkflowRefusal =
   /** 另一个工作流已使用这个名称。 */
   | { readonly code: 'name-taken'; readonly name: string }
-  /** 另一种类的工作流已使用这个名称。 */
-  | { readonly code: 'name-taken-by-kind'; readonly name: string; readonly kind: WorkflowKind }
   | { readonly code: 'workflow-missing'; readonly workflow: string }
-  /** 工作流的种类一经保存就不再改变。 */
-  | { readonly code: 'kind-change'; readonly workflow: string; readonly from: WorkflowKind; readonly to: WorkflowKind }
   /** 被嵌入的工作流不能改名或删除，否则嵌入它的地方会断开。 */
   | { readonly code: 'embedded'; readonly name: string; readonly embedders: readonly string[]; readonly action: 'rename' | 'delete' }
-  /** `code` 工作流只写成源码，不能运行。 */
-  | { readonly code: 'not-runnable'; readonly workflow: string; readonly kind: WorkflowKind }
   | { readonly code: 'run-missing'; readonly run: string }
   | { readonly code: 'run-ended'; readonly run: string }
   | { readonly code: 'run-node-missing'; readonly run: string; readonly node: string }
@@ -36,17 +29,12 @@ export type WorkflowRefusal =
   /** 子工作流直接或间接嵌入了自己；`trail` 是沿嵌入关系走过的工作流。 */
   | { readonly code: 'embed-cycle'; readonly trail: readonly string[] }
   | { readonly code: 'embedded-workflow-missing'; readonly node: string; readonly workflow: string }
-  | { readonly code: 'language-unknown'; readonly language: string; readonly languages: readonly string[] }
-  | { readonly code: 'folder-relative'; readonly folder: string }
-  /** 目录读不出，例如不存在或没有权限；`reason` 是操作系统给出的原文。 */
-  | { readonly code: 'folder-unreadable'; readonly folder: string; readonly reason: string }
-  /** 原子目录必须是绝对路径，且只用于能读原子的语言。 */
-  | { readonly code: 'atom-folder-invalid'; readonly folder: string }
   | { readonly code: 'boundary-duplicate'; readonly side: 'inputs' | 'outputs' }
-  | { readonly code: 'node-kind'; readonly type: string; readonly kinds: readonly WorkflowKind[]; readonly kind: WorkflowKind }
   | { readonly code: 'cycle'; readonly nodes: readonly string[] }
   | { readonly code: 'node-duplicate'; readonly node: string }
   | { readonly code: 'node-type-unknown'; readonly type: string }
+  /** 节点类型只由运行开始时的展开放置，作者不能放置它。 */
+  | { readonly code: 'node-reserved'; readonly type: string }
   | { readonly code: 'port-duplicate'; readonly node: string; readonly side: 'inputs' | 'outputs'; readonly port: string }
   /** 多路分支的 case 为空、重复或与 default 引脚同名。 */
   | { readonly code: 'switch-case'; readonly node: string; readonly case: string }
@@ -101,16 +89,10 @@ function describeRefusal(refusal: WorkflowRefusal): string {
   switch (refusal.code) {
     case 'name-taken':
       return `工作流名称 "${refusal.name}" 已存在`
-    case 'name-taken-by-kind':
-      return `工作流名称 "${refusal.name}" 已被一个 ${refusal.kind} 工作流使用`
     case 'workflow-missing':
       return `工作流 "${refusal.workflow}" 不存在`
-    case 'kind-change':
-      return `工作流 "${refusal.workflow}" 是 ${refusal.from} 工作流，不能改为 ${refusal.to} 工作流`
     case 'embedded':
       return `工作流 "${refusal.name}" 被 ${refusal.embedders.map(name => `"${name}"`).join('、')} 作为子工作流嵌入，不能${refusal.action === 'rename' ? '改名' : '删除'}`
-    case 'not-runnable':
-      return `工作流 ${refusal.workflow} 是 ${refusal.kind} 工作流，只写成源码，不能运行`
     case 'run-missing':
       return `运行 ${refusal.run} 不存在`
     case 'run-ended':
@@ -131,24 +113,16 @@ function describeRefusal(refusal: WorkflowRefusal): string {
       return `子工作流嵌入成环：${refusal.trail.join(' → ')}`
     case 'embedded-workflow-missing':
       return `子工作流节点 ${refusal.node} 嵌入的工作流 ${refusal.workflow} 不存在`
-    case 'language-unknown':
-      return `code 工作流的语言必须是 ${refusal.languages.join('、')} 之一，而不是 ${refusal.language === '' ? '空' : refusal.language}`
-    case 'folder-relative':
-      return `目录必须是绝对路径: ${refusal.folder}`
-    case 'folder-unreadable':
-      return `目录 ${refusal.folder} 读不出: ${refusal.reason}`
-    case 'atom-folder-invalid':
-      return `原子目录必须是绝对路径，且只用于能读原子的语言: ${refusal.folder}`
     case 'boundary-duplicate':
       return `工作流最多只能有一个${SIDE[refusal.side]}边界节点`
-    case 'node-kind':
-      return `节点类型 ${refusal.type} 只能用在 ${refusal.kinds.join('、')} 工作流中，而本工作流是 ${refusal.kind}`
     case 'cycle':
       return `工作流包含环：${refusal.nodes.join(', ')}`
     case 'node-duplicate':
       return `节点 ID "${refusal.node}" 重复`
     case 'node-type-unknown':
       return `未知节点类型: ${refusal.type}`
+    case 'node-reserved':
+      return `节点类型 ${refusal.type} 只由子工作流展开放置，不能直接使用`
     case 'port-duplicate':
       return `节点 ${refusal.node} 的${SIDE[refusal.side]}端口 ${refusal.port} 重复`
     case 'switch-case':

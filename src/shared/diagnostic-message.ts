@@ -1,13 +1,12 @@
 /**
- * Host 侧静态分析诊断与源码生成失败的文案。
+ * Host 侧静态分析诊断的文案。
  *
- * 分析和生成只给出定位与事实，文案按使用它的界面组织：这里是保存异常与工具返回读的一句话，
+ * 分析只给出定位与事实，文案按使用它的界面组织：这里是保存异常与工具返回读的一句话，
  * 浏览器的同类文案由 `client/locale.ts` 的词典拥有。
  * @module dsh-workflow-studio
  */
 
 import type { WorkflowDiagnostic } from './analysis.ts'
-import type { RenderFault } from './source.ts'
 import { assertNever } from './errors.ts'
 
 /**
@@ -36,33 +35,5 @@ export function describeDiagnostic(diagnostic: WorkflowDiagnostic): string {
         + `与节点 ${diagnostic.nodeId} 输入端口 ${diagnostic.port} 声明的 ${diagnostic.types[1]} 不符`
     default:
       return assertNever(diagnostic)
-  }
-}
-
-/**
- * 一次源码生成失败的中文说明。
- * @param fault - 生成器给出的原因。
- * @returns 一句话说明。
- */
-export function describeRenderFault(fault: RenderFault): string {
-  switch (fault.code) {
-    case 'not-a-decision':
-      return `节点 ${fault.node} 不是 branch 或 switch，它守卫的分支在代码中写不成条件：改用 branch 分叉`
-    case 'no-condition':
-      return `决策节点 ${fault.node} 的条件输入没有接线`
-    case 'multiline-condition':
-      return `节点 ${fault.node} 作为条件时必须是单行表达式`
-    case 'unwired-parameter':
-      return `原子节点 ${fault.node} 的参数 ${fault.port} 没有接线`
-    case 'missing-atom':
-      return `原子节点 ${fault.node} 引用的 ${fault.atom} 不在工作流的原子目录中，或不能作为原子`
-    case 'missing-workflow':
-      return `子工作流节点 ${fault.node} 嵌入的工作流 ${fault.workflow} 不存在`
-    case 'port-variable':
-      return `代码节点 ${fault.node} 的端口 ${fault.port} 不能作为变量：它须是标识符、不是保留字、不与原子、被调用的工作流或 err 同名，且与同名端口类型相同`
-    case 'no-value':
-      return `节点 ${fault.node} 的值在生成的代码中没有来源：只有调用的结果、代码块的输出，以及只汇合这些值的分支合并有值`
-    default:
-      return assertNever(fault)
   }
 }

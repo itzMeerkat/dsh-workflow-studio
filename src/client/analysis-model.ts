@@ -12,7 +12,7 @@ export interface EditorAnalysis {
   readonly diagnostics: readonly WorkflowDiagnostic[]
   /** The diagnostics each node carries, keyed by node ID; nodes without any are absent. */
   readonly byNode: ReadonlyMap<string, readonly WorkflowDiagnostic[]>
-  /** The graph in execution order, ready to be written in any language. */
+  /** The graph in execution order, which the description is written from. */
   readonly ir: WorkflowIr
 }
 

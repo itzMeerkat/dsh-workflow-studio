@@ -8,17 +8,13 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import { ZodError, z } from 'zod'
 import type { WorkflowNodeRegistry } from './registry.ts'
 import type { DagEngine } from './engine.ts'
-import type { WorkflowFiles } from './workflow-files.ts'
-import type { AtomFile } from './shared/language.ts'
 import {
-  NodeId, RunId, WorkflowId, type FolderListing, type SavedWorkflow, type WorkflowRunRecord,
+  NodeId, RunId, WorkflowId, type SavedWorkflow, type WorkflowRunRecord,
   type WorkflowRunSummary, type WorkflowStudioSnapshot,
 } from './shared/types.ts'
 import { workflowDefinitionSchema } from './shared/workflow-schema.ts'
 import { WorkflowRefusalError, refuse } from './shared/refusal.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
-import { codeLanguageOf } from './shared/language.ts'
-import { listFolders, readAtomFiles } from './atom-folder.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -36,22 +32,19 @@ const jsonObjectSchema = z.record(z.string(), z.json())
 
 /** Host controller backing the `workflowStudio` Remote namespace. */
 export class WorkflowStudioController extends TypertRemoteService {
-  static inject = ['dagEngine', 'workflowNodeRegistry', 'workflowFiles']
+  static inject = ['dagEngine', 'workflowNodeRegistry']
 
   private readonly engine: DagEngine
   private readonly registry: WorkflowNodeRegistry
-  private readonly files: WorkflowFiles
 
   constructor(ctx: Context) {
     super(ctx, 'workflowStudioController', { namespace: 'workflowStudio' })
     this.engine = ctx.dagEngine
     this.registry = ctx.workflowNodeRegistry
-    this.files = ctx.workflowFiles
   }
 
   /**
-   * Return what the editor works with: every saved workflow, of either kind, and every registered node type. Each
-   * node type lists the workflow kinds it may appear in, and the editor offers only the ones fitting the open workflow.
+   * Return what the editor works with: every saved workflow and every registered node type.
    * @returns The workflows with their definitions, and the node catalog.
    */
   @Remote
@@ -64,63 +57,39 @@ export class WorkflowStudioController extends TypertRemoteService {
   }
 
   /**
-   * Validate and save one browser-authored definition, replacing a saved workflow of the same name. A code workflow
-   * with an atom folder is written into that folder as `<id>` plus its language's output suffix, and the files of the
-   * workflows embedding it are rewritten; a workflow whose source cannot be written is still saved, and its file is
-   * removed.
+   * Validate and save one browser-authored definition, replacing a saved workflow of the same name.
    * @param definition - Complete workflow definition.
-   * @returns The saved workflow ID, why its source could not be written, and which embedding workflows could not be
-   * rewritten and why.
+   * @returns The saved workflow ID.
    */
   @Remote
   async save(definition: unknown): Promise<SavedWorkflow> {
-    return this.guard(async () => this.files.save(workflowDefinitionSchema.parse(definition)))
+    return this.guard(async () => ({ workflowId: await this.engine.save(workflowDefinitionSchema.parse(definition)) }))
   }
 
   /**
-   * Replace one existing browser-authored definition, re-keying it when its name changed, and write it into
-   * its atom folder as {@link save} does.
+   * Replace one existing browser-authored definition, re-keying it when its name changed.
    * @param workflowId - Existing workflow ID returned by {@link save}.
    * @param definition - Complete replacement definition.
    * @returns As {@link save} returns; renaming a workflow returns a new ID.
    */
   @Remote
   async update(workflowId: string, definition: unknown): Promise<SavedWorkflow> {
-    return this.guard(async () => this.files.update(WorkflowId(workflowId), workflowDefinitionSchema.parse(definition)))
+    return this.guard(async () => ({
+      workflowId: await this.engine.update(WorkflowId(workflowId), workflowDefinitionSchema.parse(definition)),
+    }))
   }
 
   /**
-   * Delete one saved workflow and the file it wrote into its atom folder; its retained runs stay.
+   * Delete one saved workflow; its retained runs stay.
    * @param workflowId - Workflow ID returned by {@link save}.
    * @returns null once the workflow is deleted.
    */
   @Remote
   async delete(workflowId: string): Promise<null> {
     return this.guard(async () => {
-      await this.files.delete(WorkflowId(workflowId))
+      await this.engine.delete(WorkflowId(workflowId))
       return null
     })
-  }
-
-  /**
-   * Read the atom files of one folder, for the browser to parse into its node library.
-   * @param folder - Absolute path of the atom folder.
-   * @param language - Name of a code language.
-   * @returns The folder's files of that language.
-   */
-  @Remote
-  async atomFiles(folder: string, language: string): Promise<AtomFile[]> {
-    return this.guard(async () => readAtomFiles(folder, codeLanguageOf(language).functions.atoms))
-  }
-
-  /**
-   * List the subfolders of one Host folder, for choosing an atom folder.
-   * @param path - Absolute folder path; empty for the Host user's home folder.
-   * @returns The listing.
-   */
-  @Remote
-  async folders(path: string): Promise<FolderListing> {
-    return this.guard(async () => listFolders(path))
   }
 
   /**

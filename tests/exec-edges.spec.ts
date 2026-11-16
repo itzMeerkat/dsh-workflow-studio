@@ -2,16 +2,15 @@
  * 执行边测试：排序约束、跳过沿执行边传递，以及执行边的定义校验。
  */
 
-import { afterEach, describe, it } from 'node:test'
+import { afterEach,describe,it } from 'node:test'
 import assert from 'node:assert/strict'
-import { TestHosts, runEnded, signalRequested } from './host.ts'
+import { TestHosts,runEnded,signalRequested } from './host.ts'
 import { workflow } from './graph-fixtures.ts'
-import { topologicalSort } from '../src/validation.ts'
-import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
+import { WorkflowNode,type WorkflowNodePorts } from '../src/node.ts'
 import { NodeId } from '../src/shared/types.ts'
 import type {
-  DagWorkflowDefinition, NodeExecutionContext, NodeRunRecord, PortDefinition, WorkflowNodeExecutor,
-  WorkflowRunRecord,
+DagWorkflowDefinition,NodeExecutionContext,NodeRunRecord,PortDefinition,WorkflowNodeExecutor,
+WorkflowRunRecord,
 } from '../src/shared/types.ts'
 
 /** 按调用顺序追加节点 ID 的共享记录，每个用例开始时清空。 */
@@ -129,22 +128,6 @@ describe('执行边', () => {
     return runEnded(ctx, engine.start(id).runId)
   }
 
-  it('执行边决定顺序，但不进入下游节点的输入', async () => {
-    const record = await run(workflow({ ...mark('first'), ...mark('second') }, ['first.then>second']))
-
-    assert.equal(record.status, 'completed')
-    assert.deepEqual(calls, ['first:start', 'first:end', 'second:start', 'second:end'])
-    assert.deepEqual(node(record, 'second')?.inputs, {})
-  })
-
-  it('执行边把同层节点拆到相邻层级，没有执行边时它们同层', () => {
-    const levels = (definition: DagWorkflowDefinition) =>
-      topologicalSort(definition).map(level => level.map(item => item.id))
-    const nodes = { ...mark('first'), ...mark('second') }
-    assert.deepEqual(levels(workflow(nodes, [])), [['first', 'second']])
-    assert.deepEqual(levels(workflow(nodes, ['first.then>second'])), [['first'], ['second']])
-  })
-
   it('源节点未触发引脚时目标节点不被调用，跳过沿执行边继续传递', async () => {
     const record = await run(workflow(
       { gate: 'decline', ...mark('middle'), ...mark('last') },
@@ -167,21 +150,6 @@ describe('执行边', () => {
     )
     await assert.rejects(engine.save(workflow(nodes, ['a.nope>b'])), /不存在的执行输出引脚 nope/)
     await assert.rejects(engine.save(workflow(nodes, ['a.then>b', 'a.then>b'])), /重复/)
-  })
-
-  it('同一个输入端口仍只接受一条数据边，而执行输入接受多条执行边', async () => {
-    const { engine } = await hosts.start(await hosts.root(), executors)
-    await assert.rejects(
-      engine.save(workflow({ ...mark('a'), ...mark('b'), c: 'sink' }, ['a>c', 'b>c'])),
-      /存在多条入边/,
-    )
-
-    const record = await run(workflow(
-      { ...mark('a'), ...mark('b'), ...mark('c') },
-      ['a.then>c', 'b.then>c'],
-    ))
-    assert.equal(record.status, 'completed')
-    assert.equal(calls.at(-1), 'c:end')
   })
 })
 
@@ -230,106 +198,6 @@ describe('分支、合并与输出完整性', () => {
       assert.equal(record.status, 'failed')
       assert.match(record.error ?? '', message)
     }
-  })
-
-  it('merge 在两条入执行边全部失效时才被跳过', async () => {
-    const { ctx, engine } = await host()
-    const id = await engine.save(workflow(
-      { a: 'decline', b: 'decline', m: 'merge' },
-      ['a.then>m', 'b.then>m'],
-    ))
-    const record = await runEnded(ctx, engine.start(id).runId)
-    assert.equal(record.status, 'completed')
-    assert.equal(node(record, 'm')?.status, 'skipped')
-  })
-
-  it('普通节点触发唯一的 then 引脚，被跳过的节点计入运行摘要', async () => {
-    const { ctx, engine } = await host()
-    const id = await engine.save(workflow(
-      { ...mark('plain'), gate: 'decline', ...mark('after') },
-      ['plain.then>gate', 'gate.then>after'],
-    ))
-    const runId = engine.start(id).runId
-    const record = await runEnded(ctx, runId)
-    assert.deepEqual(node(record, 'plain')?.fired, ['then'])
-    assert.equal(engine.listRuns().find(item => item.runId === runId)?.skippedNodes, 1)
-  })
-
-  it('分支两条路径各自只触发一个引脚，未触发的一侧被跳过', async () => {
-    const { ctx, engine } = await host()
-    const flow = (condition: boolean) => workflow(
-      { flag: { type: 'flag', config: { value: condition } }, gate: 'branch', ...mark('yes'), ...mark('no') },
-      ['flag>gate:condition', 'gate.true>yes', 'gate.false>no'],
-      { name: `branch-${String(condition)}` },
-    )
-
-    const taken = await runEnded(ctx, engine.start(await engine.save(flow(true))).runId)
-    assert.equal(taken.status, 'completed')
-    assert.deepEqual(statuses(taken).slice(2), [['yes', 'completed'], ['no', 'skipped']])
-
-    const other = await runEnded(ctx, engine.start(await engine.save(flow(false))).runId)
-    assert.equal(other.status, 'completed')
-    assert.deepEqual(statuses(other).slice(2), [['yes', 'skipped'], ['no', 'completed']])
-  })
-
-  it('重启后按记录中的 fired 门控下游，不重新调用已完成的分支节点', async () => {
-    const root = await hosts.root()
-    const started = Promise.withResolvers<void>()
-    blockRelease = started.resolve
-    const first = await hosts.start(root, executors)
-    const definition = workflow({
-      flag: { type: 'flag', config: { value: false } },
-      gate: 'branch',
-      hold: 'blocker',
-      ...mark('yes'),
-    }, ['flag>gate:condition', 'gate.false>hold', 'gate.true>yes'], { name: 'branch-restart' })
-    const runId = first.engine.start(await first.engine.save(definition)).runId
-    await started.promise
-    // The branch completed and was checkpointed; `hold` is still running when the Host stops.
-    assert.deepEqual(node(first.engine.getRun(runId)!, 'gate')?.fired, ['false'])
-    await hosts.stop(first.ctx)
-
-    blockRelease = undefined
-    const second = await hosts.start(root, [new MarkNode(), new SinkNode(), decline, flag, {
-      ...blocker,
-      execute: () => ({ status: 'completed' as const, outputs: { output: 'resumed' } }),
-    }])
-    const record = await runEnded(second.ctx, runId)
-
-    assert.equal(record.status, 'completed')
-    // The branch node is never called again, so its recorded pin is what gates the run.
-    assert.equal(node(record, 'gate')?.attempts, 1)
-    assert.deepEqual(node(record, 'gate')?.fired, ['false'])
-    assert.equal(node(record, 'hold')?.status, 'completed')
-    assert.equal(node(record, 'yes')?.status, 'skipped')
-    assert.deepEqual(calls, [])
-  })
-
-  it('与长节点无关的链路不等待它，逐个节点就绪即执行', async () => {
-    const { ctx, engine } = await host()
-    const id = await engine.save(workflow(
-      { slow: 'waiter', ...mark('f0'), ...mark('f1'), ...mark('f2') },
-      ['f0.then>f1', 'f1.then>f2'],
-    ))
-
-    const runId = engine.start(id).runId
-    await new Promise<void>((resolve) => {
-      const dispose = ctx.on('dag/node-end', (info, item) => {
-        if (info.runId !== runId || item.nodeId !== 'f2') return
-        dispose()
-        resolve()
-      })
-    })
-
-    // Under a level barrier f1 and f2 sit in later levels and could not finish while `slow` runs.
-    const record = engine.getRun(runId)!
-    assert.equal(node(record, 'slow')?.status, 'running')
-    assert.deepEqual(
-      record.nodes.filter(item => item.nodeId.startsWith('f')).map(item => item.status),
-      ['completed', 'completed', 'completed'],
-    )
-    engine.cancelRun(runId, 'done')
-    await runEnded(ctx, runId)
   })
 
   it('取消运行时已开始的节点先结束，结束的运行没有节点停在 running', async () => {

@@ -8,18 +8,16 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { createCodeNodes } from './code-nodes.ts'
 import { WorkflowNode, type WorkflowNodePorts } from './node.ts'
 import { BRANCH_TYPE } from './shared/graph.ts'
-import { SUBWORKFLOW_TYPE } from './shared/subworkflow.ts'
+import { SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE, SUBWORKFLOW_TYPE } from './shared/subworkflow.ts'
 import { SWITCH_DEFAULT_PIN, SWITCH_TYPE, switchCases, switchPin } from './shared/switch.ts'
-import { SUBWORKFLOW_DEFAULTS, SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE } from './subworkflow.ts'
+import { SUBWORKFLOW_DEFAULTS } from './subworkflow.ts'
 import {
   WORKFLOW_INPUT_TYPE, WORKFLOW_INPUT_VALUES, WORKFLOW_OUTPUT_TYPE,
 } from './shared/workflow-boundary.ts'
 import type {
-  NodeExecKind, NodeExecutionContext, NodeExecutionResult, PortDefinition, WorkflowKind,
-  WorkflowNodeExecutor,
+  NodeExecKind, NodeExecutionContext, NodeExecutionResult, PortDefinition, WorkflowNodeExecutor,
 } from './shared/types.ts'
 
 /** {@link BranchNode} 条件成立时触发的执行输出引脚。 */
@@ -35,7 +33,6 @@ export const BRANCH_FALSE_PIN = 'false'
  */
 export class BranchNode implements WorkflowNodeExecutor {
   readonly type = BRANCH_TYPE
-  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '条件分支'
   readonly description = '按布尔输入触发 true 或 false 执行引脚'
   readonly execOutputs: readonly string[] = [BRANCH_TRUE_PIN, BRANCH_FALSE_PIN]
@@ -57,7 +54,6 @@ export class BranchNode implements WorkflowNodeExecutor {
  */
 export class SwitchNode implements WorkflowNodeExecutor {
   readonly type = SWITCH_TYPE
-  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '多路分支'
   readonly description = '按值等于哪个 case 触发同名执行引脚，都不等时触发 default'
   readonly execOutputs: readonly string[] = [SWITCH_DEFAULT_PIN]
@@ -81,7 +77,6 @@ export class SwitchNode implements WorkflowNodeExecutor {
  */
 export class MergeNode extends WorkflowNode<{ output: unknown }> {
   readonly type = 'merge'
-  override readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '分支合并'
   readonly description = '从互斥分支中透传唯一送达的输入'
   override readonly variadicInputs: NonNullable<WorkflowNodeExecutor['variadicInputs']> = { min: 2, outputType: 'same' }
@@ -110,7 +105,6 @@ export class MergeNode extends WorkflowNode<{ output: unknown }> {
  */
 class WorkflowInputNode implements WorkflowNodeExecutor {
   readonly type = WORKFLOW_INPUT_TYPE
-  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '工作流输入'
   readonly description = '把调用方提供的工作流输入送入图中'
   readonly inputs: readonly PortDefinition[] = []
@@ -133,7 +127,6 @@ class WorkflowInputNode implements WorkflowNodeExecutor {
  */
 class WorkflowOutputNode implements WorkflowNodeExecutor {
   readonly type = WORKFLOW_OUTPUT_TYPE
-  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '工作流输出'
   readonly description = '收集工作流声明的输出值'
   readonly inputs: readonly PortDefinition[] = []
@@ -145,15 +138,14 @@ class WorkflowOutputNode implements WorkflowNodeExecutor {
 }
 
 /**
- * 嵌入另一个同种类工作流的节点；它的端口是那个工作流的输入和输出，写在节点实例上。
+ * 嵌入另一个工作流的节点；它的端口是那个工作流的输入和输出，写在节点实例上。
  *
- * `run` 工作流在运行开始时把它展开成那个工作流的节点，`code` 工作流把它写成一次函数调用，所以它自己从不执行。
+ * 运行开始时引擎把它展开成那个工作流的节点，所以它自己从不执行。
  */
 class SubworkflowNode implements WorkflowNodeExecutor {
   readonly type = SUBWORKFLOW_TYPE
-  readonly kinds: readonly WorkflowKind[] = ['run', 'code']
   readonly label = '子工作流'
-  readonly description = '调用另一个同种类的工作流；输入输出端口就是它声明的输入和输出'
+  readonly description = '调用另一个工作流；输入输出端口就是它声明的输入和输出'
   readonly inputs: readonly PortDefinition[] = []
   readonly outputs: readonly PortDefinition[] = []
 
@@ -165,11 +157,10 @@ class SubworkflowNode implements WorkflowNodeExecutor {
 /**
  * 子工作流展开后的入口：把嵌入处送来的值，以及未送来的输入的默认值，交给子工作流的节点。
  *
- * 只由展开放置，任何工作流都不能直接使用，所以它不属于任何种类；端口写在节点实例上。
+ * 只由展开放置，作者不能直接使用；端口写在节点实例上。
  */
 class SubworkflowEntryNode implements WorkflowNodeExecutor {
   readonly type = SUBWORKFLOW_ENTRY_TYPE
-  readonly kinds: readonly WorkflowKind[] = []
   readonly label = '子工作流入口'
   readonly description = '把嵌入处送来的值交给子工作流'
   readonly inputs: readonly PortDefinition[] = []
@@ -184,10 +175,9 @@ class SubworkflowEntryNode implements WorkflowNodeExecutor {
   }
 }
 
-/** 子工作流展开后的出口：它完成即子工作流完成。只由展开放置，不属于任何种类。 */
+/** 子工作流展开后的出口：它完成即子工作流完成。只由展开放置。 */
 class SubworkflowExitNode implements WorkflowNodeExecutor {
   readonly type = SUBWORKFLOW_EXIT_TYPE
-  readonly kinds: readonly WorkflowKind[] = []
   readonly label = '子工作流出口'
   readonly description = '子工作流在此完成'
   readonly inputs: readonly PortDefinition[] = []
@@ -216,13 +206,13 @@ export function execKindOf(executor: WorkflowNodeExecutor): NodeExecKind {
 }
 
 /**
- * 注册引擎自有的节点：流程控制节点、边界节点、子工作流节点及其展开所用的节点，以及 `code` 工作流的代码节点。
+ * 注册引擎自有的节点：流程控制节点、边界节点、子工作流节点及其展开所用的节点。
  * @param ctx - 已加载 workflowNodeRegistry 服务的 Cordis context。
  */
 export function registerBuiltinNodes(ctx: Context): void {
   const nodes: readonly WorkflowNodeExecutor[] = [
     branchNode, switchNode, mergeNode, new WorkflowInputNode(), new WorkflowOutputNode(),
-    new SubworkflowNode(), new SubworkflowEntryNode(), new SubworkflowExitNode(), ...createCodeNodes(),
+    new SubworkflowNode(), new SubworkflowEntryNode(), new SubworkflowExitNode(),
   ]
   for (const node of nodes) {
     ctx.effect(() => ctx.workflowNodeRegistry.register(node, 'dsh-workflow-studio'), `builtin-node:${node.type}`)

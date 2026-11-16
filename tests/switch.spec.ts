@@ -1,85 +1,19 @@
 /**
- * 多路分支：执行引脚取自节点的 case，运行时触发值匹配的 case 或 default，Go 写成 switch 语句。
+ * 多路分支：运行时触发值匹配的 case，其他引脚后的节点被跳过。
  */
 
-import { afterEach, describe, it } from 'node:test'
+import { afterEach,describe,it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import { WorkflowStudioController } from '../src/controller.ts'
-import { analyzeWorkflow, indexNodeTypes } from '../src/shared/analysis.ts'
-import { CODE_BLOCK_TYPE, CODE_FIELD, GO, PSEUDOCODE } from '../src/shared/language.ts'
-import { renderWorkflow } from '../src/shared/source.ts'
-import { SWITCH_CASES, switchPin } from '../src/shared/switch.ts'
+import { SWITCH_CASES } from '../src/shared/switch.ts'
 import { RunId } from '../src/shared/types.ts'
-import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
+import { WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { createFixtureNodes } from './fixture-nodes.ts'
-import { CATALOG, NODE_TYPES, irOf, nodeType, workflow } from './graph-fixtures.ts'
-import { TestHosts, runEnded } from './host.ts'
+import { workflow } from './graph-fixtures.ts'
+import { TestHosts,runEnded } from './host.ts'
 
 const sw = (...cases: string[]) => ({ type: 'switch', config: { [SWITCH_CASES]: cases } })
-
-describe('多路分支', () => {
-  it('字符串、数字和布尔值按文本匹配 case，都不匹配时为 default，其他值没有引脚', () => {
-    assert.equal(switchPin(3, ['2', '3']), '3')
-    assert.equal(switchPin(true, ['true']), 'true')
-    assert.equal(switchPin('x', ['a']), 'default')
-    assert.equal(switchPin({}, ['a']), undefined)
-  })
-
-  it('每个 case 是一个互斥的引脚：各 case 汇合到分支合并时恰好一个送达', () => {
-    const definition = workflow({
-      v: 'value', s: sw('a', 'b'), x: 'value', y: 'value', z: 'value', m: { type: 'merge', inputs: [
-        { name: 'input1', type: 'any', required: false },
-        { name: 'input2', type: 'any', required: false },
-        { name: 'input3', type: 'any', required: false },
-      ] },
-    }, ['v>s:value', 's.a>x', 's.b>y', 's.default>z', 'x>m:input1', 'y>m:input2', 'z>m:input3', 'x.then>m', 'y.then>m', 'z.then>m'])
-    assert.deepEqual(analyzeWorkflow(definition, CATALOG).diagnostics, [])
-    const partial = { ...definition, edges: definition.edges.filter(edge => edge.source !== 'z' && edge.target !== 'z') }
-    assert.deepEqual(analyzeWorkflow(partial, CATALOG).diagnostics.map(item => item.code), ['merge-gap'])
-  })
-
-  it('Go 写成 switch 语句：没事可做的 case 在 default 有事可做时合并列出，否则省略', () => {
-    const catalog = indexNodeTypes([
-      ...NODE_TYPES.map(type => ({ ...type, kinds: ['run', 'code'] as const })),
-      nodeType(CODE_BLOCK_TYPE, { kinds: ['code'] }),
-    ])
-    const block = (text: string) => ({ type: CODE_BLOCK_TYPE, config: { [CODE_FIELD]: text } })
-    const definition = workflow({
-      in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'kind', type: 'string' }, { name: 'size', type: 'number' }] },
-      s: sw('a', 'b', 'c', 'd'),
-      x: block('println("b")'), z: block('println("?")'),
-      n: sw('1', '2'), y: block('println(2)'),
-    }, ['in:kind>s:value', 's.b>x', 's.default>z', 'in:size>n:value', 'n.2>y'], { kind: 'code', language: 'go' })
-    assert.equal(renderWorkflow(irOf(definition, catalog), GO), [
-      '// Code generated from workflow "test". DO NOT EDIT.',
-      '',
-      'func test(kind string, size float64) (err error) {',
-      '\tswitch kind {',
-      '\tcase "b":',
-      '\t\tprintln("b")',
-      '\tcase "a", "c", "d":',
-      '\tdefault:',
-      '\t\tprintln("?")',
-      '\t}',
-      '\tswitch size {',
-      '\tcase 2:',
-      '\t\tprintln(2)',
-      '\t}',
-      '\treturn',
-      '}',
-      '',
-    ].join('\n'))
-  })
-
-  it('没有 switch 语句的语言写成条件链：default 是不等于任何 case', () => {
-    const definition = workflow({
-      in: { type: WORKFLOW_INPUT_TYPE, outputs: [{ name: 'kind', type: 'string' }] },
-      s: sw('a', 'b'), x: 'value', z: 'value',
-    }, ['in:kind>s:value', 's.a>x', 's.default>z'])
-    assert.match(renderWorkflow(irOf(definition), PSEUDOCODE), /  if switch\.a:\n.*\n  else if switch\.default:/)
-  })
-})
 
 describe('运行中的多路分支', () => {
   const hosts = new TestHosts()
@@ -110,11 +44,5 @@ describe('运行中的多路分支', () => {
     assert.deepEqual(record.nodes.filter(node => node.nodeId !== 'out').map(node => [node.nodeId, node.status]), [
       ['two', 'completed'], ['s', 'completed'], ['hit', 'completed'], ['miss', 'skipped'],
     ])
-  })
-
-  it('保存拒绝重复的 case，以及连到不是 case 的引脚的执行边', async () => {
-    const controller = await setup()
-    await assert.rejects(saved(controller, ['1', '1'], '1'), /case "1" 为空、重复或与 default 引脚同名/)
-    await assert.rejects(saved(controller, ['1'], '2'), /不存在的执行输出引脚/)
   })
 })

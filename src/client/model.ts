@@ -2,10 +2,9 @@
 
 import type { XYPosition } from '@xyflow/react'
 import { execSourcePin, isExecEdge, topologicalLevels } from '../shared/graph.ts'
-import { ATOM_FIELD, CODE_ATOM_TYPE, CODE_LANGUAGES, signaturePorts, type Atom } from '../shared/language.ts'
-import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE, workflowSignature, type EmbedFault } from '../shared/subworkflow.ts'
+import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE, subworkflowPorts } from '../shared/subworkflow.ts'
 import {
-  NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowId, type WorkflowKind,
+  NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowId,
   type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
 import type { WorkflowRefusal } from '../shared/refusal.ts'
@@ -52,8 +51,8 @@ export function filterNodeTypes(
   ].some(value => value.toLocaleLowerCase().includes(needle)))
 }
 
-/** A saved workflow offered for embedding, with why it cannot be embedded in the edited one. */
-export type EmbedChoice = WorkflowRow & { readonly fault?: EmbedFault }
+/** A saved workflow offered for embedding; `cycle` marks one that already embeds the edited workflow. */
+export type EmbedChoice = WorkflowRow & { readonly fault?: 'cycle' }
 
 /** Filter workflow rows by name for the toolbar picker. */
 export function filterWorkflows<W extends Pick<WorkflowRow, 'name'>>(
@@ -66,20 +65,15 @@ export function filterWorkflows<W extends Pick<WorkflowRow, 'name'>>(
     workflow.name.toLocaleLowerCase().includes(needle))
 }
 
-/** The stem of a new workflow's name, so a suggested name tells which kind of workflow it starts. */
-const NAME_STEM: Readonly<Record<WorkflowKind, string>> = { run: 'workflow', code: 'code-workflow' }
-
 /**
- * The first available `<stem>-N` name for a new workflow of one kind.
- * @param workflows - Every saved workflow; the kinds share one name space.
- * @param kind - The kind of the new workflow.
+ * The first available `workflow-N` name for a new workflow.
+ * @param workflows - Every saved workflow.
  */
-export function nextWorkflowName(workflows: readonly Pick<WorkflowRow, 'name'>[], kind: WorkflowKind): string {
+export function nextWorkflowName(workflows: readonly Pick<WorkflowRow, 'name'>[]): string {
   const names = new Set(workflows.map(workflow => workflow.name))
-  const stem = NAME_STEM[kind]
   let index = 1
-  while (names.has(`${stem}-${index}`)) index += 1
-  return `${stem}-${index}`
+  while (names.has(`workflow-${index}`)) index += 1
+  return `workflow-${index}`
 }
 
 /**
@@ -118,31 +112,6 @@ export function appendEditorNode(
 }
 
 /**
- * Append one atom from the workflow's atom folder as a node named after its function.
- * @param definition - Current editor definition.
- * @param atom - The atom the node calls.
- * @param at - Where the node's top-left corner goes, unless a node already sits there.
- * @returns A new definition containing the positioned node, its ports read from the atom's signature.
- */
-export function appendAtomNode(definition: DagWorkflowDefinition, atom: Atom, at: XYPosition): DagWorkflowDefinition {
-  return {
-    ...definition,
-    nodes: [
-      ...definition.nodes,
-      {
-        id: NodeId(nextEditorNodeId(atom.signature.name, definition.nodes)),
-        type: CODE_ATOM_TYPE,
-        label: atom.signature.name,
-        config: { [ATOM_FIELD]: atom.file },
-        position: freePosition(definition.nodes, at),
-        inputs: signaturePorts(atom.signature.parameters),
-        outputs: signaturePorts(atom.signature.results),
-      },
-    ],
-  }
-}
-
-/**
  * Append a node that embeds another saved workflow, named after it.
  * @param definition - Current editor definition.
  * @param id - The embedded workflow's ID, which the node links to.
@@ -156,7 +125,7 @@ export function appendSubworkflowNode(
   child: DagWorkflowDefinition,
   at: XYPosition,
 ): DagWorkflowDefinition {
-  const signature = workflowSignature(child)
+  const { inputs, outputs } = subworkflowPorts(child)
   return {
     ...definition,
     nodes: [
@@ -167,8 +136,8 @@ export function appendSubworkflowNode(
         label: child.name,
         config: { [SUBWORKFLOW_FIELD]: id },
         position: freePosition(definition.nodes, at),
-        inputs: signaturePorts(signature.parameters),
-        outputs: signaturePorts(signature.results),
+        inputs,
+        outputs,
       },
     ],
   }
@@ -276,9 +245,8 @@ function hasAlternatePath(
 /**
  * Why the panel cannot edit a definition.
  *
- * Every view assumes each edge joins two nodes, and a code workflow's source is written in the language it names.
- * Saving refuses a definition breaking either, but a record saved by an older version or an imported file may break
- * one, so the panel checks here instead of failing in whichever view reads it.
+ * Every view assumes each edge joins two nodes. Saving refuses a definition breaking that, but a record saved by an
+ * older version or an imported file may break it, so the panel checks here instead of failing in whichever view reads it.
  * @param definition - The parsed definition.
  * @returns The first reason, as the refusal the Host gives for the same fault, or undefined when the panel can edit it.
  */
@@ -287,9 +255,6 @@ export function openFault(definition: DagWorkflowDefinition): WorkflowRefusal | 
   for (const edge of definition.edges) {
     if (!ids.has(edge.source)) return { code: 'edge-node-missing', edge: edge.id, end: 'source', node: edge.source }
     if (!ids.has(edge.target)) return { code: 'edge-node-missing', edge: edge.id, end: 'target', node: edge.target }
-  }
-  if (definition.kind === 'code' && !CODE_LANGUAGES.some(language => language.name === definition.language)) {
-    return { code: 'language-unknown', language: definition.language ?? '', languages: CODE_LANGUAGES.map(language => language.name) }
   }
   return undefined
 }

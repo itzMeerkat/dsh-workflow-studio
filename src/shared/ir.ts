@@ -1,8 +1,8 @@
 /**
  * 工作流的中间表示：按执行顺序和分支条件排好的语句树。
  *
- * 定义是一张图，读它要逐条边追踪；生成器要的是顺序、嵌套和每个值的来源。IR 把前者算成后者一次，
- * 之后每种语言只负责怎么写。IR 不含任何语言的决定：这里没有标识符、没有缩进。
+ * 定义是一张图，读它要逐条边追踪；描述要的是顺序、嵌套和每个值的来源。IR 把前者算成后者一次，
+ * 之后 {@link describeWorkflow} 只负责怎么写：这里没有标识符、没有缩进。
  * @module dsh-workflow-studio
  */
 
@@ -11,7 +11,6 @@ import { isDataEdge, nodeExecPins } from './graph.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './workflow-boundary.ts'
 import type {
   DagNodeDefinition, DagWorkflowDefinition, NodeExecKind, NodeId, NodeTypeSummary, PortDefinition,
-  WorkflowKind,
 } from './types.ts'
 
 /** IR 中被引用的一个值。 */
@@ -35,7 +34,7 @@ export interface IrCall {
   /** 作者给这个节点的名字；未命名时不存在。 */
   readonly label?: string
   readonly execKind: NodeExecKind
-  /** 节点配置，例如代码节点携带的代码。 */
+  /** 节点配置，例如子工作流节点嵌入的工作流。 */
   readonly config: Record<string, unknown>
   /** 节点的执行输出引脚，按声明顺序。 */
   readonly pins: readonly string[]
@@ -81,7 +80,6 @@ export type IrBlock = readonly IrItem[]
 /** 一个工作流的完整 IR。 */
 export interface WorkflowIr {
   readonly name: string
-  readonly kind: WorkflowKind
   /** 工作流声明的输入端口，即它的参数；没有输入边界节点时为空。 */
   readonly inputs: readonly PortDefinition[]
   /** 工作流声明的输出端口，即它的结果；没有输出边界节点时为空。 */
@@ -137,7 +135,6 @@ export function buildWorkflowIr(
   const outputNode = definition.nodes.find(node => node.type === WORKFLOW_OUTPUT_TYPE)
   return {
     name: definition.name,
-    kind: definition.kind,
     inputs: inputNode === undefined ? [] : lower.outputsOf(inputNode),
     outputs: outputNode === undefined ? [] : lower.inputsOf(outputNode),
     body: root,

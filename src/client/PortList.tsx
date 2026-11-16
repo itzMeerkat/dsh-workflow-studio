@@ -2,8 +2,7 @@
 
 import { IconCloseOutlineRegular, IconPlusOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useState } from 'react'
-import { typeName, type Language } from '../shared/language.ts'
-import type { PortDefinition, PortType } from '../shared/types.ts'
+import { BUILTIN_PORT_TYPES, type PortDefinition } from '../shared/types.ts'
 import type { Translate, WorkflowStudioKey } from './locale.ts'
 import {
   appendWorkflowPort,
@@ -24,17 +23,15 @@ const FAULT: Record<'empty' | 'duplicate', WorkflowStudioKey> = {
 }
 
 /**
- * The ports one side of a workflow or a node declares, each with its name, type and, when `defaults` is set, default.
+ * The ports one side of a workflow declares, each with its name, type and, when `defaults` is set, default.
  * @param title - The list's heading.
  * @param side - Which side the ports are on, which names a new port.
- * @param types - The port types offered; a port keeps a declared type the list lacks.
+ * @param defaults - Whether each port carries a default value.
  */
-export function PortList({ title, side, ports, types, language, defaults, t, onChange }: {
+export function PortList({ title, side, ports, defaults, t, onChange }: {
   readonly title: string
   readonly side: WorkflowPortSide
   readonly ports: readonly PortDefinition[]
-  readonly types: readonly PortType[]
-  readonly language: Language
   readonly defaults: boolean
   readonly t: Translate
   readonly onChange: (ports: readonly PortDefinition[], edit: WorkflowPortEdit) => void
@@ -75,7 +72,8 @@ export function PortList({ title, side, ports, types, language, defaults, t, onC
                   onChange(updateWorkflowPort(ports, index, { type: event.currentTarget.value }), { kind: 'other' })
                 }}
               >
-                {[...new Set([...types, port.type])].map(type => <option key={type} value={type}>{typeName(language, type)}</option>)}
+                {/* A port keeps a declared type the built-in list lacks. */}
+                {[...new Set([...BUILTIN_PORT_TYPES, port.type])].map(type => <option key={type} value={type}>{type}</option>)}
               </select>
               {defaults && (
                 <DraftField

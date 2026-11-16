@@ -6,9 +6,8 @@
  */
 
 import { EXEC_THEN_PIN, execSourcePin, isDataEdge, isExecEdge } from './shared/graph.ts'
-import { signaturePorts } from './shared/language.ts'
 import {
-  SUBWORKFLOW_TYPE, subworkflowOf, workflowSignature, type WorkflowLookup,
+  SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE, SUBWORKFLOW_TYPE, subworkflowOf, subworkflowPorts, type WorkflowLookup,
 } from './shared/subworkflow.ts'
 import {
   EdgeId, NodeId, type DagEdgeDefinition, type DagExecEdge, type DagNodeDefinition, type DagWorkflowDefinition,
@@ -19,17 +18,11 @@ import {
 } from './shared/workflow-boundary.ts'
 import { refuse } from './shared/refusal.ts'
 
-/** 展开后站在子工作流节点位置上的节点：把嵌入处送来的值交给子工作流，并让子工作流的每个节点等它。 */
-export const SUBWORKFLOW_ENTRY_TYPE = 'subworkflow-entry'
-
-/** 展开后代替子工作流输出边界的节点：它完成即子工作流完成，嵌入处的后继等它。 */
-export const SUBWORKFLOW_EXIT_TYPE = 'subworkflow-exit'
-
 /** 入口节点存放子工作流输入默认值的配置字段。 */
 export const SUBWORKFLOW_DEFAULTS = 'defaults'
 
 /**
- * 把一个 `run` 工作流的子工作流节点展开成它们嵌入的工作流的节点，嵌套的子工作流一并展开。
+ * 把一个工作流的子工作流节点展开成它们嵌入的工作流的节点，嵌套的子工作流一并展开。
  *
  * 子工作流节点 `S` 展开为：
  * - 一个 ID 仍为 `S` 的入口节点，标签是 `S` 的标签或被嵌入工作流的名称，输入就是 `S` 的输入，因此连进 `S` 的边原样保留；它把收到的值和子工作流输入的默认值
@@ -39,7 +32,7 @@ export const SUBWORKFLOW_DEFAULTS = 'defaults'
  *   到齐才开始，`S` 被跳过时它的每个节点都被跳过，与单个节点一致；
  * - 从 `S` 引出的数据边改由子工作流输出端口的来源引出，没有来源的端口不再引出边，读 `S` 输出的节点因此等它读的值
  *   而不是整个子工作流；从 `S` 引出的执行边改由出口引出，它们的目标等子工作流完成。
- * @param definition - 已保存的 `run` 工作流。
+ * @param definition - 已保存的工作流。
  * @param lookup - 读取已保存的工作流。
  * @param isJoin - 节点类型是否为 OR 连接点。
  * @returns 不含子工作流节点的定义。
@@ -117,7 +110,7 @@ function inline(
     config: {
       [SUBWORKFLOW_DEFAULTS]: Object.fromEntries(ports.flatMap(port => port.default === undefined ? [] : [[port.name, port.default]])),
     },
-    inputs: signaturePorts(workflowSignature(child).parameters),
+    inputs: subworkflowPorts(child).inputs,
     outputs: ports.map(({ name, type }) => ({ name, type })),
   }
   const body = child.nodes

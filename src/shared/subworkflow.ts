@@ -1,13 +1,12 @@
 /**
- * 子工作流：把另一个同种类的已保存工作流当作一个节点。
+ * 子工作流：把另一个已保存的工作流当作一个节点。
  *
- * 节点只记下被嵌入工作流的 ID，是链接而不是副本：它的端口就是那个工作流的签名，改动那个工作流就改动每个嵌入它的地方。
- * `run` 工作流在运行开始时把它展开成那个工作流的节点；`code` 工作流把它写成对那个工作流生成的函数的调用。
+ * 节点只记下被嵌入工作流的 ID，是链接而不是副本：它的端口就是那个工作流声明的输入和输出，改动那个工作流就改动每个
+ * 嵌入它的地方。运行开始时引擎把它展开成那个工作流的节点。
  * @module dsh-workflow-studio
  */
 
-import type { Signature } from './language.ts'
-import { WorkflowId, type DagWorkflowDefinition } from './types.ts'
+import { WorkflowId, type DagNodeDefinition, type DagWorkflowDefinition, type PortDefinition } from './types.ts'
 import { workflowInputPorts, workflowOutputPorts } from './workflow-boundary.ts'
 
 /** 嵌入另一个工作流的节点类型。 */
@@ -15,6 +14,15 @@ export const SUBWORKFLOW_TYPE = 'subworkflow'
 
 /** 子工作流节点存放被嵌入工作流 ID 的配置字段。 */
 export const SUBWORKFLOW_FIELD = 'workflow'
+
+/** 展开后站在子工作流节点位置上的节点：把嵌入处送来的值交给子工作流，并让子工作流的每个节点等它。 */
+export const SUBWORKFLOW_ENTRY_TYPE = 'subworkflow-entry'
+
+/** 展开后代替子工作流输出边界的节点：它完成即子工作流完成，嵌入处的后继等它。 */
+export const SUBWORKFLOW_EXIT_TYPE = 'subworkflow-exit'
+
+/** 只由运行开始时的展开放置的节点类型；作者不能放置它们，编辑器也不列出它们。 */
+export const EXPANSION_NODE_TYPES: readonly string[] = [SUBWORKFLOW_ENTRY_TYPE, SUBWORKFLOW_EXIT_TYPE]
 
 /** 按 ID 读取已保存的工作流。 */
 export type WorkflowLookup = (id: WorkflowId) => DagWorkflowDefinition | undefined
@@ -28,53 +36,72 @@ export function subworkflowOf(config: Readonly<Record<string, unknown>>): Workfl
 }
 
 /**
- * 一个工作流作为节点时的签名：输入是参数，输出是结果。
- *
- * `run` 工作流的输入有默认值时可以不接线；`code` 工作流从不运行，输入没有默认值可用，因此都必须接线。
- * `code` 工作流生成的函数总是另外返回一个错误，所以调用它可能失败。
+ * 一个工作流作为节点时的端口：它声明的输入和输出。有默认值的输入可以不接线。
  * @param definition - 被嵌入的工作流。
- * @returns 以工作流名称命名的签名。
+ * @returns 节点的输入和输出端口，只含名称、类型和必需性。
  */
-export function workflowSignature(definition: DagWorkflowDefinition): Signature & { readonly name: string } {
+export function subworkflowPorts(definition: DagWorkflowDefinition): { inputs: PortDefinition[]; outputs: PortDefinition[] } {
   return {
-    name: definition.name,
-    parameters: workflowInputPorts(definition).map(({ name, type, default: value }) =>
-      ({ name, type, optional: definition.kind === 'run' && value !== undefined })),
-    results: workflowOutputPorts(definition).map(({ name, type }) => ({ name, type })),
-    fails: definition.kind === 'code',
+    inputs: workflowInputPorts(definition).map(({ name, type, default: value }) =>
+      value === undefined ? { name, type } : { name, type, required: false }),
+    outputs: workflowOutputPorts(definition).map(({ name, type }) => ({ name, type })),
   }
 }
 
 /**
- * 一个工作流为什么不能嵌入另一个。
- * - `other-kind`：两者种类不同。
- * - `other-package`：`code` 工作流按名字调用被嵌入工作流生成的函数，所以两者必须是同一语言、同一原子目录。
- * - `cycle`：被嵌入的工作流直接或间接嵌入了嵌入它的工作流。
+ * 按被嵌入的工作流重写每个子工作流节点的端口，并去掉接在它已不再声明的端口上的数据边。
+ *
+ * 被嵌入的工作流读不到时保留节点原有的端口，接线不因列表尚未加载而丢失。
+ * @param definition - 工作流定义。
+ * @param lookup - 读取已保存的工作流。
+ * @returns 子工作流节点的端口与被嵌入工作流一致的定义；已经一致时就是 `definition` 本身，调用方可以按引用判断有没有变化。
  */
-export type EmbedFault = 'other-kind' | 'other-package' | 'cycle'
+export function withSubworkflows(definition: DagWorkflowDefinition, lookup: WorkflowLookup): DagWorkflowDefinition {
+  let changed = false
+  const nodes = definition.nodes.map((node) => {
+    const embedded = node.type === SUBWORKFLOW_TYPE ? lookup(subworkflowOf(node.config)) : undefined
+    if (embedded === undefined) return node
+    const { inputs, outputs } = subworkflowPorts(embedded)
+    if (samePorts(node.inputs, inputs) && samePorts(node.outputs, outputs)) return node
+    changed = true
+    return { ...node, inputs, outputs }
+  })
+  const byId = new Map(nodes.map(node => [node.id, node]))
+  const declares = (node: DagNodeDefinition, ports: DagNodeDefinition['inputs'], port: string): boolean =>
+    node.type !== SUBWORKFLOW_TYPE || (ports ?? []).some(candidate => candidate.name === port)
+  const edges = definition.edges.filter((edge) => {
+    if (edge.kind === 'exec') return true
+    const source = byId.get(edge.source)!
+    const target = byId.get(edge.target)!
+    return declares(source, source.outputs, edge.sourcePort ?? 'output')
+      && declares(target, target.inputs, edge.targetPort ?? 'input')
+  })
+  return changed || edges.length !== definition.edges.length ? { ...definition, nodes, edges } : definition
+}
+
+/** 两组端口的名称、类型和必需性逐个相同；{@link subworkflowPorts} 给出的端口只有这三项。 */
+function samePorts(current: readonly PortDefinition[] | undefined, next: readonly PortDefinition[]): boolean {
+  return current !== undefined && current.length === next.length && current.every((port, index) => {
+    const other = next[index]!
+    return port.name === other.name && port.type === other.type && (port.required ?? true) === (other.required ?? true)
+      && port.description === undefined && port.display === undefined && port.default === undefined
+  })
+}
 
 /**
- * 判断 `child` 能否嵌入 `parent`。
- * @param parent - 嵌入方。
+ * 嵌入会不会形成环：被嵌入的工作流就是嵌入方，或直接或间接嵌入了嵌入方。
  * @param parentId - 嵌入方的 ID；尚未保存的工作流没有 ID，也就不会被任何工作流嵌入。
  * @param childId - 被嵌入的工作流的 ID。
  * @param child - 被嵌入的工作流。
  * @param lookup - 读取已保存的工作流，用于沿嵌入关系查找环。
- * @returns 不能嵌入的原因；能嵌入时为 undefined。
  */
-export function embedFault(
-  parent: DagWorkflowDefinition,
+export function embedsCycle(
   parentId: WorkflowId | undefined,
   childId: WorkflowId,
   child: DagWorkflowDefinition,
   lookup: WorkflowLookup,
-): EmbedFault | undefined {
-  if (child.kind !== parent.kind) return 'other-kind'
-  if (parent.kind === 'code' && (child.language !== parent.language || child.atomFolder !== parent.atomFolder)) {
-    return 'other-package'
-  }
-  if (parentId !== undefined && (childId === parentId || embeds(child, parentId, lookup))) return 'cycle'
-  return undefined
+): boolean {
+  return parentId !== undefined && (childId === parentId || embeds(child, parentId, lookup))
 }
 
 /**

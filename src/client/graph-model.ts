@@ -12,6 +12,7 @@ import {
   nodeExecPins,
   portsAreCompatible,
 } from '../shared/graph.ts'
+import { withSubworkflows, type WorkflowLookup } from '../shared/subworkflow.ts'
 import { isBoundaryNode } from '../shared/workflow-boundary.ts'
 import {
   EdgeId,
@@ -163,6 +164,49 @@ export function toDefinition(
     }),
     edges: edges.map(edgeDefinition),
   }
+}
+
+/**
+ * Apply one edit to a node of the canvas graph.
+ *
+ * Every subworkflow node takes its ports from the workflow it embeds, so each one whose ports moved takes the new ones,
+ * not only the edited node; edges on ports that are gone, and on execution pins the edited node no longer has, are
+ * dropped. A renamed pin keeps its edges.
+ * @param definition - The definition the canvas was loaded from; it supplies the fields the canvas does not hold.
+ * @param graph - The canvas nodes and edges before the edit.
+ * @param nodeId - The edited node.
+ * @param update - The edit to the node's definition.
+ * @param lookup - Reads the saved workflows subworkflow nodes embed.
+ * @param renamed - An execution pin of the edited node whose name changed.
+ * @returns The canvas nodes and edges after the edit.
+ */
+export function editNode(
+  definition: DagWorkflowDefinition,
+  graph: { readonly nodes: readonly WorkflowFlowNode[]; readonly edges: readonly Edge[] },
+  nodeId: string,
+  update: (node: DagNodeDefinition) => DagNodeDefinition,
+  lookup: WorkflowLookup,
+  renamed?: { readonly from: string; readonly to: string },
+): { nodes: WorkflowFlowNode[]; edges: Edge[] } {
+  const edited = graph.nodes.map(node => node.id === nodeId
+    ? { ...node, data: { ...node.data, definition: update(node.data.definition) } }
+    : node)
+  const authored = toDefinition(definition, edited, graph.edges)
+  const linked = withSubworkflows(authored, lookup)
+  // withSubworkflows keeps each node it leaves unchanged, so a node object that differs is one whose ports moved.
+  const nodes = edited.map((node, index) => node.id === nodeId || linked.nodes[index] !== authored.nodes[index]
+    ? { ...node, data: { ...node.data, definition: linked.nodes[index]! } }
+    : node)
+  const pins = nodeOutputPins(nodes.find(node => node.id === nodeId)!.data)
+  const kept = new Set<string>(linked.edges.map(edge => edge.id))
+  const edges = graph.edges.flatMap((edge) => {
+    if (!kept.has(edge.id)) return []
+    const handle = edge.source === nodeId ? parseHandle(edge.sourceHandle) : undefined
+    if (handle?.kind !== 'exec') return [edge]
+    const pin = handle.name === renamed?.from ? renamed.to : handle.name
+    return pins.includes(pin) ? [{ ...edge, sourceHandle: handleId({ kind: 'exec', name: pin }) }] : []
+  })
+  return { nodes, edges }
 }
 
 function edgeDefinition(edge: Edge): DagEdgeDefinition {

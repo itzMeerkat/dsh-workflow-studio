@@ -39,16 +39,10 @@ export function refusalText(refusal: WorkflowRefusal, t: Translate): string {
   switch (refusal.code) {
     case 'name-taken':
       return say('refusal.name-taken', refusal)
-    case 'name-taken-by-kind':
-      return say('refusal.name-taken-by-kind', { name: refusal.name, kind: t(`kind.${refusal.kind}`) })
     case 'workflow-missing':
       return say('refusal.workflow-missing', refusal)
-    case 'kind-change':
-      return say('refusal.kind-change', { workflow: refusal.workflow, from: t(`kind.${refusal.from}`), to: t(`kind.${refusal.to}`) })
     case 'embedded':
       return say(`refusal.embedded.${refusal.action}`, refusal)
-    case 'not-runnable':
-      return say('refusal.not-runnable', refusal)
     case 'run-missing':
       return say('refusal.run-missing', refusal)
     case 'run-ended':
@@ -69,24 +63,16 @@ export function refusalText(refusal: WorkflowRefusal, t: Translate): string {
       return say('refusal.embed-cycle', { trail: refusal.trail.join(' → ') })
     case 'embedded-workflow-missing':
       return say('refusal.embedded-workflow-missing', refusal)
-    case 'language-unknown':
-      return say('refusal.language-unknown', refusal)
-    case 'folder-relative':
-      return say('refusal.folder-relative', refusal)
-    case 'folder-unreadable':
-      return say('refusal.folder-unreadable', refusal)
-    case 'atom-folder-invalid':
-      return say('refusal.atom-folder-invalid', refusal)
     case 'boundary-duplicate':
       return say(`refusal.boundary-duplicate.${refusal.side}`, refusal)
-    case 'node-kind':
-      return say('refusal.node-kind', { type: refusal.type, kinds: refusal.kinds.map(kind => t(`kind.${kind}`)), kind: t(`kind.${refusal.kind}`) })
     case 'cycle':
       return say('refusal.cycle', refusal)
     case 'node-duplicate':
       return say('refusal.node-duplicate', refusal)
     case 'node-type-unknown':
       return say('refusal.node-type-unknown', refusal)
+    case 'node-reserved':
+      return say('refusal.node-reserved', refusal)
     case 'port-duplicate':
       return say(`refusal.port-duplicate.${refusal.side}`, refusal)
     case 'switch-case':

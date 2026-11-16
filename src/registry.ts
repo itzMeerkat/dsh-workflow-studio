@@ -8,7 +8,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { execKindOf } from './flow-nodes.ts'
 import { duplicatePortName, execOutputPins } from './shared/graph.ts'
-import { DEFAULT_WORKFLOW_KIND } from './shared/types.ts'
 import type { NodeTypeSummary, WorkflowNodeExecutor } from './shared/types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -92,7 +91,6 @@ export class WorkflowNodeRegistry extends Service {
         description: e.description,
         sourcePlugin,
         execKind: execKindOf(e),
-        kinds: e.kinds ?? [DEFAULT_WORKFLOW_KIND],
         inputs: e.inputs ?? [],
         outputs: e.outputs ?? [],
         execOutputs: execOutputPins(e),

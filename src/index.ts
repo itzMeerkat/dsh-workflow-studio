@@ -1,8 +1,7 @@
 /**
  * dsh-workflow-studio 主插件入口。
  *
- * 注册节点表、执行引擎、模型面工具，以及存在技能表时的 `workflow-code-atoms` 技能。
- * 本插件自带流程控制节点、边界节点、`code` 工作流的代码节点和写出源码的语言，其余节点由插件提供。
+ * 注册节点表、执行引擎和模型面工具。本插件自带流程控制节点、边界节点和子工作流节点，其余节点由插件提供。
  * @module dsh-workflow-studio
  */
 
@@ -11,8 +10,6 @@ import { WorkflowNodeRegistry } from './registry.ts'
 import { DagEngineProvider, type DagEngineConfig } from './engine-provider.ts'
 import { registerWorkflowTools } from './tools.ts'
 import { WorkflowStudioController } from './controller.ts'
-import { WorkflowFiles } from './workflow-files.ts'
-import { registerWorkflowSkill } from './skill.ts'
 
 /** 插件运行所需的 Harness 服务。 */
 export const inject = ['tools', 'storageDomain']
@@ -35,15 +32,9 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   ctx.inject(['dagEngine', 'workflowNodeRegistry'], (scope) => {
-    scope.plugin(WorkflowFiles)
-  })
-
-  ctx.inject(['dagEngine', 'workflowNodeRegistry', 'workflowFiles'], (scope) => {
     scope.plugin(WorkflowStudioController)
     registerWorkflowTools(scope)
   })
-
-  registerWorkflowSkill(ctx)
 }
 
 export { WorkflowNodeRegistry } from './registry.ts'
@@ -77,20 +68,10 @@ export { buildWorkflowIr } from './shared/ir.ts'
 export type {
   IrArgument, IrArm, IrBlock, IrCall, IrGuard, IrItem, IrOutputs, IrValue, WorkflowIr,
 } from './shared/ir.ts'
-export { RenderError, renderWorkflow } from './shared/source.ts'
-export type { RenderFault } from './shared/source.ts'
-export {
-  ATOM_FIELD, CODE_ATOM_TYPE, CODE_BLOCK_TYPE, CODE_CONDITION_TYPE, CODE_FIELD, CODE_LANGUAGES, GO, PSEUDOCODE,
-  codeLanguageOf, languageOf,
-} from './shared/language.ts'
-export type {
-  Atom, AtomFault, AtomSyntax, CodeLanguage, FunctionSyntax, Language, Signature, TypedName,
-} from './shared/language.ts'
-export { describeDiagnostic, describeRenderFault } from './shared/diagnostic-message.ts'
+export { describeWorkflow } from './shared/description.ts'
+export { describeDiagnostic } from './shared/diagnostic-message.ts'
 export { registerWorkflowTools } from './tools.ts'
-export { WORKFLOW_CODE_SKILL, registerWorkflowSkill } from './skill.ts'
 export { WorkflowStudioController } from './controller.ts'
-export { WorkflowFiles, workflowFilePath } from './workflow-files.ts'
 export { workflowRunsDomainSpec, workflowStudioDomainSpec } from './persistence.ts'
 export { workflowDefinitionSchema, workflowRunRecordSchema } from './shared/workflow-schema.ts'
 export { DagEngine } from './engine.ts'
@@ -102,9 +83,9 @@ export type {
   NodeControlDefinition,
   WorkflowSummary, WorkflowRunStatus, WorkflowRunSummary, WorkflowRunRecord,
   NodeRecoveryPolicy, NodeNotepad, JsonValue, JsonObject, NodeSignalRequest,
-  NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, NodeExecKind, WorkflowKind,
+  NodeRunRecord, NodeRunStatus, PortDefinition, NodeTypeSummary, NodeExecKind,
   WorkflowStudioSnapshot,
 } from './shared/types.ts'
 export {
-  DEFAULT_WORKFLOW_KIND, WorkflowId, RunId, NodeId, EdgeId,
+  WorkflowId, RunId, NodeId, EdgeId,
 } from './shared/types.ts'

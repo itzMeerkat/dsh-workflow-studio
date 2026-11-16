@@ -119,9 +119,6 @@ export class DagEngineProvider extends DagEngine {
 
     return this.enqueueMutation(async () => {
       const existing = this.findByName(snapshot.name)
-      if (existing !== undefined && existing.kind !== snapshot.kind) {
-        refuse({ code: 'name-taken-by-kind', name: snapshot.name, kind: existing.kind })
-      }
       const id = existing !== undefined ? existing.id : this.allocateId(snapshot.name)
       await this.workflows.put(id, snapshot)
       return id
@@ -132,7 +129,8 @@ export class DagEngineProvider extends DagEngine {
    * 替换一个已存在的定义；改名同时把记录换到新名称派生的 ID 下。
    *
    * 改名先写新记录再删旧记录，因此两次写入之间停机只会留下一份重复的旧记录，不会丢失定义。
-   * 名称未改时保留原 ID，所以早于此规则保存的随机 ID 记录只在被改名时才换名。
+   * 名称未改，或新名称派生的 ID 就是原 ID（例如只改了大小写）时保留原 ID，所以早于此规则保存的随机 ID 记录
+   * 只在被改名时才换名。
    */
   async update(id: WorkflowId, definition: DagWorkflowDefinition): Promise<WorkflowId> {
     const snapshot = structuredClone(definition)
@@ -140,23 +138,16 @@ export class DagEngineProvider extends DagEngine {
     return this.enqueueMutation(async () => {
       const current = this.workflows.get(id)
       if (current === undefined) refuse({ code: 'workflow-missing', workflow: id })
-      if (current.kind !== snapshot.kind) {
-        refuse({ code: 'kind-change', workflow: id, from: current.kind, to: snapshot.kind })
-      }
       const named = this.findByName(snapshot.name)
       if (named !== undefined && named.id !== id) {
         refuse({ code: 'name-taken', name: snapshot.name })
       }
-      if (current.name === snapshot.name) {
-        await this.workflows.put(id, snapshot)
-        return id
-      }
-      // 子工作流节点按 ID 链接，而 ID 随名称改变，所以被嵌入的工作流改名会断开每个嵌入它的地方。
-      this.assertNotEmbedded(id, current.name, 'rename')
-      const renamed = this.allocateId(snapshot.name)
-      await this.workflows.put(renamed, snapshot)
-      await this.workflows.delete(id)
-      return renamed
+      const target = current.name === snapshot.name ? id : this.allocateId(snapshot.name, id)
+      // 子工作流节点按 ID 链接，所以换了 ID 的改名会断开每个嵌入它的地方。
+      if (target !== id) this.assertNotEmbedded(id, current.name, 'rename')
+      await this.workflows.put(target, snapshot)
+      if (target !== id) await this.workflows.delete(id)
+      return target
     })
   }
 
@@ -191,12 +182,14 @@ export class DagEngineProvider extends DagEngine {
   }
 
   /**
-   * 为一个尚未存储的名称分配记录键。
+   * 为一个名称分配记录键。
    * @param name - 工作流名称。
-   * @returns 该名称派生的、未被占用的工作流 ID。
+   * @param own - 正在改名的工作流的 ID；它占用的键视为空闲，因此派生出同一个键时 ID 不变。
+   * @returns 该名称派生的、未被其他工作流占用的工作流 ID。
    */
-  private allocateId(name: string): WorkflowId {
-    return WorkflowId(uniqueWorkflowSlug(name, candidate => this.workflows.get(WorkflowId(candidate)) !== undefined))
+  private allocateId(name: string, own?: WorkflowId): WorkflowId {
+    return WorkflowId(uniqueWorkflowSlug(name, candidate =>
+      candidate !== own && this.workflows.get(WorkflowId(candidate)) !== undefined))
   }
 
   get(id: WorkflowId): DagWorkflowDefinition | undefined {
@@ -220,7 +213,6 @@ export class DagEngineProvider extends DagEngine {
     if (this.closing) throw new Error('工作流引擎正在关闭')
     const authored = this.get(workflowId)
     if (authored === undefined) refuse({ code: 'workflow-missing', workflow: workflowId })
-    if (authored.kind !== 'run') refuse({ code: 'not-runnable', workflow: workflowId, kind: authored.kind })
     // 子工作流按启动时保存的版本展开，输入值写进边界节点的配置，因此运行快照自带它们，恢复时也不必重新提供。
     const definition = withRunInputs(this.expand(authored), inputs)
     const executors = resolveExecutors(this.registry, definition)
@@ -498,7 +490,6 @@ function workflowSummary(
   return {
     id,
     name: definition.name,
-    kind: definition.kind,
     ...(definition.description === undefined ? {} : { description: definition.description }),
   }
 }

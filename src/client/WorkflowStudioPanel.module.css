@@ -243,53 +243,6 @@
   font-weight: 600;
 }
 
-.folderBrowser {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.folderBrowser input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 4px 8px;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: 6px;
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
-  font-family: var(--dsw-font-mono);
-  font-size: 12px;
-}
-
-.folderBrowser small {
-  color: var(--dsw-alias-label-secondary);
-}
-
-.folderBrowser ul {
-  max-height: 320px;
-  overflow: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.folderBrowser li button {
-  width: 100%;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font-family: var(--dsw-font-mono);
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.folderBrowser li button:hover {
-  background: var(--dsw-alias-bg-layer-2);
-}
-
 .menuEmpty {
   margin: 8px;
 }
@@ -728,11 +681,6 @@
 
 .settingsField textarea {
   resize: vertical;
-}
-
-.settingsActions {
-  display: flex;
-  gap: 6px;
 }
 
 .settingsPorts {
@@ -1408,7 +1356,6 @@
 .viewTabs button:focus-visible,
 .workflowName:focus-visible,
 .menuSearch input:focus-visible,
-.atomList button:focus-visible,
 .detailsClose:focus-visible,
 .inspectorForm input:focus-visible,
 .inspectorForm textarea:focus-visible {
@@ -1845,14 +1792,14 @@
   font-size: 12px;
 }
 
-.source {
+.description {
   flex: 1 1 auto;
   overflow: auto;
   padding: 12px;
   background: var(--dsw-alias-bg-layer-1);
 }
 
-.source pre {
+.description pre {
   margin: 0;
   color: var(--dsw-alias-label-primary);
   font-family: var(--dsw-font-mono);
@@ -1872,138 +1819,6 @@
   font-family: var(--dsw-font-mono);
   font-size: 11px;
   line-height: 16px;
-}
-
-/* ---- Atoms panel ---- */
-
-.atomsPanel {
-  display: flex;
-  width: 280px;
-  min-width: 0;
-  flex: 0 0 280px;
-  overflow: hidden;
-  border-right: 0.5px solid var(--dsw-alias-border-l3);
-  background: var(--dsw-alias-bg-layer-1);
-  flex-direction: column;
-}
-
-.atomsPanel .detailsHeader h2 {
-  flex: 1;
-}
-
-.atomsFolder {
-  display: flex;
-  padding: 12px 14px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.atomsFolder > code {
-  overflow: hidden;
-  color: var(--dsw-alias-label-primary);
-  font-family: var(--dsw-font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.atomsFolder small,
-.atomsContent > small {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-}
-
-.atomsContent {
-  display: flex;
-  min-height: 0;
-  overflow: auto;
-  padding: 12px 14px;
-  flex: 1;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.atomList {
-  display: flex;
-  margin: 0;
-  padding: 0;
-  flex-direction: column;
-  gap: 4px;
-  list-style: none;
-}
-
-.atomList button {
-  display: flex;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: 6px;
-  background: var(--dsw-alias-bg-layer-2);
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  flex-direction: column;
-  gap: 3px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.atomList button:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.atomList strong {
-  font-size: 12px;
-}
-
-.atomList .nodeTypeTitle > * {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The function name identifies the atom, so the file name gives up its width first. */
-.atomList .nodeTypeTitle code {
-  flex: 0 3 auto;
-  color: var(--dsw-alias-label-tertiary);
-  font-family: var(--dsw-font-mono);
-  font-size: 11px;
-}
-
-.atomSignature {
-  color: var(--dsw-alias-label-secondary);
-  font-family: var(--dsw-font-mono);
-  font-size: 11px;
-  line-height: 16px;
-  overflow-wrap: anywhere;
-}
-
-.atomProblems h3 {
-  margin: 0 0 4px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.atomProblems li {
-  overflow-wrap: anywhere;
-}
-
-.atomProblems ul {
-  display: flex;
-  margin: 0;
-  padding: 0;
-  flex-direction: column;
-  gap: 3px;
-  color: #b83232;
-  font-size: 11px;
-  list-style: none;
-}
-
-.atomProblems code {
-  font-family: var(--dsw-font-mono);
 }
 
 /* ---- Card width ---- */

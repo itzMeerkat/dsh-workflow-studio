@@ -38,7 +38,6 @@ implements WorkflowNodeExecutor {
   declare readonly execOutputs?: readonly string[]
   declare readonly exclusiveExecOutputs?: boolean
   declare readonly variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
-  declare readonly kinds?: NonNullable<WorkflowNodeExecutor['kinds']>
   declare readonly validateSignal?: NonNullable<WorkflowNodeExecutor['validateSignal']>
 
   /**

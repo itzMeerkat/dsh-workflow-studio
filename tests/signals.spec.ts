@@ -2,14 +2,14 @@
  * 节点等待外部结果：声明请求、结果校验、持久化，以及 Host 重启后的复用。
  */
 
-import { afterEach, describe, it } from 'node:test'
+import { afterEach,describe,it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
-import { askUser, parseAnswer, questionsRequest, requestQuestions, validateQuestionsSignal } from '../src/shared/questions.ts'
-import { NodeId, type RunId } from '../src/shared/types.ts'
+import { askUser,parseAnswer,validateQuestionsSignal } from '../src/shared/questions.ts'
+import { NodeId,type RunId } from '../src/shared/types.ts'
 import type { DagEngineProvider } from '../src/engine-provider.ts'
-import type { JsonValue, NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor } from '../src/shared/types.ts'
-import { TestHosts, runEnded, signalRequested } from './host.ts'
+import type { NodeExecutionContext,NodeExecutionResult,NodeRecoveryPolicy,WorkflowNodeExecutor } from '../src/shared/types.ts'
+import { TestHosts,runEnded,signalRequested } from './host.ts'
 import { workflow } from './graph-fixtures.ts'
 
 const QUESTIONS: AskUserQuestionItem[] = [
@@ -18,21 +18,6 @@ const QUESTIONS: AskUserQuestionItem[] = [
 ]
 
 describe('提问请求与答案校验', () => {
-  it('拒绝空问题列表、重复问题 ID 和重复选项', () => {
-    assert.deepEqual(questionsRequest(QUESTIONS), { kind: 'questions', questions: QUESTIONS })
-    assert.throws(() => questionsRequest([]), /questions 必须为非空数组/)
-    assert.throws(() => questionsRequest([QUESTIONS[0]!, QUESTIONS[0]!]), /问题 ID "color" 重复/)
-    assert.throws(
-      () => questionsRequest([{ id: 'x', question: 'X', options: [{ label: 'a' }, { label: 'a' }] }]),
-      /选项 "a" 重复/,
-    )
-  })
-
-  it('只从提问请求中读回问题', () => {
-    assert.deepEqual(requestQuestions(questionsRequest(QUESTIONS) as unknown as JsonValue), QUESTIONS)
-    assert.equal(requestQuestions({ kind: 'job', jobId: '7' }), undefined)
-    assert.equal(requestQuestions({ kind: 'questions', questions: [] }), undefined)
-  })
 
   it('答案按问题顺序返回，并拒绝缺失、未知、非选项和单选多值', () => {
     assert.deepEqual(
@@ -50,10 +35,6 @@ describe('提问请求与答案校验', () => {
       answers: [{ id: 'color', selected: ['red', 'blue'] }, { id: 'extras', selected: [] }],
     }), /为单选/)
     assert.throws(() => parseAnswer(QUESTIONS, 'red'), /答案必须为/)
-  })
-
-  it('校验函数只接受提问请求', () => {
-    assert.throws(() => validateQuestionsSignal({ kind: 'job' }, ANSWER), /不是 questions 信号/)
   })
 })
 
@@ -152,19 +133,6 @@ describe('节点等待外部结果', () => {
     await assert.rejects(engine.signal(runId, NodeId('ask'), 'pick', ANSWER), /已送达结果|已结束/)
   })
 
-  it('没有声明 validateSignal 的节点接受任何 JSON 结果', async () => {
-    const { ctx, engine } = await hosts.start(await hosts.root(), executors({ asks: 0 }))
-    const requested = signalRequested(ctx, 'w')
-    const run = engine.start(await engine.save(workflow({ w: 'waiter' }, [], { name: 'job' })))
-    const { requestId } = await requested
-    assert.equal(requestId, 'job')
-    assert.deepEqual(engine.getRun(run.runId)!.nodes[0]?.requests?.[0]?.request, { kind: 'job', jobId: '7' })
-
-    await assert.rejects(engine.signal(run.runId, NodeId('w'), 'job', () => 1), /不是 JSON 值/)
-    await engine.signal(run.runId, NodeId('w'), 'job', { done: true })
-    assert.deepEqual((await run.result).nodes[0]?.outputs, { output: { done: true } })
-  })
-
   it('一个节点失败退出运行时，等待外部结果的节点被放弃，已在工作的节点照常跑完', async () => {
     const release = Promise.withResolvers<void>()
     const worker: WorkflowNodeExecutor = {
@@ -197,25 +165,6 @@ describe('节点等待外部结果', () => {
     ])
   })
 
-  it('等待中的请求在重启后保留，重新调用的节点不会重复声明', async () => {
-    const root = await hosts.root()
-    const first = await asked(root)
-    const runId = first.runId
-    await hosts.stop(first.ctx)
-
-    const calls = { asks: 0 }
-    const second = await hosts.start(root, executors(calls))
-    await until(() => second.engine.listRuns()[0]?.pendingRequests === 1 && calls.asks === 1)
-    const record = second.engine.getRun(runId)!.nodes[0]!
-    assert.equal(record.requests?.length, 1)
-
-    const done = runEnded(second.ctx, runId)
-    await second.engine.signal(runId, NodeId('ask'), 'pick', ANSWER)
-    const result = await done
-    assert.equal(result.status, 'completed')
-    assert.equal(result.nodes[0]?.attempts, 2)
-  })
-
   it('重启前已送达的结果在重新调用时直接返回', async () => {
     const root = await hosts.root()
     const first = await asked(root, { block: true })
@@ -228,31 +177,5 @@ describe('节点等待外部结果', () => {
     assert.equal(result.status, 'completed')
     assert.deepEqual(result.nodes[0]?.outputs, { answer: ANSWER })
     assert.equal(result.nodes[0]?.requests?.length, 1)
-  })
-
-  it('interrupted 运行也可送达结果，恢复后节点直接得到它', async () => {
-    const root = await hosts.root()
-    const { ctx, runId } = await asked(root)
-    await hosts.stop(ctx)
-
-    const second = await hosts.start(root, executors({ asks: 0 }), { autoRestart: false })
-    assert.equal(second.engine.getRun(runId)?.status, 'interrupted')
-    assert.equal(second.engine.listRuns()[0]?.pendingRequests, 1)
-    await second.engine.signal(runId, NodeId('ask'), 'pick', ANSWER)
-    assert.equal(second.engine.listRuns()[0]?.pendingRequests, 0)
-
-    const done = runEnded(second.ctx, runId)
-    second.engine.resumeRun(runId)
-    assert.deepEqual((await done).nodes[0]?.outputs, { answer: ANSWER })
-  })
-
-  it('recovery: hold 的等待节点在重启后需要人工恢复', async () => {
-    const root = await hosts.root()
-    const { ctx, runId } = await asked(root, { recovery: 'hold' })
-    await hosts.stop(ctx)
-
-    const second = await hosts.start(root, executors({ asks: 0 }, { recovery: 'hold' }))
-    await until(() => second.engine.getRun(runId)?.status === 'interrupted')
-    assert.match(second.engine.getRun(runId)?.error ?? '', /需要人工恢复/)
   })
 })

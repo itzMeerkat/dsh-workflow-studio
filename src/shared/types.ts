@@ -38,34 +38,20 @@ export interface JsonObject {
 // ---- 工作流定义 ----
 
 /**
- * 工作流的种类。两种工作流用同一套图、同一个编辑器，去向不同。
- * - `run`：由引擎调度执行，节点做真正的工作。
- * - `code`：由语言后端编译为目标语言的源码，从不执行；节点携带的是代码，不是工作。
- */
-export type WorkflowKind = 'run' | 'code'
-
-/** 未声明种类的定义按 `run` 处理，因为引擎在有第二种工作流之前只有这一种。 */
-export const DEFAULT_WORKFLOW_KIND: WorkflowKind = 'run'
-
-/**
  * 运行因 Host 停止而中断后，节点如何恢复。
  * - `rerun`：自动重新调用节点（至少一次语义）。
  * - `hold`：运行进入 interrupted，等待人工恢复后再重新调用。
  */
 export type NodeRecoveryPolicy = 'rerun' | 'hold'
 
-/** 内置端口类型，按编辑器列出的先后排列；`run` 工作流只用它们。 */
+/** 内置端口类型，按编辑器列出的先后排列。 */
 export const BUILTIN_PORT_TYPES = ['any', 'string', 'number', 'boolean'] as const
 
 /** 内置端口类型；`any` 能接收任何值。 */
 export type BuiltinPortType = typeof BUILTIN_PORT_TYPES[number]
 
 /**
- * 端口类型，运行时不检查。
- *
- * 内置类型之外，`code` 工作流的端口按它语言中的写法取类型，例如 Go 的 `int`、`*Order`、`[]string`；
- * 类型按写法区分，写法相同才是同一个类型。语言把内置类型写成它自己的类型，例如 Go 把 `number` 写成 `float64`，
- * 所以该语言的这些类型总以内置类型的名字出现。
+ * 端口类型，运行时不检查。内置类型之外，节点插件可以用自己的类型名；类型按名字区分，名字相同才是同一个类型。
  */
 export type PortType = BuiltinPortType | (string & {})
 
@@ -180,12 +166,6 @@ export type DagEdgeDefinition = DagDataEdge | DagExecEdge
 /** 可 JSON 导入导出的完整工作流定义。 */
 export interface DagWorkflowDefinition {
   name: string
-  /** 工作流的种类，决定它能用哪些节点类型，以及它是被执行还是被编译。 */
-  kind: WorkflowKind
-  /** `code` 工作流写成的语言，节点携带的代码也是该语言；`run` 工作流没有。 */
-  language?: string
-  /** `code` 工作流的原子目录，Host 上的绝对路径；其中的原子成为这个工作流可用的节点。 */
-  atomFolder?: string
   description?: string
   nodes: DagNodeDefinition[]
   edges: DagEdgeDefinition[]
@@ -195,7 +175,6 @@ export interface DagWorkflowDefinition {
 export interface WorkflowSummary {
   id: WorkflowId
   name: string
-  kind: WorkflowKind
   description?: string
 }
 
@@ -378,8 +357,6 @@ export interface WorkflowNodeExecutor {
     readonly min: number
     readonly outputType?: 'same'
   }
-  /** 节点可以出现在哪些种类的工作流里；省略时只有 `run`。 */
-  readonly kinds?: readonly WorkflowKind[]
   /** 中断后的恢复策略；省略时为 `rerun`。工作流节点的 `recovery` 覆盖此值。 */
   readonly recovery?: NodeRecoveryPolicy
   /**
@@ -396,7 +373,7 @@ export interface WorkflowNodeExecutor {
    * @returns 节点完成时的结果。
    * @throws 节点自己处理不了的错误，例如配置或输入非法、依赖的服务出错。引擎把节点记为 failed，不再开始新的节点，
    * 等已在工作的节点跑完、放弃等待外部结果的节点后，运行以 failed 结束，错误以节点名包装；子工作流中的失败再包一层
-   * 子工作流的名字。这与 `code` 工作流中原子返回错误时生成的函数提前返回相同。
+   * 子工作流的名字。
    */
   execute(context: NodeExecutionContext): NodeExecutionResult | Promise<NodeExecutionResult>
 }
@@ -421,8 +398,6 @@ export interface NodeTypeSummary {
   sourcePlugin: string
   /** 调度与静态分析依据的执行语义。 */
   execKind: NodeExecKind
-  /** 节点可以出现在哪些种类的工作流里。 */
-  kinds: readonly WorkflowKind[]
   inputs: readonly PortDefinition[]
   outputs: readonly PortDefinition[]
   /** 节点类型的执行输出引脚，浏览器据此渲染执行引脚。 */
@@ -431,24 +406,11 @@ export interface NodeTypeSummary {
   variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
 }
 
-/** 选择原子目录时看到的一层 Host 目录。 */
-export interface FolderListing {
-  /** 目录的绝对路径。 */
-  readonly path: string
-  /** 上一级目录；根目录没有。 */
-  readonly parent?: string
-  /** 子目录，不含隐藏目录，按名字排序；路径由 Host 拼接。 */
-  readonly folders: readonly { readonly name: string; readonly path: string }[]
-  /** 文件的名字，不含隐藏文件，按名字排序。 */
-  readonly files: readonly string[]
-}
-
 /** 浏览器编辑器启动时读取的已保存工作流与节点目录。 */
 export interface WorkflowStudioSnapshot {
   readonly workflows: ReadonlyArray<{
     readonly id: WorkflowId
     readonly name: string
-    readonly kind: WorkflowKind
     readonly description?: string
     readonly definition: DagWorkflowDefinition
   }>
@@ -458,8 +420,4 @@ export interface WorkflowStudioSnapshot {
 /** 一次保存的结果。 */
 export interface SavedWorkflow {
   readonly workflowId: WorkflowId
-  /** 工作流有原子目录却写不出源码时的原因；它的文件已删除。 */
-  readonly sourceError?: string
-  /** 嵌入它的工作流随它重写文件时写不出源码的那些，以及原因；它们的文件已删除。 */
-  readonly embedderErrors?: readonly { readonly name: string; readonly error: string }[]
 }

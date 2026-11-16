@@ -17,11 +17,8 @@ import type {
   WorkflowRunRecord,
   WorkflowRunSummary,
   WorkflowStudioSnapshot,
-  FolderListing,
   SavedWorkflow,
 } from './types.ts'
-import type { AtomFile } from './language.ts'
-import { DEFAULT_WORKFLOW_KIND } from './types.ts'
 
 /** 两个类型键集合的差异；相同时为 never。 */
 type KeyDifference<A, B> = Exclude<keyof A, keyof B> | Exclude<keyof B, keyof A>
@@ -114,16 +111,13 @@ const workflowEdgeSchema = declared<DagEdgeDefinition>()(z.discriminatedUnion('k
   z.object({ ...edgeIdentity, kind: z.literal('exec') }),
 ]))
 
-/** 工作流种类的 JSON schema。 */
-const workflowKindSchema = z.enum(['run', 'code'])
-
-/** 完整工作流定义的持久化和 Remote JSON schema。 */
+/**
+ * 完整工作流定义的持久化和 Remote JSON schema。
+ *
+ * 较早的记录带有 `kind`、`language` 和 `atomFolder` 字段；未声明的键被丢弃，所以这些记录照常读回。
+ */
 export const workflowDefinitionSchema = declared<DagWorkflowDefinition>()(z.object({
   name: nonEmptyString,
-  // 第二种工作流出现之前保存的记录没有这个字段，它们都是被执行的工作流。
-  kind: workflowKindSchema.default(DEFAULT_WORKFLOW_KIND),
-  language: nonEmptyString.optional(),
-  atomFolder: nonEmptyString.optional(),
   description: nonEmptyString.optional(),
   nodes: z.array(workflowNodeSchema),
   edges: z.array(workflowEdgeSchema),
@@ -190,7 +184,6 @@ export const workflowStudioSnapshotSchema = declared<WorkflowStudioSnapshot>()(z
   workflows: z.array(z.object({
     id: z.string().min(1),
     name: z.string(),
-    kind: workflowKindSchema,
     description: z.string().optional(),
     definition: workflowDefinitionSchema,
   })),
@@ -200,7 +193,6 @@ export const workflowStudioSnapshotSchema = declared<WorkflowStudioSnapshot>()(z
     description: z.string(),
     sourcePlugin: z.string(),
     execKind: z.enum(['plain', 'decision', 'join']),
-    kinds: z.array(workflowKindSchema),
     inputs: z.array(workflowPortSchema),
     outputs: z.array(workflowPortSchema),
     execOutputs: z.array(z.string()),
@@ -212,17 +204,4 @@ export const workflowStudioSnapshotSchema = declared<WorkflowStudioSnapshot>()(z
 /** 一次保存结果的 Remote JSON schema。 */
 export const savedWorkflowSchema = declared<SavedWorkflow>()(z.object({
   workflowId: z.string().min(1),
-  sourceError: z.string().optional(),
-  embedderErrors: z.array(z.object({ name: z.string(), error: z.string() })).optional(),
-}))
-
-/** Host 读出的原子目录文件的 Remote JSON schema。 */
-export const atomFilesSchema = z.array(declared<AtomFile>()(z.object({ file: z.string(), text: z.string() })))
-
-/** 一层 Host 目录的 Remote JSON schema。 */
-export const folderListingSchema = declared<FolderListing>()(z.object({
-  path: z.string(),
-  parent: z.string().optional(),
-  folders: z.array(z.object({ name: z.string(), path: z.string() })),
-  files: z.array(z.string()),
 }))

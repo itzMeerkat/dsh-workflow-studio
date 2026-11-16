@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
-import { CODE_LANGUAGES, languageOf } from '../shared/language.ts'
-import type { DagWorkflowDefinition, SavedWorkflow, WorkflowKind, WorkflowStudioSnapshot } from '../shared/types.ts'
+import type { DagWorkflowDefinition, SavedWorkflow, WorkflowStudioSnapshot } from '../shared/types.ts'
 import { failureText, refusalText } from './failure-text.ts'
 import type { Translate } from './locale.ts'
 import { nextWorkflowName, openFault, type WorkflowRow } from './model.ts'
@@ -23,7 +22,7 @@ export type EditorPhase = 'loading' | 'ready' | 'saving' | 'running'
 export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Translate) {
   const [snapshot, setSnapshot] = useState<WorkflowStudioSnapshot>({ workflows: [], nodeTypes: [] })
   const [selectedId, setSelectedId] = useState<string>()
-  const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1', 'run'))
+  const [definition, setDefinition] = useState<DagWorkflowDefinition>(() => emptyDefinition('workflow-1'))
   // Incremented when the canvas must discard its local graph and reload `definition`.
   const [revision, setRevision] = useState(0)
   const [phase, setPhase] = useState<EditorPhase>('loading')
@@ -80,10 +79,10 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
     void load()
   }, [])
 
-  /** Open a new, unsaved workflow of one kind. */
-  const create = (kind: WorkflowKind): void => {
+  /** Open a new, unsaved workflow. */
+  const create = (): void => {
     setSelectedId(undefined)
-    replace(emptyDefinition(nextWorkflowName(snapshot.workflows, kind), kind))
+    replace(emptyDefinition(nextWorkflowName(snapshot.workflows)))
   }
 
   /** Save the open definition, creating it or replacing the selected one; failures show as the notice. */
@@ -104,22 +103,12 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
       setPhase('ready')
       return
     }
-    // Saving a workflow with an atom folder also writes its function into that folder, in a file named after its ID.
-    const syntax = languageOf(definition).functions?.atoms
-    const written = definition.atomFolder === undefined || syntax === undefined
-      ? undefined
-      : `${result.workflowId}${syntax.outputSuffix}`
     await load(result.workflowId)
-    const saved = written === undefined
-      ? t('notice.saved')
-      : result.sourceError === undefined
-        ? `${t('notice.savedFile')} ${written}`
-        : `${t('notice.savedNoFile')} ${result.sourceError}`
-    setNotice([saved, ...(result.embedderErrors ?? []).map(({ name, error }) => `${t('notice.embedderNoFile')} ${name}: ${error}`)].join(' '))
+    setNotice(t('notice.saved'))
   }
 
   /**
-   * Delete a saved workflow. Deleting the open one opens another, or a new one of the same kind when none is left;
+   * Delete a saved workflow. Deleting the open one opens another, or a new one when none is left;
    * deleting another one leaves the open workflow and its unsaved edits alone.
    */
   const remove = async (id: string): Promise<void> => {
@@ -132,7 +121,7 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
     }
     if (id === selectedId) {
       setSelectedId(undefined)
-      replace(emptyDefinition(nextWorkflowName(snapshot.workflows, definition.kind), definition.kind))
+      replace(emptyDefinition(nextWorkflowName(snapshot.workflows)))
       await load()
     } else {
       await load('keep')
@@ -191,13 +180,10 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
  * They are ordinary nodes, so a new workflow could start without them; seeding them means the
  * place to declare an input is on screen from the start instead of hiding in the node library.
  * @param name - The new workflow's name.
- * @param kind - The new workflow's kind; a code workflow starts in the first code language.
  */
-function emptyDefinition(name: string, kind: WorkflowKind): DagWorkflowDefinition {
+function emptyDefinition(name: string): DagWorkflowDefinition {
   return {
     name,
-    kind,
-    ...(kind === 'code' ? { language: CODE_LANGUAGES[0]!.name } : {}),
     nodes: [boundaryNode('inputs'), boundaryNode('outputs')],
     edges: [],
   }
