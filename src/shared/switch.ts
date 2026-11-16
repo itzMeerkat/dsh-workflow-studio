@@ -5,6 +5,8 @@
  * @module dsh-workflow-studio
  */
 
+// graph.ts imports this module too; EXEC_FAILED_PIN is read only when a function runs, after both have loaded.
+import { EXEC_FAILED_PIN } from './graph.ts'
 import type { DagNodeDefinition } from './types.ts'
 
 /** 多路分支节点类型。 */
@@ -37,10 +39,11 @@ export function switchPins(config: DagNodeDefinition['config']): readonly string
 /**
  * 一组 case 为什么不能作为执行引脚；能时为 undefined。
  * @param cases - case 文本。
- * @returns 第一个空的、重复的或与 {@link SWITCH_DEFAULT_PIN} 同名的 case。
+ * @returns 第一个空的、重复的，或与 {@link SWITCH_DEFAULT_PIN}、失败引脚同名的 case。
  */
 export function invalidCase(cases: readonly string[]): string | undefined {
-  return cases.find((item, index) => item === '' || item === SWITCH_DEFAULT_PIN || cases.indexOf(item) !== index)
+  return cases.find((item, index) => item === '' || item === SWITCH_DEFAULT_PIN || item === EXEC_FAILED_PIN
+    || cases.indexOf(item) !== index)
 }
 
 /**

@@ -2,10 +2,10 @@
  * 伪代码描述单元测试：节点按执行顺序写成调用，分支写成 if/else，子工作流写成对它嵌入的工作流的调用。
  */
 
-import { describe,it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { describeWorkflow } from '../src/shared/description.ts'
-import { irOf,workflow } from './graph-fixtures.ts'
+import { irOf, workflow } from './graph-fixtures.ts'
 
 describe('工作流写成伪代码描述', () => {
   it('节点写成调用，实参写出来源，决策节点的两侧写成 if/else，同名节点退回节点 ID', () => {
@@ -25,5 +25,13 @@ describe('工作流写成伪代码描述', () => {
       '  sink(input: merge)',
       '',
     ].join('\n'))
+  })
+
+  it('失败引脚的一侧写成 else if，与正常完成的一侧互斥', () => {
+    const tryCatch = workflow(
+      { x: 'value', ok: 'value', alt: 'value', m: 'merge', out: 'sink' },
+      ['x.then>ok', 'x.failed>alt', 'ok>m:input1', 'alt>m:input2', 'ok.then>m', 'alt.then>m', 'm>out'],
+    )
+    assert.match(describeWorkflow(irOf(tryCatch)), /  if x\.then:\n    ok = value\(\)\n  else if x\.failed:\n    alt = value\(\)\n/)
   })
 })

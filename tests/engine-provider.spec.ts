@@ -2,7 +2,7 @@
  * DAG 引擎默认实现测试。
  */
 
-import { afterEach,describe,it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -11,14 +11,14 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { TestHosts } from './host.ts'
 import { createFixtureNodes } from './fixture-nodes.ts'
 import { workflow } from './graph-fixtures.ts'
-import { WorkflowNode,type WorkflowNodePorts } from '../src/node.ts'
+import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { WorkflowNodeRegistry } from '../src/registry.ts'
 import { DagEngineProvider } from '../src/engine-provider.ts'
 import { WorkflowStudioController } from '../src/controller.ts'
-import { Config as PluginConfig,apply as applyPlugin,inject as pluginInject } from '../src/index.ts'
-import { EdgeId,NodeId,WorkflowId } from '../src/shared/types.ts'
+import { Config as PluginConfig, apply as applyPlugin, inject as pluginInject } from '../src/index.ts'
+import { EdgeId, NodeId, WorkflowId } from '../src/shared/types.ts'
 import type {
-DagWorkflowDefinition,NodeExecutionContext,NodeRunRecord,WorkflowNodeExecutor,WorkflowRunRecord,
+  DagWorkflowDefinition, NodeExecutionContext, NodeRunRecord, WorkflowNodeExecutor, WorkflowRunRecord,
 } from '../src/shared/types.ts'
 
 class SourceNode extends WorkflowNode {

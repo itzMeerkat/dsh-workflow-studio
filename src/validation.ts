@@ -10,7 +10,7 @@ import {
   execSourcePin,
   execTargetPin,
   isExecEdge,
-  nodeExecPins,
+  nodeSourcePins,
   portsAreCompatible,
   topologicalLevels,
 } from './shared/graph.ts'
@@ -103,7 +103,7 @@ export function resolveExecutors(
     const invalid = node.type === SWITCH_TYPE ? invalidCase(switchCases(node.config)) : undefined
     if (invalid !== undefined) refuse({ code: 'switch-case', node: node.id, case: invalid })
     executors.set(node.id, executor)
-    nodePorts.set(node.id, { inputs, outputs, execPins: nodeExecPins(node, executor) })
+    nodePorts.set(node.id, { inputs, outputs, execPins: nodeSourcePins(node, executor) })
   }
 
   const edgeIds = new Set<string>()

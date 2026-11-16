@@ -66,7 +66,7 @@ Use registered node types only. Match port names exactly. Connected types must m
 
 Use `create_workflow` with a complete definition. A workflow with the same name replaces the prior definition and retains its workflow ID.
 
-Use `run_workflow` with the exact saved name. The tool returns the run ID and does not wait for the final result; use `get_workflow_run` with that ID to read the run and node statuses.
+Use `run_workflow` with the exact saved name. The tool returns the run ID and does not wait for the final result. Where the composition loads background jobs, as the base bundle does, it also returns a job ID: the run is a job of your Session, a completion notice arrives when it ends, `job_output` shows which nodes ended and which wait for an answer, and a `questions` request appears to the user in the chat. `job_kill` stops following the run without cancelling it. Without a job ID, use `get_workflow_run` with the run ID to read the run and node statuses.
 
 Do not invent node types, ports, IDs, or missing required values when preparing tool arguments. Inspect the registered catalog or existing definition first.
 
@@ -120,10 +120,11 @@ export async function runWorkflow(ctx: Context, name: string) {
 
 ## Understand execution
 
-- The scheduler executes topological stages in order and nodes within one stage concurrently.
+- A node starts as soon as all of its own predecessors, through data and execution edges, have settled; unrelated branches run concurrently.
 - Execution edges decide whether a node runs: a node whose incoming execution edge leaves a pin that did not fire, or leaves a skipped node, is skipped, while `merge` runs when any of its incoming execution edges fired. Data edges carry values only.
-- Missing required data from a skipped dependency propagates `skipped`. Other partial required inputs fail the node.
-- A failed node fails the workflow after the current stage settles. Pending downstream nodes become cancelled.
+- A required input whose source can be skipped is refused when the workflow is saved; a required input missing at run time fails the node.
+- A node that throws is called again as its `retry` policy allows (`{ retries, delayMs }` on the node type, or on the workflow node to override it).
+- When a node's last call fails, an execution edge from its `failed` pin handles the failure: the nodes behind `failed` run, the nodes behind its other pins are skipped, and the run can complete. A failed node has no outputs, so nothing behind `failed` may read them. Without such an edge the run fails once the nodes already started have settled, and nodes never started become cancelled.
 - Runs are saved with a definition snapshot. After a Host restart, unfinished runs continue and nodes that were running are called again; runs that need a person to decide become `interrupted`.
 - Cancellation during executor work depends on that executor observing `context.signal`.
 
@@ -136,7 +137,7 @@ Check these causes in order:
 3. Type mismatch: compare source and target `PortDefinition.type`.
 4. Cycle: inspect **Execution order** and remove the dependency cycle.
 5. Skipped node: inspect the pins its incoming execution edges leave, and which pins those nodes fired (`fired` in their records).
-6. Failed node: inspect the node record's `inputs`, `outputs`, and `error`.
+6. Failed node: inspect the node record's `inputs`, `error`, and `attempts`; add a `retry` policy for a transient error, or a `failed` edge to handle it in the graph.
 7. Run waiting for a result (any node calling `awaitSignal`, such as `human-approval` from `dsh-workflow-demo-node`): answer it in the panel's **Runs** tab, or find the entry without a `result` in the node record's `requests` and call `signal()`.
 8. Interrupted run: read its `error` for the reason, fix it (for example, load the missing node plugin), then call `resumeRun()` or `cancelRun()`.
 

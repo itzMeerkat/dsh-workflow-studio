@@ -3,12 +3,12 @@
  */
 
 import assert from 'node:assert/strict'
-import { describe,it } from 'node:test'
-import { connectionError,editNode,flowEdges,flowNodes,handleId } from '../src/client/graph-model.ts'
+import { describe, it } from 'node:test'
+import { connectionError, editNode, flowEdges, flowNodes, handleId } from '../src/client/graph-model.ts'
 import { indexNodeTypes } from '../src/shared/analysis.ts'
-import { NODE_TYPES,nodeType,workflow } from './graph-fixtures.ts'
-import { SUBWORKFLOW_FIELD,SUBWORKFLOW_TYPE } from '../src/shared/subworkflow.ts'
-import { NodeId,WorkflowId } from '../src/shared/types.ts'
+import { NODE_TYPES, nodeType, workflow } from './graph-fixtures.ts'
+import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE } from '../src/shared/subworkflow.ts'
+import { NodeId, WorkflowId } from '../src/shared/types.ts'
 import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { workflowDefinitionSchema } from '../src/shared/workflow-schema.ts'
 

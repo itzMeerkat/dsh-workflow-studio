@@ -1,6 +1,6 @@
 /** The saved workflows, the workflow open in the editor, and the actions that load, save, delete, and import them. */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { messageOf } from '../shared/errors.ts'
 import type { DagWorkflowDefinition, SavedWorkflow, WorkflowStudioSnapshot } from '../shared/types.ts'
 import { failureText, refusalText } from './failure-text.ts'
@@ -9,6 +9,20 @@ import { nextWorkflowName, openFault, type WorkflowRow } from './model.ts'
 import { callRemote, type WorkflowStudioRemoteNamespace } from './remote.ts'
 import { importedWorkflowName, parseImportedWorkflow } from './transfer.ts'
 import { boundaryNode } from './workflow-ports.ts'
+
+/** How many undo steps the editor keeps for the open workflow. */
+const HISTORY_LIMIT = 100
+
+/** Canvas edits closer together than this, such as the steps of one drag or one word typed, undo as one step. */
+const COALESCE_MS = 600
+
+/** Earlier and undone versions of the open definition, nearest last in `past` and first in `future`. */
+interface History {
+  readonly past: readonly DagWorkflowDefinition[]
+  readonly future: readonly DagWorkflowDefinition[]
+}
+
+const NO_HISTORY: History = { past: [], future: [] }
 
 /** What the editor is doing; every phase but `ready` disables the actions that would race it. */
 export type EditorPhase = 'loading' | 'ready' | 'saving' | 'running'
@@ -27,15 +41,69 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
   const [revision, setRevision] = useState(0)
   const [phase, setPhase] = useState<EditorPhase>('loading')
   const [notice, setNotice] = useState<string>()
+  const [history, setHistory] = useState<History>(NO_HISTORY)
+  // When the last canvas edit was recorded; 0 after any other change, so the next edit starts a new step.
+  const lastEdit = useRef(0)
 
   /** Show a failed Remote call as the notice, a refusal worded in the active locale. */
   const fail = (failure: unknown): void => { setNotice(failureText(failure, t)) }
 
-  /** Replace the open definition and make the canvas reload it. */
-  const replace = (next: DagWorkflowDefinition): void => {
+  /** Show a definition and make the canvas reload it, leaving the undo history alone. */
+  const sync = (next: DagWorkflowDefinition): void => {
     setDefinition(next)
     setRevision(value => value + 1)
     setNotice(undefined)
+  }
+
+  /** Open another workflow; its edits start a new undo history. */
+  const open = (next: DagWorkflowDefinition): void => {
+    setHistory(NO_HISTORY)
+    lastEdit.current = 0
+    sync(next)
+  }
+
+  /** Record the open definition as one undo step before it is replaced. */
+  const record = (): void => {
+    setHistory(({ past }) => ({ past: [...past, definition].slice(-HISTORY_LIMIT), future: [] }))
+  }
+
+  /** Change the open definition as one undo step, and make the canvas reload it. */
+  const change = (next: DagWorkflowDefinition): void => {
+    record()
+    lastEdit.current = 0
+    sync(next)
+  }
+
+  /** Change the open definition in place, as the canvas and the name field do; edits in quick succession undo together. */
+  const edit = (next: DagWorkflowDefinition): void => {
+    // Selecting or measuring a node reaches here too, and changes nothing a definition holds.
+    if (JSON.stringify(next) === JSON.stringify(definition)) {
+      setDefinition(next)
+      return
+    }
+    const now = Date.now()
+    if (now - lastEdit.current > COALESCE_MS) record()
+    else setHistory(({ past }) => ({ past, future: [] }))
+    lastEdit.current = now
+    setDefinition(next)
+  }
+
+  /** Step back to the previous version of the open definition. */
+  const undo = (): void => {
+    const previous = history.past.at(-1)
+    if (previous === undefined) return
+    setHistory({ past: history.past.slice(0, -1), future: [definition, ...history.future] })
+    lastEdit.current = 0
+    sync(previous)
+  }
+
+  /** Step forward to the version the last undo left. */
+  const redo = (): void => {
+    const [next, ...rest] = history.future
+    if (next === undefined) return
+    setHistory({ past: [...history.past, definition], future: rest })
+    lastEdit.current = 0
+    sync(next)
   }
 
   /**
@@ -48,7 +116,7 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
       setNotice(refusalText(fault, t))
       return false
     }
-    replace(workflow.definition)
+    open(workflow.definition)
     setSelectedId(workflow.id)
     return true
   }
@@ -82,7 +150,7 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
   /** Open a new, unsaved workflow. */
   const create = (): void => {
     setSelectedId(undefined)
-    replace(emptyDefinition(nextWorkflowName(snapshot.workflows)))
+    open(emptyDefinition(nextWorkflowName(snapshot.workflows)))
   }
 
   /** Save the open definition, creating it or replacing the selected one; failures show as the notice. */
@@ -121,7 +189,7 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
     }
     if (id === selectedId) {
       setSelectedId(undefined)
-      replace(emptyDefinition(nextWorkflowName(snapshot.workflows)))
+      open(emptyDefinition(nextWorkflowName(snapshot.workflows)))
       await load()
     } else {
       await load('keep')
@@ -142,7 +210,7 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
         return false
       }
       setSelectedId(undefined)
-      replace({ ...imported, name: importedWorkflowName(imported.name, snapshot.workflows) })
+      open({ ...imported, name: importedWorkflowName(imported.name, snapshot.workflows) })
       setNotice(t('notice.imported'))
       return true
     } catch (error: unknown) {
@@ -161,9 +229,13 @@ export function useWorkflowEditor(remote: WorkflowStudioRemoteNamespace, t: Tran
     setPhase,
     setNotice,
     fail,
-    replace,
-    /** Change the open definition in place, as the canvas and the name field do, without reloading the canvas. */
-    edit: setDefinition,
+    sync,
+    change,
+    edit,
+    undo,
+    redo,
+    canUndo: history.past.length > 0,
+    canRedo: history.future.length > 0,
     select,
     load,
     create,

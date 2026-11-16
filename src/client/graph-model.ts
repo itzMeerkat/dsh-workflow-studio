@@ -9,7 +9,7 @@ import {
   execSourcePin,
   execTargetPin,
   isExecEdge,
-  nodeExecPins,
+  nodeSourcePins,
   portsAreCompatible,
 } from '../shared/graph.ts'
 import { withSubworkflows, type WorkflowLookup } from '../shared/subworkflow.ts'
@@ -241,7 +241,7 @@ export function nodeOutputPorts(data: WorkflowNodeData): readonly PortDefinition
 
 /** Execution output pins of a canvas node: a switch's cases, or the catalog's pins. */
 export function nodeOutputPins(data: WorkflowNodeData): readonly string[] {
-  return nodeExecPins(data.definition, data.catalog ?? {})
+  return nodeSourcePins(data.definition, data.catalog ?? {})
 }
 
 /**

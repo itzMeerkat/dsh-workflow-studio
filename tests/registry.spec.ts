@@ -2,7 +2,7 @@
  * 节点注册表单元测试。
  */
 
-import { afterEach,describe,it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { Context } from '@deepseek-ai/cordis'
 import { WorkflowNodeRegistry } from '../src/registry.ts'

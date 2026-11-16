@@ -2,7 +2,7 @@
  * 多路分支：运行时触发值匹配的 case，其他引脚后的节点被跳过。
  */
 
-import { afterEach,describe,it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import { WorkflowStudioController } from '../src/controller.ts'
@@ -11,7 +11,7 @@ import { RunId } from '../src/shared/types.ts'
 import { WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import { createFixtureNodes } from './fixture-nodes.ts'
 import { workflow } from './graph-fixtures.ts'
-import { TestHosts,runEnded } from './host.ts'
+import { TestHosts, runEnded } from './host.ts'
 
 const sw = (...cases: string[]) => ({ type: 'switch', config: { [SWITCH_CASES]: cases } })
 

@@ -10,6 +10,7 @@ import { describeDiagnostic } from './shared/diagnostic-message.ts'
 import { describeWorkflow } from './shared/description.ts'
 import { buildWorkflowIr } from './shared/ir.ts'
 import { withSubworkflows } from './shared/subworkflow.ts'
+import { startLinkedRun } from './session-link.ts'
 import { RunId, type JsonObject, type NodeTypeSummary } from './shared/types.ts'
 import { toJsonObject } from './shared/json.ts'
 import { refuse } from './shared/refusal.ts'
@@ -123,7 +124,9 @@ export function registerWorkflowTools(ctx: Context): void {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'run_workflow',
-    description: '按名称启动一个已定义的工作流执行，返回运行 ID；用 get_workflow_run 查询进度和结果。',
+    description: '按名称启动一个已定义的工作流执行，返回运行 ID。部署提供后台作业时，运行同时是本会话的一个后台作业：'
+      + '运行结束时会收到完成通知，用 job_output 查看进展；运行向人提问时，问题直接出现在本会话中。'
+      + 'job_kill 只停止跟随，不取消运行。没有后台作业时用 get_workflow_run 查询进度和结果。',
     parameters: {
       name: { type: 'string', required: true, description: '要运行的工作流名称' },
       inputs: {
@@ -137,18 +140,26 @@ export function registerWorkflowTools(ctx: Context): void {
         properties: {
           runId: { type: 'string', description: '运行 ID' },
           status: { type: 'string', description: '运行状态' },
+          jobId: { type: 'string', description: '跟随该运行的后台作业 ID；没有后台作业时不存在' },
         },
         additionalProperties: false,
       },
-      render: (_args, value) => [
-        { type: 'text', text: `工作流运行已启动 (runId: ${value.runId}, 状态: ${value.status})` },
-      ],
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.jobId === undefined
+          ? `工作流运行已启动 (runId: ${value.runId}, 状态: ${value.status})；用 get_workflow_run 查询进度`
+          : `工作流运行已作为后台作业 ${value.jobId} 启动 (runId: ${value.runId})；结束时会收到完成通知`,
+      }],
     },
-    async execute(args, _exec) {
+    async execute(args, exec) {
       const summary = engine.findByName(args.name)
       if (summary === undefined) refuse({ code: 'workflow-missing', workflow: args.name })
-      const run = engine.start(summary.id, workflowInputValues(args.inputs))
-      return { runId: run.runId, status: 'running' }
+      const inputs = workflowInputValues(args.inputs)
+      const linked = exec.agent === undefined
+        ? undefined
+        : startLinkedRun(ctx, engine, summary.id, inputs, exec.agent, { callId: exec.callId, rootCallId: exec.rootCallId })
+      if (linked !== undefined) return { runId: linked.run.runId, status: 'running', jobId: linked.jobId }
+      return { runId: engine.start(summary.id, inputs).runId, status: 'running' }
     },
   })), 'workflow-tools:run_workflow')
 

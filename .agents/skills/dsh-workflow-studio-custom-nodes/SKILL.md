@@ -18,6 +18,7 @@ Extend `WorkflowNode` from [`src/node.ts`](../../../src/node.ts) unless the node
 - `execOutputs`: the execution pins the node fires on completion; omitted means the single pin `then`. A node that picks among several pins returns them in `next`.
 - `exclusiveExecOutputs`: set it when every completion fires exactly one of at least two pins, as an approval does. The node becomes a decision node: the analysis treats its pins as mutually exclusive, and the engine fails a completion that fires any other number.
 - `recovery`: `hold` when a person must decide whether calling the node again after a Host restart is safe; omitted means `rerun`.
+- `retry`: `{ retries, delayMs }` when an error the node throws can pass, such as a timeout; the engine calls the node again up to `retries` times, `delayMs` apart. A workflow node may override it. Do not declare a pin named `failed`: the engine owns it and fires it when a failure is handled in the graph.
 - `variadicInputs`: declare the minimum instance input count and optional same-type output requirement.
 - `validateSignal`: declare it when the node waits for a result with `awaitSignal` and that result has a required format.
 
@@ -150,7 +151,7 @@ Before finishing, confirm:
 - Every used input and produced output is declared, and every declared output has a value on completion.
 - Business outcomes are outputs or fired pins; only an error the node cannot handle is thrown, with a useful message.
 - Async work observes cancellation and releases resources.
-- A second call of `run()` for the same `invocationKey` is safe, or `recovery` is `hold`.
+- A second call of `run()` for the same `invocationKey` is safe, or `recovery` is `hold` and `retry` is absent.
 - Outputs and notepad values are JSON values.
 - Registration is effect-owned and names its source plugin.
 - The browser catalog exposes the intended ports and controls.

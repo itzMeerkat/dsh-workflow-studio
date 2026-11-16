@@ -31,6 +31,8 @@ import { NodeLibraryMenu, WorkflowPicker } from './Menus.tsx'
 import {
   appendEditorNode,
   appendSubworkflowNode,
+  isTextEntry,
+  type Clip,
   openFault,
   type EmbedChoice,
   type PickerRow,
@@ -65,7 +67,7 @@ export interface WorkflowStudioPanelProps extends PropsLocale<typeof NS> {
 /** Main workflow authoring surface. */
 export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudioPanelProps) {
   const editor = useWorkflowEditor(remote, t)
-  const { snapshot, selectedId, definition, revision, phase, notice, setNotice, replace } = editor
+  const { snapshot, selectedId, definition, revision, phase, notice, setNotice, change } = editor
   const [view, setView] = useState<View>('canvas')
   const runs = useRuns(remote, editor.fail, () => { setNotice(undefined) })
   // Set while the run dialog is collecting values for the workflow's declared inputs.
@@ -73,6 +75,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   const [settingsOpen, setSettingsOpen] = useState(true)
   const importInput = useRef<HTMLInputElement>(null)
   const viewCenter = useRef<() => XYPosition>()
+  // Nodes copied on the canvas; kept while the panel is open, so they can be pasted into another workflow.
+  const clipboard = useRef<Clip>()
 
   // The saved workflows, which subworkflow nodes link to by ID.
   const saved = useMemo(
@@ -85,7 +89,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   // opened on them, may move those ports.
   useEffect(() => {
     const linked = withSubworkflows(definition, lookup)
-    if (linked !== definition) replace(linked)
+    if (linked !== definition) editor.sync(linked)
   }, [lookup, revision])
 
   /** Save, start a run without waiting for it, and open it in the Runs view. */
@@ -155,7 +159,18 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
   const activeRuns = runs.runs.filter(row => isActiveRun(row)).length
   const waitingRequests = runs.runs.reduce((count, row) => count + row.pendingRequests, 0)
   return (
-    <main className={css.page} aria-label={t('title')}>
+    <main
+      className={css.page}
+      aria-label={t('title')}
+      onKeyDown={(event) => {
+        if (busy || !(event.ctrlKey || event.metaKey) || isTextEntry(event.target)) return
+        const key = event.key.toLowerCase()
+        if (key === 'z' && !event.shiftKey) editor.undo()
+        else if (key === 'y' || (key === 'z' && event.shiftKey)) editor.redo()
+        else return
+        event.preventDefault()
+      }}
+    >
       <header className={css.header}>
         <div className={css.editorTools}>
           <input
@@ -196,8 +211,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
               nodeTypes={addableNodeTypes}
               workflows={embedChoices}
               t={t}
-              onSelect={(nodeType: NodeTypeSummary) => { replace(appendEditorNode(definition, nodeType, placement())) }}
-              onSelectWorkflow={(row) => { replace(appendSubworkflowNode(definition, row.id, saved.get(row.id)!, placement())) }}
+              onSelect={(nodeType: NodeTypeSummary) => { change(appendEditorNode(definition, nodeType, placement())) }}
+              onSelectWorkflow={(row) => { change(appendSubworkflowNode(definition, row.id, saved.get(row.id)!, placement())) }}
             />
           )}
         </div>
@@ -221,6 +236,12 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
             onClick={() => { setSettingsOpen(open => !open) }}
           >
             {t('settings.title')}
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy || !editor.canUndo} title={t('action.undoKeys')} onClick={editor.undo}>
+            {t('action.undo')}
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy || !editor.canRedo} title={t('action.redoKeys')} onClick={editor.redo}>
+            {t('action.redo')}
           </Button>
           <Button
             size="sm"
@@ -304,6 +325,8 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
               diagnostics={analysis?.byNode ?? new Map()}
               workflows={embeddable}
               lookup={lookup}
+              clipboard={clipboard}
+              onPaste={change}
               t={t}
               onChange={editor.edit}
               onError={setNotice}
@@ -336,7 +359,7 @@ export function WorkflowStudioPanel({ t, remote, renderRequest }: WorkflowStudio
           <WorkflowSettings
             definition={definition}
             t={t}
-            onChange={replace}
+            onChange={change}
             onClose={() => { setSettingsOpen(false) }}
             onDelete={selectedId === undefined || busy ? undefined : () => { void editor.remove(selectedId) }}
           />

@@ -3,13 +3,14 @@
  * @module dsh-workflow-studio
  */
 
+import { setTimeout as sleep } from 'node:timers/promises'
 import type {
   DagNodeDefinition, JsonValue, NodeId, NodeExecutionContext, NodeExecutionResult, NodeRunInfo, NodeRunRecord,
   WorkflowNodeExecutor, WorkflowRunStatus,
 } from './shared/types.ts'
 import { toJsonObject, toJsonValue } from './shared/json.ts'
 import { messageOf } from './shared/errors.ts'
-import { execSourcePin, inboundEdges, nodeExecPins, type InboundEdges } from './shared/graph.ts'
+import { EXEC_FAILED_PIN, execSourcePin, failureHandlers, inboundEdges, nodeExecPins, type InboundEdges } from './shared/graph.ts'
 import { execKindOf } from './flow-nodes.ts'
 import { enclosingEntries } from './subworkflow.ts'
 import { cancelRemaining, nodeState, runInfo, type RunState } from './run-state.ts'
@@ -59,6 +60,8 @@ export class RunExecutor {
   private readonly abandon: AbortSignal
   /** 本次运行定义的入边索引；定义在运行期间不变，因此只建一次。 */
   private readonly inbound: InboundEdges
+  /** 从失败引脚引出执行边的节点：它们失败时触发失败引脚，运行继续。 */
+  private readonly handlers: ReadonlySet<string>
 
   /**
    * @param state - 已设置执行器和新的 AbortController 的运行状态。
@@ -68,13 +71,15 @@ export class RunExecutor {
     this.signal = state.abortController.signal
     this.abandon = AbortSignal.any([this.signal, this.exit.signal])
     this.inbound = inboundEdges(state.definition.edges)
+    this.handlers = failureHandlers(state.definition.edges)
   }
 
   /**
    * 调度所有 pending 节点直到运行结束、失败或被取消。
    *
    * 节点在自己的全部前驱结束后立即开始，而不等待同层的其他节点，因此一个长节点不会拖住与它无关的分支。
-   * 节点失败后不再启动新节点，已在执行的节点跑完后运行才失败，使带副作用的节点不被半途丢下；
+   * 节点失败且没有从失败引脚引出的边时，不再启动新节点，已在执行的节点跑完后运行才失败，使带副作用的节点不被半途丢下；
+   * 有这样的边时，节点触发失败引脚，运行照常继续。
    * 只有等待外部结果的节点被放弃并记为 cancelled，否则一个没人回答的请求会让运行永远不结束。
    * @returns 运行的结束状态；节点失败或写入失败时为 failed。
    */
@@ -117,7 +122,7 @@ export class RunExecutor {
           const settled = await Promise.race(running.values())
           running.delete(settled)
           const { node, record } = nodeState(state, settled)
-          if (record.status === 'failed') {
+          if (record.status === 'failed' && !this.handlers.has(settled)) {
             failure ??= this.failureOf(node, record.error ?? '节点执行失败')
             this.exit.abort(failure)
           }
@@ -234,7 +239,8 @@ export class RunExecutor {
   /**
    * 按执行边决定节点是否被跳过，跳过时就地结束其记录。
    *
-   * 源节点未完成或未触发该引脚时执行边失效。普通节点是 AND 连接，任一入边失效即跳过；
+   * 源节点未触发该引脚时执行边失效：它被跳过、被取消，或完成时没有触发这个引脚，或失败时没有处理失败的边。
+   * 普通节点是 AND 连接，任一入边失效即跳过；
    * OR 连接点（{@link execKindOf} 为 `join`）只在全部入边失效时跳过。跳过的节点不触发任何引脚，
    * 因此跳过沿执行边传递。
    * @param node - 前驱已全部结束、待执行的节点。
@@ -244,8 +250,8 @@ export class RunExecutor {
     const inbound = this.inbound.exec.get(node.id) ?? []
     if (inbound.length === 0) return false
     const live = inbound.filter((edge) => {
-      const source = nodeState(this.state, edge.source).record
-      return source.status === 'completed' && (source.fired ?? []).includes(execSourcePin(edge))
+      // A completed node records the pins it fired; a failed node whose failure the graph handles records `failed`.
+      return (nodeState(this.state, edge.source).record.fired ?? []).includes(execSourcePin(edge))
     })
     const dead = execKindOf(this.executorFor(node)) === 'join'
       ? live.length === 0
@@ -298,22 +304,41 @@ export class RunExecutor {
   }
 
   /**
-   * 通过输入检查后调用执行器。节点抛出的错误和违反结果约定的返回值都记为 failed，运行随之结束；
+   * 通过输入检查后调用执行器。节点抛出的错误和违反结果约定的返回值都记为 failed；
    * 运行取消，或节点的等待被放弃时，无论执行器返回什么，节点都记为 cancelled。
+   *
+   * 节点抛出错误且重试策略还有余量时，记下这次的错误和调用次数，等待间隔后再调用；等待中运行被取消时节点记为
+   * cancelled，运行因另一个节点失败而退出时不再重试。
    */
   private async runNode(task: NodeTask, inputs: Record<string, unknown>): Promise<NodeEnd> {
-    const { node, executor } = task
+    const { node, executor, record } = task
     const context = this.nodeContext(task, inputs)
 
     const gate = this.inputGate(node, executor, inputs)
     if (gate !== undefined) return gate
 
+    const retry = node.retry ?? executor.retry
     const stopped = (): boolean => this.signal.aborted || (this.exit.signal.aborted && task.waiting)
-    try {
-      const result = await executor.execute(context)
-      return stopped() ? { status: 'cancelled' } : resultEnd(node, executor, result)
-    } catch (error: unknown) {
-      return stopped() ? { status: 'cancelled' } : { status: 'failed', error: messageOf(error) }
+    for (let retries = 0; ; retries += 1) {
+      try {
+        const result = await executor.execute(context)
+        return stopped() ? { status: 'cancelled' } : resultEnd(node, executor, result)
+      } catch (error: unknown) {
+        if (stopped()) return { status: 'cancelled' }
+        const message = messageOf(error)
+        if (retries >= (retry?.retries ?? 0) || this.exit.signal.aborted) return { status: 'failed', error: message }
+        record.error = message
+        await this.host.checkpoint(this.state)
+        this.host.log(`[${this.state.definition.name}/${node.label ?? node.type}] 第 ${record.attempts} 次调用失败，${retry?.delayMs ?? 0} ms 后重试: ${message}`)
+        try {
+          await sleep(retry?.delayMs ?? 0, undefined, { signal: this.abandon })
+        } catch (_aborted: unknown) {
+          // The wait ended early: a cancel cancels the node, an exit ends it with the error it already has.
+          return this.signal.aborted ? { status: 'cancelled' } : { status: 'failed', error: message }
+        }
+        task.waiting = false
+        record.attempts += 1
+      }
     }
   }
 
@@ -383,13 +408,18 @@ export class RunExecutor {
     return inputs
   }
 
-  private endNode({ record, info }: NodeTask, end: NodeEnd): void {
+  private endNode({ node, record, info }: NodeTask, end: NodeEnd): void {
     record.status = end.status
     if (end.status === 'completed') {
       record.fired = [...end.fired]
       record.outputs = structuredClone(end.outputs)
+      // An error a retry recovered from no longer describes the node.
+      delete record.error
     }
-    if (end.status === 'failed') record.error = end.error
+    if (end.status === 'failed') {
+      record.error = end.error
+      if (this.handlers.has(node.id)) record.fired = [EXEC_FAILED_PIN]
+    }
     if (end.status === 'cancelled' && this.abandon.reason !== undefined) record.error = String(this.abandon.reason)
     record.completedAt = Date.now()
     this.host.emit('dag/node-end', runInfo(this.state), { ...info, status: end.status })

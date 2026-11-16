@@ -6,7 +6,9 @@
  * @module dsh-workflow-studio
  */
 
-import { execSourcePin, inboundEdges, isDataEdge, nodeExecPins, topologicalLevels } from './graph.ts'
+import {
+  EXEC_FAILED_PIN, execSourcePin, failureHandlers, inboundEdges, isDataEdge, nodeExecPins, topologicalLevels,
+} from './graph.ts'
 import { NodeId } from './types.ts'
 import { WORKFLOW_OUTPUT_TYPE } from './workflow-boundary.ts'
 import type {
@@ -139,10 +141,12 @@ export function analyzeWorkflow(
   const nodes = new Map(definition.nodes.map(node => [node.id, node]))
   const typeOf = (node: NodeId): NodeTypeSummary => catalog.get(nodes.get(node)!.type)!
   const pinsOf = (node: NodeId): readonly string[] => nodeExecPins(nodes.get(node)!, typeOf(node))
+  const handlers = failureHandlers(definition.edges)
+  const outcomesOf = (node: NodeId): Outcomes => outcomes(pinsOf(node), typeOf(node).execKind === 'decision', handlers.has(node))
   const inbound = inboundEdges(definition.edges)
   // guard 与类型推断都沿同一个拓扑序自上而下求解，因此只排一次。
   const levels = topologicalLevels(definition.nodes, definition.edges).levels
-  const guards = computeGuards(levels, typeOf, pinsOf, inbound)
+  const guards = computeGuards(levels, typeOf, outcomesOf, inbound)
   const outputTypes = inferOutputTypes(levels, typeOf, inbound)
 
   const diagnostics: WorkflowDiagnostic[] = []
@@ -151,22 +155,39 @@ export function analyzeWorkflow(
   }
   for (const node of definition.nodes) {
     if (typeOf(node.id).execKind === 'join') {
-      diagnostics.push(...checkJoin(node.id, guards, typeOf, pinsOf, inbound.data.get(node.id) ?? []))
+      diagnostics.push(...checkJoin(node.id, guards, outcomesOf, inbound.data.get(node.id) ?? []))
     }
   }
   return { order: levels.flat(), guards, diagnostics }
 }
 
+/** 一个节点每次结束时可能触发的引脚组合；不同组合互斥。 */
+type Outcomes = readonly (readonly string[])[]
+
+/**
+ * 节点每次结束可能触发的引脚组合。
+ *
+ * 决策节点每次恰好触发一个引脚，其余节点完成时触发全部引脚；失败由图处理的节点另有一种结局：只触发失败引脚。
+ * @param pins - 节点声明的执行输出引脚。
+ * @param decision - 节点是否为决策节点。
+ * @param handlesFailure - 是否有执行边从节点的失败引脚引出。
+ */
+function outcomes(pins: readonly string[], decision: boolean, handlesFailure: boolean): Outcomes {
+  const completed = decision ? pins.map(pin => [pin]) : [pins]
+  return handlesFailure ? [...completed, [EXEC_FAILED_PIN]] : completed
+}
+
 /**
  * 按拓扑序求每个节点的条件引脚集合。
  *
- * 只有声明了多个执行输出引脚的节点会引入条件：单引脚节点完成时必然触发它，因此不改变下游的依赖。
+ * 声明了多个执行输出引脚、或失败由图处理的节点会引入条件：只有一个引脚且失败使运行失败的节点，
+ * 每次结束都触发同一个引脚，因此不改变下游的依赖。
  * 普通节点是 AND 连接，guard 取各入边之并；OR 连接点只需任一入边触发，因此取各入边之交。
  */
 function computeGuards(
   levels: readonly (readonly DagNodeDefinition[])[],
   typeOf: (node: NodeId) => NodeTypeSummary,
-  pinsOf: (node: NodeId) => readonly string[],
+  outcomesOf: (node: NodeId) => Outcomes,
   inbound: ReturnType<typeof inboundEdges>,
 ): ReadonlyMap<NodeId, Guard> {
   const guards = new Map<NodeId, Guard>()
@@ -175,7 +196,7 @@ function computeGuards(
       const execEdges = inbound.exec.get(node.id) ?? []
       const reached = execEdges.map((edge) => {
         const pins = new Set(guards.get(edge.source)!)
-        if (pinsOf(edge.source).length > 1) {
+        if (outcomesOf(edge.source).flat().length > 1) {
           pins.add(pinAtom(edge.source, execSourcePin(edge)))
         }
         return pins
@@ -261,7 +282,11 @@ function checkDataEdge(edge: DagDataEdge, context: EdgeContext): WorkflowDiagnos
   const portName = edge.targetPort ?? 'input'
   const port = (target.inputs ?? typeOf(edge.target).inputs).find(item => item.name === portName)!
 
-  const unmet = [...guards.get(edge.source)!].find(atom => !guards.get(edge.target)!.has(atom))
+  // A failed node produces no outputs, so its values never reach a node that runs only when it failed.
+  const failed = pinAtom(edge.source, EXEC_FAILED_PIN)
+  const unmet = guards.get(edge.target)!.has(failed)
+    ? failed
+    : [...guards.get(edge.source)!].find(atom => !guards.get(edge.target)!.has(atom))
   const code = unmet === undefined
     ? undefined
     : port.required !== false
@@ -305,19 +330,17 @@ function checkDataEdge(edge: DagDataEdge, context: EdgeContext): WorkflowDiagnos
 function checkJoin(
   node: NodeId,
   guards: ReadonlyMap<NodeId, Guard>,
-  typeOf: (node: NodeId) => NodeTypeSummary,
-  pinsOf: (node: NodeId) => readonly string[],
+  outcomesOf: (node: NodeId) => Outcomes,
   sources: readonly DagDataEdge[],
 ): WorkflowDiagnostic[] {
   if (sources.length === 0) return []
   const own = guards.get(node)!
   const remainders = sources.map(edge => new Set([...guards.get(edge.source)!].filter(atom => !own.has(atom))))
-  const isDecision = (atom: string): boolean => typeOf(atomNode(atom)).execKind === 'decision'
   const diagnostics: WorkflowDiagnostic[] = []
 
   for (const [index, remainder] of remainders.entries()) {
     const overlap = remainders.findIndex((other, position) =>
-      position > index && !excludes(remainder, other, isDecision))
+      position > index && !excludes(remainder, other, outcomesOf))
     if (overlap >= 0) {
       diagnostics.push({
         code: 'merge-overlap',
@@ -326,44 +349,35 @@ function checkJoin(
       })
     }
   }
-  if (!covers(remainders, pinsOf, isDecision)) {
+  if (!covers(remainders, outcomesOf)) {
     diagnostics.push({ code: 'merge-gap', nodeId: node })
   }
   return diagnostics
 }
 
-/** 两个条件集合是否互斥：依赖同一决策节点的不同引脚。 */
-function excludes(a: Guard, b: Guard, isDecision: (atom: string) => boolean): boolean {
-  return [...a].some(atom => isDecision(atom)
-    && !b.has(atom)
-    && [...b].some(other => atomNode(other) === atomNode(atom)))
+/** 两个条件集合是否互斥：依赖同一节点不会在一次结束中同时触发的两个引脚。 */
+function excludes(a: Guard, b: Guard, outcomesOf: (node: NodeId) => Outcomes): boolean {
+  return [...a].some(atom => [...b].some(other => atomNode(other) === atomNode(atom) && other !== atom
+    && !outcomesOf(atomNode(atom)).some(fired => fired.includes(atomPin(atom)) && fired.includes(atomPin(other)))))
 }
 
 /**
  * 条件集合是否覆盖所有分支：任何一次运行都至少命中其中一个。
  *
- * 空条件必然命中。否则取任一决策节点，逐个假设它的每个引脚触发：丢弃依赖它其他引脚的集合，
- * 从其余集合中划去该引脚，递归判断剩下的条件。每层都消去一个决策节点，因此递归必然结束。
+ * 空条件必然命中。否则取任一有多种结局的节点，逐个假设它的每种结局：丢弃依赖这次没有触发的引脚的集合，
+ * 从其余集合中划去这个节点的条件，递归判断剩下的条件。每层都消去一个节点，因此递归必然结束。
  */
-function covers(
-  remainders: readonly Guard[],
-  pinsOf: (node: NodeId) => readonly string[],
-  isDecision: (atom: string) => boolean,
-): boolean {
+function covers(remainders: readonly Guard[], outcomesOf: (node: NodeId) => Outcomes): boolean {
   if (remainders.some(remainder => remainder.size === 0)) return true
-  const chosen = remainders.flatMap(remainder => [...remainder]).find(isDecision)
+  const chosen = remainders.flatMap(remainder => [...remainder]).find(atom => outcomesOf(atomNode(atom)).length > 1)
   if (chosen === undefined) return false
-  const decision = atomNode(chosen)
-  return pinsOf(decision).every((pin) => {
-    const atom = pinAtom(decision, pin)
-    return covers(
-      remainders
-        .filter(remainder => [...remainder].every(item => atomNode(item) !== decision || item === atom))
-        .map(remainder => new Set([...remainder].filter(item => item !== atom))),
-      pinsOf,
-      isDecision,
-    )
-  })
+  const node = atomNode(chosen)
+  return outcomesOf(node).every(fired => covers(
+    remainders
+      .filter(remainder => [...remainder].every(item => atomNode(item) !== node || fired.includes(atomPin(item))))
+      .map(remainder => new Set([...remainder].filter(item => atomNode(item) !== node))),
+    outcomesOf,
+  ))
 }
 
 /**

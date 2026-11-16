@@ -9,8 +9,8 @@
   en: 3f5c8131c2a8ae74
   zh: 791eae30143cb07e
 /dsh-workflow-studio/summary:
-  en: b01d68679806ced2
-  zh: 78fd32d57eedd471
+  en: b8ed4f9aeea9dcf9
+  zh: 7f310a2c4a2b27b6
 /dsh-workflow-studio/table-of-contents:
   en: 7fa0ee8d2c7e270c
   zh: 46239df019b8d8ec
@@ -24,26 +24,53 @@
   en: d06a94c82a27a4e3
   zh: faa9466807bac0f8
 /dsh-workflow-studio/use-this-package:
-  en: 326f82d72c8b6a72
-  zh: 238cc2c178114fa7
+  en: 5225446081ccb2a3
+  zh: 27790ae4b2a5686c
+/dsh-workflow-studio/use-this-package/define-a-workflow:
+  en: bf060fe996dbc29b
+  zh: b985050aab49ef78
+/dsh-workflow-studio/use-this-package/check-a-workflow:
+  en: f3f5aec134b75fc3
+  zh: 9096f8a51b2e6527
+/dsh-workflow-studio/use-this-package/embed-a-workflow:
+  en: 59e1f571b0978db6
+  zh: 3b66858c849c3ffb
+/dsh-workflow-studio/use-this-package/describe-a-workflow:
+  en: 05ef1c820659034e
+  zh: 60401c190716b2a3
+/dsh-workflow-studio/use-this-package/model-tools:
+  en: 471369f0fecb757c
+  zh: 728353ae77145581
+/dsh-workflow-studio/use-this-package/runs-and-recovery:
+  en: 420a311fb8eb0825
+  zh: 0567f8a75747e8f1
+/dsh-workflow-studio/use-this-package/wait-for-a-result:
+  en: 38d3633d9e416b65
+  zh: 15e7df71ab615867
+/dsh-workflow-studio/use-this-package/write-a-node-type:
+  en: 2d570c9589c6bdf7
+  zh: 631df0ec3e205065
+/dsh-workflow-studio/use-this-package/edit-and-run-in-the-panel:
+  en: 6a6aea6e9f5275ab
+  zh: 5b450c9ac4deedff
 /dsh-workflow-studio/understand-the-implementation:
-  en: 4ea32d5e827e1d42
-  zh: 1e7b04cf7b2dcf4f
+  en: 955e98847959fe7e
+  zh: c342305dc6a98c6c
 /dsh-workflow-studio/further-exploration:
-  en: c4686ccfdb896110
-  zh: dc88621018fb00d5
+  en: 9f6af7413a1e35b2
+  zh: cecd0690ec232cc1
 /dsh-workflow-studio/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
 /dsh-workflow-studio/model-experience/tool-surface:
-  en: 1a3e03eb40fe48e4
-  zh: 1febf4e5d5402042
+  en: 15b1ef59d8fc7be3
+  zh: 6e4ae3ebfa0b868e
 /dsh-workflow-studio/model-experience/token-and-cache-effect:
-  en: cd7b68f2944c1b65
-  zh: c013e10afb89acca
+  en: e507f0573569c03e
+  zh: f028012e04229f4a
 /dsh-workflow-studio/known-limitations-and-deferred-work:
-  en: 9b21fdad32362833
-  zh: 748182bede5953a1
-/dsh-workflow-studio/known-limitations-and-deferred-work/dev-note:
-  en: ebcd15af603774e7
-  zh: c8c1dffb8a8a0923
+  en: 00d8f0a9cdffa3d4
+  zh: 0933c78b3f885e01
+/dsh-workflow-studio/dev-note:
+  en: 33044c0286249716
+  zh: ba1b3f87e17b3e0d

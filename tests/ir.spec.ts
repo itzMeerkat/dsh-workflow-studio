@@ -2,10 +2,10 @@
  * 中间表示单元测试。
  */
 
-import { describe,it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { IrBlock } from '../src/shared/ir.ts'
-import { irOf,workflow } from './graph-fixtures.ts'
+import { irOf, workflow } from './graph-fixtures.ts'
 
 /** 块树的简写：调用写类型名，guard 写 `守卫节点.引脚` 及其内容。 */
 function shape(block: IrBlock): unknown[] {

@@ -2,14 +2,14 @@
  * 节点等待外部结果：声明请求、结果校验、持久化，以及 Host 重启后的复用。
  */
 
-import { afterEach,describe,it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
-import { askUser,parseAnswer,validateQuestionsSignal } from '../src/shared/questions.ts'
-import { NodeId,type RunId } from '../src/shared/types.ts'
+import { askUser, parseAnswer, validateQuestionsSignal } from '../src/shared/questions.ts'
+import { NodeId, type RunId } from '../src/shared/types.ts'
 import type { DagEngineProvider } from '../src/engine-provider.ts'
-import type { NodeExecutionContext,NodeExecutionResult,NodeRecoveryPolicy,WorkflowNodeExecutor } from '../src/shared/types.ts'
-import { TestHosts,runEnded,signalRequested } from './host.ts'
+import type { NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor } from '../src/shared/types.ts'
+import { TestHosts, runEnded, signalRequested } from './host.ts'
 import { workflow } from './graph-fixtures.ts'
 
 const QUESTIONS: AskUserQuestionItem[] = [

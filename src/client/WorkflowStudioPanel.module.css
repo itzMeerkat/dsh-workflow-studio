@@ -957,7 +957,8 @@
   color: #217a49;
 }
 
-.execPin[data-pin='false'] {
+.execPin[data-pin='false'],
+.execPin[data-pin='failed'] {
   color: #b83232;
 }
 
@@ -971,7 +972,8 @@
   background: #217a49;
 }
 
-.execPin[data-pin='false'] .execBranchHandle {
+.execPin[data-pin='false'] .execBranchHandle,
+.execPin[data-pin='failed'] .execBranchHandle {
   background: #b83232;
 }
 

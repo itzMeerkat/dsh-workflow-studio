@@ -2,15 +2,16 @@
  * 执行边测试：排序约束、跳过沿执行边传递，以及执行边的定义校验。
  */
 
-import { afterEach,describe,it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { TestHosts,runEnded,signalRequested } from './host.ts'
+import { TestHosts, runEnded, signalRequested } from './host.ts'
 import { workflow } from './graph-fixtures.ts'
-import { WorkflowNode,type WorkflowNodePorts } from '../src/node.ts'
+import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
 import { NodeId } from '../src/shared/types.ts'
+import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 import type {
-DagWorkflowDefinition,NodeExecutionContext,NodeRunRecord,PortDefinition,WorkflowNodeExecutor,
-WorkflowRunRecord,
+  DagWorkflowDefinition, NodeExecutionContext, NodeRunRecord, PortDefinition, WorkflowNodeExecutor,
+  WorkflowRunRecord,
 } from '../src/shared/types.ts'
 
 /** 按调用顺序追加节点 ID 的共享记录，每个用例开始时清空。 */
@@ -100,7 +101,32 @@ const decline: WorkflowNodeExecutor = {
   execute: () => ({ outputs: { output: null }, next: [] }),
 }
 
-const executors = [new MarkNode(), new SinkNode(), decline, flag, blocker, waiter]
+/** 每个 `config.id` 已被调用的次数，每个用例开始时清空。 */
+const flakyCalls = new Map<string, number>()
+
+/** 前 `config.failures` 次调用抛出错误、之后完成的节点；执行器允许重试两次。 */
+const flaky: WorkflowNodeExecutor = {
+  type: 'flaky',
+  label: 'Flaky',
+  description: 'Fails a configured number of times, then completes',
+  inputs: [],
+  outputs: [{ name: 'output', type: 'any' }],
+  retry: { retries: 2 },
+  execute: ({ config }) => {
+    const id = String(config.id)
+    const call = (flakyCalls.get(id) ?? 0) + 1
+    flakyCalls.set(id, call)
+    if (call <= Number(config.failures)) throw new Error(`failure ${call}`)
+    return { outputs: { output: call } }
+  },
+}
+
+const executors = [new MarkNode(), new SinkNode(), decline, flag, blocker, waiter, flaky]
+
+/** 一个在前 `failures` 次调用失败的 `flaky` 节点。 */
+function flakyNode(id: string, failures: number) {
+  return { [id]: { type: 'flaky', config: { id, failures } } }
+}
 
 /** `mark` 节点把自己的 ID 记进 {@link calls}，因此它的配置就是 ID。 */
 function mark(id: string) {
@@ -239,5 +265,52 @@ describe('分支、合并与输出完整性', () => {
     const record = await runEnded(ctx, runId)
     assert.equal(record.status, 'completed')
     assert.equal(node(record, 'after')?.status, 'completed')
+  })
+})
+
+describe('重试与失败引脚', () => {
+  const hosts = new TestHosts()
+  afterEach(async () => {
+    calls.length = 0
+    flakyCalls.clear()
+    await hosts.cleanup()
+  })
+
+  async function run(definition: DagWorkflowDefinition) {
+    const { ctx, engine } = await hosts.start(await hosts.root(), executors)
+    const id = await engine.save(definition)
+    return runEnded(ctx, engine.start(id).runId)
+  }
+
+  it('节点抛出错误时按重试策略再调用；成功后错误清除，次数用尽后节点以最后一次的错误失败', async () => {
+    const recovered = await run(workflow(flakyNode('a', 2), []))
+    assert.equal(recovered.status, 'completed')
+    const { attempts, outputs, error } = node(recovered, 'a')!
+    assert.deepEqual({ attempts, outputs, error }, { attempts: 3, outputs: { output: 3 }, error: undefined })
+
+    flakyCalls.clear()
+    const exhausted = await run(workflow({ a: { type: 'flaky', config: { id: 'a', failures: 5 }, retry: { retries: 1 } } }, []))
+    assert.equal(exhausted.status, 'failed')
+    assert.equal(node(exhausted, 'a')?.attempts, 2)
+    assert.equal(node(exhausted, 'a')?.error, 'failure 2')
+  })
+
+  it('有边从失败引脚引出时，节点失败后走这条边，正常的后继被跳过，运行完成', async () => {
+    const record = await run(workflow(
+      { ...flakyNode('risky', 5), ...mark('recover'), ...mark('next') },
+      ['risky.failed>recover', 'risky.then>next'],
+    ))
+    assert.equal(record.status, 'completed')
+    assert.deepEqual(statuses(record), [['risky', 'failed'], ['recover', 'completed'], ['next', 'skipped']])
+    assert.deepEqual(node(record, 'risky')?.fired, ['failed'])
+    assert.equal(node(record, 'risky')?.error, 'failure 3')
+  })
+
+  it('不会失败的边界节点没有失败引脚', async () => {
+    const { engine } = await hosts.start(await hosts.root(), executors)
+    await assert.rejects(
+      engine.save(workflow({ in: { type: WORKFLOW_INPUT_TYPE, outputs: [] }, ...mark('a') }, ['in.failed>a'])),
+      /不存在的执行输出引脚 failed/,
+    )
   })
 })

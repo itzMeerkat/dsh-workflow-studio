@@ -44,6 +44,19 @@ export interface JsonObject {
  */
 export type NodeRecoveryPolicy = 'rerun' | 'hold'
 
+/**
+ * 节点抛出错误后，在同一个 Host 中重新调用它的策略。
+ *
+ * 只重试节点自己抛出的错误；缺少必需输入、违反结果约定等接线或实现错误每次都会重现，不重试。
+ * 等待间隔中运行被取消时节点记为 cancelled；另一个节点失败使运行退出时不再重试，节点以最后一次的错误失败。
+ */
+export interface NodeRetryPolicy {
+  /** 第一次调用失败后最多再调用几次；0 表示不重试。 */
+  readonly retries: number
+  /** 两次调用之间等待的毫秒数；省略时为 0。 */
+  readonly delayMs?: number
+}
+
 /** 内置端口类型，按编辑器列出的先后排列。 */
 export const BUILTIN_PORT_TYPES = ['any', 'string', 'number', 'boolean'] as const
 
@@ -121,6 +134,8 @@ export interface DagNodeDefinition {
   config: Record<string, unknown>
   /** 覆盖执行器声明的中断恢复策略。 */
   recovery?: NodeRecoveryPolicy
+  /** 覆盖执行器声明的重试策略。 */
+  retry?: NodeRetryPolicy
   /** 可视化编辑器中的节点坐标。 */
   position?: { x: number; y: number }
   /** 可视化编辑器中卡片的宽度（像素）；省略时为默认宽度。 */
@@ -359,6 +374,8 @@ export interface WorkflowNodeExecutor {
   }
   /** 中断后的恢复策略；省略时为 `rerun`。工作流节点的 `recovery` 覆盖此值。 */
   readonly recovery?: NodeRecoveryPolicy
+  /** 节点抛出错误后的重试策略；省略时不重试。工作流节点的 `retry` 覆盖此值。 */
+  readonly retry?: NodeRetryPolicy
   /**
    * 校验送达 {@link NodeExecutionContext.awaitSignal} 请求的结果。省略时引擎接受任何 JSON 值。
    * 引擎在写入运行记录前调用它，因此格式错误在送达方一侧被拒绝，而不是使节点失败。

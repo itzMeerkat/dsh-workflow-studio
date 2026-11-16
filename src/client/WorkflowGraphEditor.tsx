@@ -30,7 +30,7 @@ import {
   type WorkflowFlowNode,
 } from './graph-model.ts'
 import type { Translate } from './locale.ts'
-import type { WorkflowRow } from './model.ts'
+import { copyNodes, isTextEntry, pasteNodes, type Clip, type WorkflowRow } from './model.ts'
 import { NodeCardContext, WorkflowNodeCard } from './NodeCard.tsx'
 import { NodeInspector } from './NodeInspector.tsx'
 import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
@@ -57,12 +57,19 @@ interface WorkflowGraphEditorProps {
   readonly workflows: readonly WorkflowRow[]
   /** Reads the saved workflows, which give subworkflow nodes their ports. */
   readonly lookup: WorkflowLookup
+  /** Where Ctrl+C on the canvas puts the selected nodes, and Ctrl+V reads them from. */
+  readonly clipboard: MutableRefObject<Clip | undefined>
+  /** Receives the definition with pasted nodes; the canvas reloads it. */
+  readonly onPaste: (definition: DagWorkflowDefinition) => void
   readonly t: Translate
   readonly onChange: (definition: DagWorkflowDefinition) => void
   readonly onError: (message: string | undefined) => void
   /** Set, while the canvas is shown, to where in the graph the middle of its view is. */
   readonly viewCenter: MutableRefObject<(() => XYPosition) | undefined>
 }
+
+/** How far pasted nodes sit down and to the right of the nodes they were copied from, in pixels. */
+const PASTE_OFFSET = 32
 
 /** Render and edit one workflow definition as a connected node graph. */
 export function WorkflowGraphEditor({
@@ -74,6 +81,8 @@ export function WorkflowGraphEditor({
   runResult,
   workflows,
   lookup,
+  clipboard,
+  onPaste,
   t,
   onChange,
   onError,
@@ -196,7 +205,24 @@ export function WorkflowGraphEditor({
 
   return (
     <div className={css.graphLayout}>
-      <div ref={canvas} className={css.canvas}>
+      <div
+        ref={canvas}
+        className={css.canvas}
+        onKeyDown={(event) => {
+          if (!(event.ctrlKey || event.metaKey) || isTextEntry(event.target)) return
+          const key = event.key.toLowerCase()
+          const current = toDefinition(definition, latest.current.nodes, latest.current.edges)
+          if (key === 'c') {
+            const selected = new Set(latest.current.nodes.filter(node => node.selected === true).map(node => node.id))
+            clipboard.current = copyNodes(current, selected) ?? clipboard.current
+          } else if (key === 'v' && clipboard.current !== undefined) {
+            onPaste(pasteNodes(current, clipboard.current, PASTE_OFFSET).definition)
+          } else {
+            return
+          }
+          event.preventDefault()
+        }}
+      >
         <NodeCardContext.Provider value={{ t, updateConfig, linkWorkflow: { choices: workflows, link: linkWorkflow }, editCases }}>
           <ReactFlow<WorkflowFlowNode, Edge>
             nodes={nodes}

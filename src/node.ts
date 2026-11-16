@@ -10,6 +10,7 @@ import type {
   NodeControlDefinition,
   NodeExecutionContext,
   NodeExecutionResult,
+  NodeRetryPolicy,
   PortDefinition,
   WorkflowNodeExecutor,
 } from './shared/types.ts'
@@ -38,6 +39,7 @@ implements WorkflowNodeExecutor {
   declare readonly execOutputs?: readonly string[]
   declare readonly exclusiveExecOutputs?: boolean
   declare readonly variadicInputs?: NonNullable<WorkflowNodeExecutor['variadicInputs']>
+  declare readonly retry?: NodeRetryPolicy
   declare readonly validateSignal?: NonNullable<WorkflowNodeExecutor['validateSignal']>
 
   /**

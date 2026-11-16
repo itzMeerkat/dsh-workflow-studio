@@ -2,15 +2,15 @@
  * 运行记录持久化、Host 重启恢复与保留数量测试。
  */
 
-import { afterEach,describe,it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
-import type { DagEngineConfig,DagEngineProvider } from '../src/engine-provider.ts'
-import { TestHosts,runEnded } from './host.ts'
+import type { DagEngineConfig, DagEngineProvider } from '../src/engine-provider.ts'
+import { TestHosts, runEnded } from './host.ts'
 import { workflow } from './graph-fixtures.ts'
-import { NodeId,type RunId,type WorkflowId } from '../src/shared/types.ts'
+import { NodeId, type RunId, type WorkflowId } from '../src/shared/types.ts'
 import type {
-NodeExecutionContext,NodeExecutionResult,NodeRecoveryPolicy,WorkflowNodeExecutor,
+  NodeExecutionContext, NodeExecutionResult, NodeRecoveryPolicy, WorkflowNodeExecutor,
 } from '../src/shared/types.ts'
 
 /** 可观察的节点调用记录。 */

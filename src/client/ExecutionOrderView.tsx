@@ -14,7 +14,7 @@ import { useMemo } from 'react'
 import type { DagWorkflowDefinition, NodeRunRecord, NodeTypeSummary } from '../shared/types.ts'
 import { isBoundaryNode } from '../shared/workflow-boundary.ts'
 import type { WorkflowNodeData } from './graph-model.ts'
-import { nodeExecPins } from '../shared/graph.ts'
+import { EXEC_FAILED_PIN, nodeExecPins } from '../shared/graph.ts'
 import { WorkflowBoundaryCard } from './WorkflowBoundaryCard.tsx'
 import type { ExecutionDependency, ExecutionPlan } from './model.ts'
 import {
@@ -140,7 +140,8 @@ function branchPinsBySource(
   const branchPins = new Map<string, Set<string>>()
   for (const dependency of dependencies) {
     const pin = dependency.execSourcePin
-    if (pin === undefined || nodeExecPins(dependency.source, catalog.get(dependency.source.type) ?? {}).length < 2) continue
+    if (pin === undefined) continue
+    if (pin !== EXEC_FAILED_PIN && nodeExecPins(dependency.source, catalog.get(dependency.source.type) ?? {}).length < 2) continue
     const pins = branchPins.get(dependency.source.id) ?? new Set<string>()
     pins.add(pin)
     branchPins.set(dependency.source.id, pins)

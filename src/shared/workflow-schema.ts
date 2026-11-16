@@ -91,6 +91,7 @@ const workflowNodeSchema = declared<DagNodeDefinition>()(z.object({
   label: nonEmptyString.optional(),
   config: z.record(z.string(), z.json()).default({}),
   recovery: z.enum(['rerun', 'hold']).optional(),
+  retry: z.object({ retries: z.number().int().min(0), delayMs: z.number().int().min(0).optional() }).optional(),
   position: editorPosition.optional(),
   width: z.number().positive().optional(),
   outputs: z.array(workflowPortSchema).optional(),

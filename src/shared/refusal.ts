@@ -36,7 +36,7 @@ export type WorkflowRefusal =
   /** 节点类型只由运行开始时的展开放置，作者不能放置它。 */
   | { readonly code: 'node-reserved'; readonly type: string }
   | { readonly code: 'port-duplicate'; readonly node: string; readonly side: 'inputs' | 'outputs'; readonly port: string }
-  /** 多路分支的 case 为空、重复或与 default 引脚同名。 */
+  /** 多路分支的 case 为空、重复，或与 default 引脚、失败引脚同名。 */
   | { readonly code: 'switch-case'; readonly node: string; readonly case: string }
   | { readonly code: 'edge-duplicate'; readonly edge: string }
   | { readonly code: 'edge-node-missing'; readonly edge: string; readonly end: 'source' | 'target'; readonly node: string }
@@ -126,7 +126,7 @@ function describeRefusal(refusal: WorkflowRefusal): string {
     case 'port-duplicate':
       return `节点 ${refusal.node} 的${SIDE[refusal.side]}端口 ${refusal.port} 重复`
     case 'switch-case':
-      return `节点 ${refusal.node} 的 case "${refusal.case}" 为空、重复或与 default 引脚同名`
+      return `节点 ${refusal.node} 的 case "${refusal.case}" 为空、重复，或与 default 引脚、failed 引脚同名`
     case 'edge-duplicate':
       return `边 ID "${refusal.edge}" 重复`
     case 'edge-node-missing':

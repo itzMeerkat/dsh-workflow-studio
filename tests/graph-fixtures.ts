@@ -2,13 +2,13 @@
  * 整图分析与伪代码投影共用的图构造工具。
  */
 
-import { analyzeWorkflow,indexNodeTypes } from '../src/shared/analysis.ts'
-import { buildWorkflowIr,type WorkflowIr } from '../src/shared/ir.ts'
-import { EdgeId,NodeId } from '../src/shared/types.ts'
+import { analyzeWorkflow, indexNodeTypes } from '../src/shared/analysis.ts'
+import { buildWorkflowIr, type WorkflowIr } from '../src/shared/ir.ts'
+import { EdgeId, NodeId } from '../src/shared/types.ts'
 import type {
-DagEdgeDefinition,DagNodeDefinition,DagWorkflowDefinition,NodeTypeSummary,PortDefinition,
+  DagEdgeDefinition, DagNodeDefinition, DagWorkflowDefinition, NodeTypeSummary, PortDefinition,
 } from '../src/shared/types.ts'
-import { WORKFLOW_INPUT_TYPE,WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
+import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 
 /**
  * 一个节点类型摘要；未给出的字段取普通 `run` 节点的默认值。

@@ -2,7 +2,7 @@
  * 模型面工作流工具测试。
  */
 
-import { describe,it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -10,7 +10,7 @@ import { registerWorkflowTools } from '../src/tools.ts'
 import { WorkflowId } from '../src/shared/types.ts'
 import type { DagWorkflowDefinition } from '../src/shared/types.ts'
 import { WORKFLOW_INPUT_TYPE } from '../src/shared/workflow-boundary.ts'
-import { nodeType,workflow } from './graph-fixtures.ts'
+import { nodeType, workflow } from './graph-fixtures.ts'
 
 /** 已保存的唯一一个工作流：把输入交给一个审批节点。 */
 const SAVED_FLOW = workflow({

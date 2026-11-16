@@ -2,13 +2,13 @@
  * 工作流边界节点测试：调用方的输入值与声明的默认值进入图中。
  */
 
-import { afterEach,describe,it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { TestHosts,runEnded } from './host.ts'
+import { TestHosts, runEnded } from './host.ts'
 import { createFixtureNodes } from './fixture-nodes.ts'
 import { workflow } from './graph-fixtures.ts'
 import type { DagWorkflowDefinition } from '../src/shared/types.ts'
-import { WORKFLOW_INPUT_TYPE,WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
+import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from '../src/shared/workflow-boundary.ts'
 
 describe('工作流边界节点', () => {
   const hosts = new TestHosts()

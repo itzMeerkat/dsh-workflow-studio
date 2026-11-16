@@ -2,9 +2,9 @@
  * 测试用节点：覆盖引擎需要的普通节点、流程控制节点和可变输入节点。
  */
 
-import { WorkflowNode,type WorkflowNodePorts } from '../src/node.ts'
-import { askUser,validateQuestionsSignal } from '../src/shared/questions.ts'
-import type { NodeControlDefinition,NodeExecutionContext,WorkflowNodeExecutor } from '../src/shared/types.ts'
+import { WorkflowNode, type WorkflowNodePorts } from '../src/node.ts'
+import { askUser, validateQuestionsSignal } from '../src/shared/questions.ts'
+import type { NodeControlDefinition, NodeExecutionContext, WorkflowNodeExecutor } from '../src/shared/types.ts'
 
 /** `value`：输出 `config.value`。 */
 export class ValueNode extends WorkflowNode<{ output: unknown }> {

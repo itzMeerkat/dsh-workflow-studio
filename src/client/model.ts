@@ -4,9 +4,10 @@ import type { XYPosition } from '@xyflow/react'
 import { execSourcePin, isExecEdge, topologicalLevels } from '../shared/graph.ts'
 import { SUBWORKFLOW_FIELD, SUBWORKFLOW_TYPE, subworkflowPorts } from '../shared/subworkflow.ts'
 import {
-  NodeId, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary, type WorkflowId,
-  type WorkflowStudioSnapshot,
+  EdgeId, NodeId, type DagEdgeDefinition, type DagNodeDefinition, type DagWorkflowDefinition, type NodeTypeSummary,
+  type WorkflowId, type WorkflowStudioSnapshot,
 } from '../shared/types.ts'
+import { isBoundaryNode } from '../shared/workflow-boundary.ts'
 import type { WorkflowRefusal } from '../shared/refusal.ts'
 
 /** One saved workflow in the editor snapshot. */
@@ -143,6 +144,54 @@ export function appendSubworkflowNode(
   }
 }
 
+/** Nodes copied from the canvas, with the edges that join two of them. */
+export interface Clip {
+  readonly nodes: readonly DagNodeDefinition[]
+  readonly edges: readonly DagEdgeDefinition[]
+}
+
+/**
+ * Copy some nodes of a definition.
+ *
+ * Boundary nodes stay behind, because a workflow has at most one per side, and so does every edge with an end outside
+ * the copy, because pasting cannot know what it would connect to.
+ * @param definition - The edited definition.
+ * @param ids - The selected node IDs.
+ * @returns The copy, or undefined when nothing copyable is selected.
+ */
+export function copyNodes(definition: DagWorkflowDefinition, ids: ReadonlySet<string>): Clip | undefined {
+  const nodes = definition.nodes.filter(node => ids.has(node.id) && !isBoundaryNode(node))
+  if (nodes.length === 0) return undefined
+  const copied = new Set<string>(nodes.map(node => node.id))
+  return { nodes, edges: definition.edges.filter(edge => copied.has(edge.source) && copied.has(edge.target)) }
+}
+
+/**
+ * Paste a copy into a definition: each node takes a fresh ID derived from its type and sits `offset` pixels down and to
+ * the right of where it was copied, and each edge takes a fresh ID and the pasted nodes' IDs.
+ * @param definition - The edited definition.
+ * @param clip - The copy.
+ * @param offset - How far the pasted nodes move from the copied ones, in pixels.
+ * @returns The definition with the pasted nodes and edges, and the pasted node IDs.
+ */
+export function pasteNodes(
+  definition: DagWorkflowDefinition,
+  clip: Clip,
+  offset: number,
+): { definition: DagWorkflowDefinition; ids: string[] } {
+  const nodes = [...definition.nodes]
+  const renamed = new Map<string, NodeId>()
+  for (const node of clip.nodes) {
+    const id = NodeId(nextEditorNodeId(node.type, nodes))
+    renamed.set(node.id, id)
+    const position = node.position === undefined ? undefined : { x: node.position.x + offset, y: node.position.y + offset }
+    nodes.push({ ...structuredClone(node), id, ...(position === undefined ? {} : { position }) })
+  }
+  const edges = clip.edges.map(edge =>
+    ({ ...edge, id: EdgeId(crypto.randomUUID()), source: renamed.get(edge.source)!, target: renamed.get(edge.target)! }))
+  return { definition: { ...definition, nodes, edges: [...definition.edges, ...edges] }, ids: [...renamed.values()] }
+}
+
 /** Group nodes into the same topological stages used by the workflow scheduler. */
 export function createExecutionPlan(definition: DagWorkflowDefinition): ExecutionPlan {
   const { levels, cyclic } = topologicalLevels(definition.nodes, definition.edges)
@@ -261,6 +310,15 @@ export function openFault(definition: DagWorkflowDefinition): WorkflowRefusal | 
 
 /** A saved workflow in the picker, with why the panel cannot open it. */
 export type PickerRow = WorkflowRow & { readonly fault?: WorkflowRefusal }
+
+/**
+ * Whether a key event belongs to a text field, whose own undo, copy, and paste must keep working.
+ * @param target - The event's target.
+ */
+export function isTextEntry(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
+}
 
 /** Encode one editor definition as the JSON an exported file holds. */
 export function formatEditorDefinition(definition: DagWorkflowDefinition): string {

@@ -3,7 +3,9 @@
  * @module dsh-workflow-studio
  */
 
+import { EXPANSION_NODE_TYPES, SUBWORKFLOW_TYPE } from './subworkflow.ts'
 import { SWITCH_TYPE, switchPins } from './switch.ts'
+import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './workflow-boundary.ts'
 import type {
   DagDataEdge, DagEdgeDefinition, DagExecEdge, DagNodeDefinition, PortDefinition, WorkflowNodeExecutor,
 } from './types.ts'
@@ -13,6 +15,26 @@ export const EXEC_RUN_PIN = 'run'
 
 /** 节点完成时触发的执行输出引脚名；执行边默认由该引脚引出。 */
 export const EXEC_THEN_PIN = 'then'
+
+/**
+ * 节点失败时触发的执行输出引脚名。
+ *
+ * 从这个引脚引出执行边，节点的失败就由图处理：节点记为 failed，它的其他引脚都不触发，这条边的目标照常执行，
+ * 运行不因此失败。没有这样的边时，节点失败使运行失败。
+ */
+export const EXEC_FAILED_PIN = 'failed'
+
+/**
+ * 一种节点能否从 {@link EXEC_FAILED_PIN} 引出执行边。
+ *
+ * 边界节点不会失败；子工作流节点在运行开始时被展开，它自己从不执行，内部节点的失败由子工作流内部的图处理；
+ * 展开放置的节点不由作者放置。
+ * @param type - 节点类型。
+ */
+export function hasFailedPin(type: string): boolean {
+  return type !== WORKFLOW_INPUT_TYPE && type !== WORKFLOW_OUTPUT_TYPE && type !== SUBWORKFLOW_TYPE
+    && !EXPANSION_NODE_TYPES.includes(type)
+}
 
 /** 引擎自有的条件分支节点的类型名。 */
 export const BRANCH_TYPE = 'branch'
@@ -51,6 +73,27 @@ export function nodeExecPins(
   executor: Pick<WorkflowNodeExecutor, 'execOutputs'>,
 ): readonly string[] {
   return node.type === SWITCH_TYPE ? switchPins(node.config) : execOutputPins(executor)
+}
+
+/**
+ * 一个节点可以引出执行边的全部引脚：{@link nodeExecPins}，再加上能失败的节点的 {@link EXEC_FAILED_PIN}。
+ * @param node - 节点。
+ * @param executor - 节点的执行器，或浏览器目录中的节点类型。
+ */
+export function nodeSourcePins(
+  node: Pick<DagNodeDefinition, 'type' | 'config'>,
+  executor: Pick<WorkflowNodeExecutor, 'execOutputs'>,
+): readonly string[] {
+  const pins = nodeExecPins(node, executor)
+  return hasFailedPin(node.type) ? [...pins, EXEC_FAILED_PIN] : pins
+}
+
+/**
+ * 从 {@link EXEC_FAILED_PIN} 引出执行边、因此失败由图处理的节点。
+ * @param edges - 定义中的全部边。
+ */
+export function failureHandlers(edges: readonly DagEdgeDefinition[]): ReadonlySet<string> {
+  return new Set(edges.filter(edge => isExecEdge(edge) && execSourcePin(edge) === EXEC_FAILED_PIN).map(edge => edge.source))
 }
 
 /** 按目标节点分组的入边，数据边与执行边分开。 */

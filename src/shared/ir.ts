@@ -7,7 +7,7 @@
  */
 
 import { atomNode, atomPin, type WorkflowAnalysis } from './analysis.ts'
-import { isDataEdge, nodeExecPins } from './graph.ts'
+import { EXEC_FAILED_PIN, isDataEdge, nodeExecPins } from './graph.ts'
 import { WORKFLOW_INPUT_TYPE, WORKFLOW_OUTPUT_TYPE } from './workflow-boundary.ts'
 import type {
   DagNodeDefinition, DagWorkflowDefinition, NodeExecKind, NodeId, NodeTypeSummary, PortDefinition,
@@ -143,11 +143,14 @@ export function buildWorkflowIr(
 
 type MutableItem = IrCall | IrOutputs | { readonly kind: 'guard'; readonly gate: IrCall; readonly arms: IrArm[] }
 
-/** `atom` 是否是 `guard` 已有 arm 之外的一侧：同一个决策节点的另一个引脚。 */
+/**
+ * `atom` 是否是 `guard` 已有 arm 之外的一侧：同一个节点的另一个引脚，且与每个已有 arm 互斥——决策节点的引脚两两互斥，
+ * 失败引脚与节点的其他引脚互斥。
+ */
 function complements(guard: { readonly gate: IrCall; readonly arms: readonly IrArm[] }, atom: string): boolean {
-  return guard.gate.node === atomNode(atom)
-    && guard.gate.execKind === 'decision'
-    && guard.arms.every(arm => arm.pin !== atomPin(atom))
+  const pin = atomPin(atom)
+  return guard.gate.node === atomNode(atom) && guard.arms.every(arm => arm.pin !== pin
+    && (guard.gate.execKind === 'decision' || arm.pin === EXEC_FAILED_PIN || pin === EXEC_FAILED_PIN))
 }
 
 function commonPrefix(left: readonly string[], right: readonly string[]): number {

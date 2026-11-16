@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { DIAGNOSTIC_SEVERITY } from '../shared/analysis.ts'
 import type { WorkflowDiagnostic } from '../shared/analysis.ts'
 import type { NodeControlDefinition, PortDefinition } from '../shared/types.ts'
-import { EXEC_RUN_PIN } from '../shared/graph.ts'
+import { EXEC_FAILED_PIN, EXEC_RUN_PIN } from '../shared/graph.ts'
 import { SUBWORKFLOW_TYPE, subworkflowOf } from '../shared/subworkflow.ts'
 import { SWITCH_TYPE, invalidCase, switchCases } from '../shared/switch.ts'
 import type { WorkflowId } from '../shared/types.ts'
@@ -71,7 +71,8 @@ export function NodeCard({
   readonly branchPins?: readonly string[]
 }) {
   const actions = useContext(NodeCardContext)
-  const pins = nodeOutputPins(data)
+  // Every card on the canvas offers the failed pin; the read-only graph shows it only where an edge leaves it.
+  const pins = nodeOutputPins(data).filter(pin => graph === 'data' || pin !== EXEC_FAILED_PIN || branchPins.includes(pin))
   const inputs = nodeInputPorts(data)
   const outputs = nodeOutputPorts(data)
   const updateNodeInternals = useUpdateNodeInternals()

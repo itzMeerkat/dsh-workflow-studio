@@ -7,7 +7,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { execKindOf } from './flow-nodes.ts'
-import { duplicatePortName, execOutputPins } from './shared/graph.ts'
+import { EXEC_FAILED_PIN, duplicatePortName, execOutputPins } from './shared/graph.ts'
 import type { NodeTypeSummary, WorkflowNodeExecutor } from './shared/types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -57,6 +57,14 @@ export class WorkflowNodeRegistry extends Service {
     if (executor.variadicInputs !== undefined
       && (!Number.isInteger(executor.variadicInputs.min) || executor.variadicInputs.min < 1)) {
       throw new Error(`节点类型 "${type}" 的可变输入最小数量必须为正整数`)
+    }
+    const { retry } = executor
+    if (retry !== undefined && (!Number.isInteger(retry.retries) || retry.retries < 0
+      || (retry.delayMs !== undefined && (!Number.isInteger(retry.delayMs) || retry.delayMs < 0)))) {
+      throw new Error(`节点类型 "${type}" 的重试次数和间隔必须为非负整数`)
+    }
+    if (executor.execOutputs?.includes(EXEC_FAILED_PIN) === true) {
+      throw new Error(`节点类型 "${type}" 不能声明执行输出引脚 ${EXEC_FAILED_PIN}，它由引擎在节点失败时触发`)
     }
     if (executor.exclusiveExecOutputs === true && (executor.execOutputs?.length ?? 0) < 2) {
       throw new Error(`节点类型 "${type}" 声明了互斥的执行输出引脚，但没有声明至少两个执行输出引脚`)
