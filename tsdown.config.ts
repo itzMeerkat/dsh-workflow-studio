@@ -1,23 +1,29 @@
 import { readFile } from 'node:fs/promises'
-import { basename, dirname, resolve } from 'node:path'
-import { defineConfig } from 'tsdown'
+import { dirname, relative, resolve, sep } from 'node:path'
+import { defineConfig, Rolldown } from 'tsdown'
 import { typertPlugin } from '@deepseek-ai/dsh-typert-generator/tsdown'
 import { transform } from 'lightningcss'
 
 const PACKAGE_ID = 'dsh-workflow-studio'
 const CSS_PREFIX = '\0workflow-studio-css:'
 const CSS_SUFFIX = '.mjs'
+const STYLE_MARKER = '/*__workflow_studio_styles__*/'
+/** The Web shell's platform module table (`PLATFORM_MODULES` in `@deepseek-ai/dsh-client-web`); a bundle may require only these. */
 const CLIENT_EXTERNALS = new Set([
   'react',
   'react/jsx-runtime',
   'react-dom',
   'react-dom/client',
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-api-remotes/client',
-  '@deepseek-ai/dsh-client-ui-primitives',
+  'zod',
+  '@tanstack/react-virtual',
+  '@deepseek-ai/dsh-client-store',
   '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-typert-protocol',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-dockkit',
 ])
+/** Compiled CSS Modules text keyed by virtual module id; each entry's `path` is its stylesheet path within this package. */
+const styles = new Map<string, { path: string; css: string }>()
 
 export default defineConfig([
   {
@@ -52,6 +58,9 @@ export default defineConfig([
       'process.env.DSH_CLIENT_TITLE': process.env.DSH_CLIENT_TITLE === undefined
         ? 'undefined'
         : JSON.stringify(process.env.DSH_CLIENT_TITLE),
+      // zustand probes `import.meta.env`, which a CJS output cannot carry.
+      'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
+      'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
     },
     plugins: [{
       name: 'workflow-studio-css-modules',
@@ -72,26 +81,32 @@ export default defineConfig([
         })
         const classes: Record<string, string> = {}
         for (const [local, value] of Object.entries(exports ?? {})) classes[local] = value.name
-        const tagId = `${PACKAGE_ID}/${basename(file)}`
-        return [
-          `const css = ${JSON.stringify(code.toString())};`,
-          `const tagId = ${JSON.stringify(tagId)};`,
-          'if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {',
-          '  const tag = document.createElement("style");',
-          `  tag.dataset.plugin = ${JSON.stringify(PACKAGE_ID)};`,
-          '  tag.dataset.pluginCss = tagId;',
-          '  tag.textContent = css;',
-          '  document.head.appendChild(tag);',
-          '}',
-          `export default ${JSON.stringify(classes)};`,
-        ].join('\n')
+        styles.set(virtualId, { path: relative(import.meta.dirname, file).split(sep).join('/'), css: code.toString() })
+        return { code: `export default ${JSON.stringify(classes)};`, moduleSideEffects: 'no-treeshake' }
+      },
+    }, {
+      // The renderer installs stylesheets from the registration's `meta`; the factory never touches the DOM.
+      name: 'workflow-studio-style-metadata',
+      renderChunk(code, chunk) {
+        const marker = code.indexOf(STYLE_MARKER)
+        if (marker < 0 || code.indexOf(STYLE_MARKER, marker + 1) !== -1) {
+          throw new Error(`${PACKAGE_ID}: missing or repeated style marker in ${chunk.fileName}`)
+        }
+        const resources = Object.keys(chunk.modules).flatMap(id => {
+          const style = styles.get(id)
+          return style === undefined ? [] : [`${JSON.stringify(style.path)}: { text: () => ${JSON.stringify(style.css)} }`]
+        })
+        const meta = resources.length === 0 ? '' : `, meta: () => ({ stylesheets: {${resources.join(',')}} })`
+        const output = new Rolldown.RolldownMagicString(code)
+        output.overwrite(marker, marker + STYLE_MARKER.length, meta)
+        return output
       },
     }],
     outputOptions: {
       entryFileNames: 'client.js',
       sourcemapExcludeSources: false,
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(PACKAGE_ID)}, factory: (require) => {`,
-      footer: 'return module.exports; } });',
+      footer: `return module.exports; }${STYLE_MARKER} });`,
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
   },
